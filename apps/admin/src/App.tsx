@@ -877,6 +877,27 @@ const VerifiedBadge: React.FC<{
   );
 };
 
+// Canonical Media Normalizer: matches URLs across varied CDN/Unsplash query dimensions
+const extractMediaBaseKey = (url?: string): string => {
+  if (!url) return '';
+  try {
+    const unsplashMatch = url.match(/(photo-[\w-]+)/i);
+    if (unsplashMatch) return unsplashMatch[1].toLowerCase();
+    return url.split('?')[0].trim().toLowerCase();
+  } catch {
+    return (url || '').trim().toLowerCase();
+  }
+};
+
+const isSameMedia = (url1?: string, url2?: string): boolean => {
+  if (!url1 || !url2) return false;
+  if (url1 === url2) return true;
+  const k1 = extractMediaBaseKey(url1);
+  const k2 = extractMediaBaseKey(url2);
+  if (k1 && k2 && k1 === k2) return true;
+  return url1.split('?')[0].trim() === url2.split('?')[0].trim();
+};
+
 // ==================== MAIN COMPONENT ====================
 
 export function App() {
@@ -922,6 +943,8 @@ export function App() {
   const [highlightPostId, setHighlightPostId] = useState<string | null>(null);
   const [copiedLightboxUrl, setCopiedLightboxUrl] = useState(false);
   const [lightboxHeartAnim, setLightboxHeartAnim] = useState(false);
+  const [lightboxShowComments, setLightboxShowComments] = useState(false);
+  const [lightboxCommentInput, setLightboxCommentInput] = useState('');
 
   // Take user all the way to the top of the preserved section upon page refresh / load
   useEffect(() => {
@@ -1171,38 +1194,46 @@ export function App() {
     setProfiles((prev) => {
       const prof = prev[clean] || getUserProfile(clean);
       if (!prof || !prof.mediaItems) return prev;
-      const nextMedia = prof.mediaItems.map((m) => {
-        if (m.id === mediaId) {
-          const nextLiked = !m.isLiked;
-          const nextLikes = nextLiked ? m.likes + 1 : Math.max(0, m.likes - 1);
-          updatedUrl = m.url;
-          updatedLiked = nextLiked;
-          updatedCount = nextLikes;
-          return {
-            ...m,
-            isLiked: nextLiked,
-            likes: nextLikes,
+      const targetItem = prof.mediaItems.find((m) => m.id === mediaId);
+      const nextLiked = targetItem ? !targetItem.isLiked : true;
+      const nextLikes = targetItem ? (nextLiked ? targetItem.likes + 1 : Math.max(0, targetItem.likes - 1)) : 1;
+      if (targetItem) {
+        updatedUrl = targetItem.url;
+        updatedLiked = nextLiked;
+        updatedCount = nextLikes;
+      }
+
+      // Synchronize across ALL profiles that share this media URL
+      const nextProfs = { ...prev };
+      for (const [h, p] of Object.entries(nextProfs)) {
+        if (p.mediaItems?.some((m) => m.id === mediaId || (updatedUrl && isSameMedia(m.url, updatedUrl)))) {
+          nextProfs[h] = {
+            ...p,
+            mediaItems: p.mediaItems.map((m) => {
+              if (m.id === mediaId || (updatedUrl && isSameMedia(m.url, updatedUrl))) {
+                return {
+                  ...m,
+                  isLiked: nextLiked,
+                  likes: nextLikes,
+                };
+              }
+              return m;
+            }),
           };
         }
-        return m;
-      });
-      const nextProfs = {
-        ...prev,
-        [clean]: {
-          ...prof,
-          mediaItems: nextMedia,
-        },
-      };
+      }
       safeSaveStorage('privity_profiles_v5', nextProfs);
       return nextProfs;
     });
 
     if (updatedUrl) {
       const targetUrl = updatedUrl;
+      const baseKey = extractMediaBaseKey(targetUrl);
       setPhotoLikesMap((prev) => {
         const next = {
           ...prev,
           [targetUrl]: { isLiked: updatedLiked, count: updatedCount },
+          ...(baseKey ? { [baseKey]: { isLiked: updatedLiked, count: updatedCount } } : {}),
         };
         safeSaveStorage('privity_photo_likes_v5', next);
         return next;
@@ -1211,7 +1242,7 @@ export function App() {
       setPosts((prevPosts) => {
         let matched = false;
         const nextPosts = prevPosts.map((p) => {
-          if (p.contentUrl === targetUrl || p.thumbnailUrl === targetUrl) {
+          if (isSameMedia(p.contentUrl, targetUrl) || isSameMedia(p.thumbnailUrl, targetUrl)) {
             matched = true;
             let nextLikers = [...(p.likersList || [])];
             if (updatedLiked) {
@@ -1230,12 +1261,42 @@ export function App() {
         });
         if (matched) {
           safeSaveStorage('privity_posts_v5', nextPosts);
+          return nextPosts;
+        } else if (updatedLiked) {
+          const ownerProf = profiles[clean] || getUserProfile(clean);
+          const newPost: PostItem = {
+            id: `p-media-${extractMediaBaseKey(targetUrl) || Date.now()}`,
+            authorId: ownerProf.id,
+            authorName: ownerProf.name,
+            authorHandle: ownerProf.handle,
+            authorAvatar: ownerProf.avatar,
+            isVerified: ownerProf.isVerified,
+            verifiedCategory: ownerProf.category || ownerProf.verifiedCategory,
+            cryptoProofId: ownerProf.cryptoProofId,
+            type: 'image',
+            contentUrl: targetUrl,
+            caption: `Studio visual release by @${ownerProf.handle}.`,
+            tags: ['studio', 'media', 'visuals'],
+            privacy: 'public',
+            likesCount: updatedCount,
+            likersList: ['luciano'],
+            commentsCount: 0,
+            sharesCount: 0,
+            savesCount: 0,
+            isLiked: true,
+            isSaved: false,
+            timeAgo: 'Just now',
+            comments: [],
+          };
+          const createdPosts = [newPost, ...prevPosts];
+          safeSaveStorage('privity_posts_v5', createdPosts);
+          return createdPosts;
         }
         return nextPosts;
       });
     }
 
-    triggerToast(updatedLiked ? 'Liked photo' : 'Unliked photo');
+    triggerToast(updatedLiked ? 'Liked studio visual' : 'Unliked studio visual');
   };
 
   // Post Actions Menu & Caption Editing State
@@ -1327,57 +1388,79 @@ export function App() {
     triggerToast(`Filtered feed by #${clean}`);
   };
 
+  const isUserFollowed = (handleOrId: string): boolean => {
+    const clean = handleOrId.replace(/^@/, '').toLowerCase();
+    return !!(
+      followingMap[clean] ||
+      followingMap[`usr-${clean}`] ||
+      followingMap[handleOrId] ||
+      (myProfile.followingList || []).some((h) => h.toLowerCase() === clean)
+    );
+  };
+
   const toggleFollow = (handleOrId: string, name?: string) => {
-    const clean = handleOrId.replace(/^@/, '');
-    const current = !!followingMap[clean];
+    const clean = handleOrId.replace(/^@/, '').replace(/^usr-/, '');
+    const targetProf = profiles[clean] || Object.values(profiles).find((p) => p.handle.toLowerCase() === clean.toLowerCase() || p.id === handleOrId);
+    const resolvedHandle = targetProf ? targetProf.handle.replace(/^@/, '') : clean;
+    const resolvedId = targetProf ? targetProf.id : `usr-${clean}`;
+
+    const current = isUserFollowed(resolvedHandle);
     const next = !current;
     const myHandle = myProfile.handle || 'luciano';
 
     setFollowingMap((prev) => {
-      const nextMap = { ...prev, [clean]: next };
-      try {
-        localStorage.setItem('privity_following_v5', JSON.stringify(nextMap));
-      } catch (err) {
-        console.warn(err);
-      }
+      const nextMap = {
+        ...prev,
+        [clean]: next,
+        [clean.toLowerCase()]: next,
+        [resolvedHandle]: next,
+        [resolvedHandle.toLowerCase()]: next,
+        [resolvedId]: next,
+      };
+      safeSaveStorage('privity_following_v5', nextMap);
       return nextMap;
     });
 
     setProfiles((prev) => {
-      const target = prev[clean] || getUserProfile(clean);
+      const target = prev[resolvedHandle] || prev[clean] || getUserProfile(resolvedHandle);
       let targetFollowers = [...(target.followersList || [])];
       if (next) {
-        if (!targetFollowers.includes('luciano')) targetFollowers.push('luciano');
-        if (myHandle !== 'luciano' && !targetFollowers.includes(myHandle)) targetFollowers.push(myHandle);
+        if (!targetFollowers.some((h) => h.toLowerCase() === 'luciano')) targetFollowers.push('luciano');
+        if (myHandle !== 'luciano' && !targetFollowers.some((h) => h.toLowerCase() === myHandle.toLowerCase())) {
+          targetFollowers.push(myHandle);
+        }
       } else {
-        targetFollowers = targetFollowers.filter((h) => h !== 'luciano' && h !== myHandle);
+        targetFollowers = targetFollowers.filter(
+          (h) => h.toLowerCase() !== 'luciano' && h.toLowerCase() !== myHandle.toLowerCase()
+        );
       }
       const nextTarget = { ...target, followersList: targetFollowers };
 
       const myProf = prev['luciano'] || prev[myHandle] || getUserProfile('luciano');
       let myFollowing = [...(myProf.followingList || [])];
       if (next) {
-        if (!myFollowing.includes(clean)) myFollowing.push(clean);
+        if (!myFollowing.some((h) => h.toLowerCase() === resolvedHandle.toLowerCase())) {
+          myFollowing.push(resolvedHandle);
+        }
       } else {
-        myFollowing = myFollowing.filter((h) => h !== clean);
+        myFollowing = myFollowing.filter(
+          (h) => h.toLowerCase() !== resolvedHandle.toLowerCase() && h.toLowerCase() !== clean.toLowerCase()
+        );
       }
       const nextMyProf = { ...myProf, followingList: myFollowing };
 
       const nextProfiles = {
         ...prev,
+        [resolvedHandle]: nextTarget,
         [clean]: nextTarget,
         luciano: nextMyProf,
         ...(myHandle !== 'luciano' ? { [myHandle]: nextMyProf } : {}),
       };
-      try {
-        localStorage.setItem('privity_profiles_v5', JSON.stringify(nextProfiles));
-      } catch (err) {
-        console.warn(err);
-      }
+      safeSaveStorage('privity_profiles_v5', nextProfiles);
       return nextProfiles;
     });
 
-    triggerToast(next ? `Now following ${name || '@' + clean}` : `Unfollowed ${name || '@' + clean}`);
+    triggerToast(next ? `Now following ${name || '@' + resolvedHandle}` : `Unfollowed ${name || '@' + resolvedHandle}`);
   };
 
   const handleRemoveFollower = (followerHandle: string) => {
@@ -1615,10 +1698,12 @@ export function App() {
 
     if (targetPhotoUrl) {
       const photoUrl = targetPhotoUrl;
+      const baseKey = extractMediaBaseKey(photoUrl);
       setPhotoLikesMap((prev) => {
         const next = {
           ...prev,
           [photoUrl]: { isLiked: targetLiked, count: targetCount },
+          ...(baseKey ? { [baseKey]: { isLiked: targetLiked, count: targetCount } } : {}),
         };
         safeSaveStorage('privity_photo_likes_v5', next);
         return next;
@@ -1628,12 +1713,14 @@ export function App() {
         let changed = false;
         const nextProfs = { ...prevProfs };
         for (const [h, prof] of Object.entries(nextProfs)) {
-          if (prof.mediaItems?.some((m) => m.url === photoUrl)) {
+          if (prof.mediaItems?.some((m) => isSameMedia(m.url, photoUrl))) {
             changed = true;
             nextProfs[h] = {
               ...prof,
               mediaItems: prof.mediaItems.map((m) =>
-                m.url === photoUrl ? { ...m, isLiked: targetLiked, likes: targetCount } : m
+                isSameMedia(m.url, photoUrl)
+                  ? { ...m, isLiked: targetLiked, likes: targetLiked ? Math.max(m.likes + 1, targetCount) : Math.max(0, m.likes - 1) }
+                  : m
               ),
             };
           }
@@ -1671,15 +1758,18 @@ export function App() {
     triggerToast(`External share link copied: ${url}`);
   };
 
-  // Add Comment with 1-level reply nesting per PRD 13.2
-  const handleAddComment = (postId: string) => {
-    const text = commentInputs[postId]?.trim();
+  // Add Comment with 1-level reply nesting & cross-profile media item synchronization
+  const handleAddComment = (postId: string, textOverride?: string) => {
+    const text = (textOverride !== undefined ? textOverride : commentInputs[postId])?.trim();
     if (!text) return;
+
+    let targetPhotoUrl: string | undefined = undefined;
 
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
         if (p.id === postId) {
-          if (replyTarget && replyTarget.postId === postId) {
+          targetPhotoUrl = p.contentUrl || p.thumbnailUrl;
+          if (replyTarget && replyTarget.postId === postId && !textOverride) {
             const updated = p.comments.map((c) => {
               if (c.id === replyTarget.commentId) {
                 const reply = {
@@ -1716,16 +1806,44 @@ export function App() {
       return nextPosts;
     });
 
-    setCommentInputs({ ...commentInputs, [postId]: '' });
-    setReplyTarget(null);
+    // Also update any matching media items in all profiles!
+    if (targetPhotoUrl) {
+      const photoUrl = targetPhotoUrl;
+      setProfiles((prevProfs) => {
+        let changed = false;
+        const nextProfs = { ...prevProfs };
+        for (const [h, prof] of Object.entries(nextProfs)) {
+          if (prof.mediaItems?.some((m) => isSameMedia(m.url, photoUrl))) {
+            changed = true;
+            nextProfs[h] = {
+              ...prof,
+              mediaItems: prof.mediaItems.map((m) =>
+                isSameMedia(m.url, photoUrl) ? { ...m, comments: m.comments + 1 } : m
+              ),
+            };
+          }
+        }
+        if (changed) {
+          safeSaveStorage('privity_profiles_v5', nextProfs);
+        }
+        return nextProfs;
+      });
+    }
+
+    if (!textOverride) {
+      setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
+      setReplyTarget(null);
+    }
     triggerToast('Comment posted');
   };
 
   // Delete comment or nested reply
   const handleDeleteComment = (postId: string, commentId: string, replyId?: string) => {
+    let targetPhotoUrl: string | undefined = undefined;
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
         if (p.id !== postId) return p;
+        targetPhotoUrl = p.contentUrl || p.thumbnailUrl;
         if (replyId) {
           const updated = p.comments.map((c) => {
             if (c.id !== commentId) return c;
@@ -1753,6 +1871,30 @@ export function App() {
       safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
+
+    if (targetPhotoUrl) {
+      const photoUrl = targetPhotoUrl;
+      setProfiles((prevProfs) => {
+        let changed = false;
+        const nextProfs = { ...prevProfs };
+        for (const [h, prof] of Object.entries(nextProfs)) {
+          if (prof.mediaItems?.some((m) => isSameMedia(m.url, photoUrl))) {
+            changed = true;
+            nextProfs[h] = {
+              ...prof,
+              mediaItems: prof.mediaItems.map((m) =>
+                isSameMedia(m.url, photoUrl) ? { ...m, comments: Math.max(0, m.comments - 1) } : m
+              ),
+            };
+          }
+        }
+        if (changed) {
+          safeSaveStorage('privity_profiles_v5', nextProfs);
+        }
+        return nextProfs;
+      });
+    }
+
     triggerToast('Comment deleted');
   };
 
@@ -3550,6 +3692,198 @@ export function App() {
                                 </span>
                               </div>
                             )}
+
+                            {/* Real Threaded Comments Section on Profile Dispatches */}
+                            <div className="comments-thread-box">
+                              {post.comments.map((comment) => (
+                                <div key={comment.id}>
+                                  <div className="thread-row">
+                                    <img
+                                      src={comment.authorAvatar}
+                                      alt={comment.authorName}
+                                      className="thread-user-pic"
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => navigateToProfile(comment.authorHandle)}
+                                      title={`View @${comment.authorHandle}'s profile`}
+                                    />
+                                    <div className="thread-bubble">
+                                      <div className="thread-author-bar">
+                                        <span
+                                          className="thread-author-name"
+                                          style={{ cursor: 'pointer' }}
+                                          onClick={() => navigateToProfile(comment.authorHandle)}
+                                          title={`View @${comment.authorHandle}'s profile`}
+                                        >
+                                          {comment.authorName}{' '}
+                                          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '11px' }}>
+                                            @{comment.authorHandle}
+                                          </span>
+                                        </span>
+                                        <span className="thread-time">{comment.timeAgo}</span>
+                                      </div>
+                                      <div className="thread-content-text">{comment.text}</div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '6px' }}>
+                                        <button
+                                          type="button"
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            color: 'var(--followers-iris)',
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            padding: 0,
+                                          }}
+                                          onClick={() => {
+                                            setReplyTarget({
+                                              postId: post.id,
+                                              commentId: comment.id,
+                                              handle: comment.authorHandle,
+                                            });
+                                            const el = document.getElementById(`comment-input-${post.id}`);
+                                            el?.focus();
+                                          }}
+                                        >
+                                          Reply
+                                        </button>
+                                        <button
+                                          type="button"
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            color: comment.isLiked ? '#ef4444' : 'var(--text-muted)',
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            padding: 0,
+                                          }}
+                                          onClick={() => handleLikeComment(post.id, comment.id)}
+                                        >
+                                          <span>{(comment.likesCount || 0) > 0 ? comment.likesCount : 'Like'}</span>
+                                        </button>
+                                        {(comment.authorHandle === myProfile.handle || comment.authorHandle === 'luciano') && (
+                                          <button
+                                            type="button"
+                                            style={{
+                                              background: 'none',
+                                              border: 'none',
+                                              color: 'var(--text-faint)',
+                                              fontSize: '11px',
+                                              fontWeight: 600,
+                                              cursor: 'pointer',
+                                              padding: 0,
+                                            }}
+                                            onClick={() => handleDeleteComment(post.id, comment.id)}
+                                          >
+                                            Delete
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Nested Replies */}
+                                  {comment.replies && comment.replies.length > 0 && (
+                                    <div style={{ marginLeft: '40px', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                      {comment.replies.map((reply) => (
+                                        <div key={reply.id} className="thread-row reply-row">
+                                          <img
+                                            src={reply.authorAvatar}
+                                            alt={reply.authorName}
+                                            className="thread-user-pic reply-pic"
+                                            style={{ cursor: 'pointer' }}
+                                            onClick={() => navigateToProfile(reply.authorHandle)}
+                                          />
+                                          <div className="thread-bubble reply-bubble">
+                                            <div className="thread-author-bar">
+                                              <span
+                                                className="thread-author-name"
+                                                style={{ cursor: 'pointer' }}
+                                                onClick={() => navigateToProfile(reply.authorHandle)}
+                                              >
+                                                {reply.authorName}{' '}
+                                                <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '11px' }}>
+                                                  @{reply.authorHandle}
+                                                </span>
+                                              </span>
+                                              <span className="thread-time">{reply.timeAgo}</span>
+                                            </div>
+                                            <div className="thread-content-text">{reply.text}</div>
+                                            {(reply.authorHandle === myProfile.handle || reply.authorHandle === 'luciano') && (
+                                              <div style={{ marginTop: '4px' }}>
+                                                <button
+                                                  type="button"
+                                                  style={{
+                                                    background: 'none',
+                                                    border: 'none',
+                                                    color: 'var(--text-faint)',
+                                                    fontSize: '10px',
+                                                    fontWeight: 600,
+                                                    cursor: 'pointer',
+                                                    padding: 0,
+                                                  }}
+                                                  onClick={() => handleDeleteComment(post.id, comment.id, reply.id)}
+                                                >
+                                                  Delete
+                                                </button>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+
+                              {/* Comment Compose Tray on Profile Dispatches */}
+                              <div className="comment-compose-tray">
+                                <img
+                                  src={myProfile.avatar}
+                                  alt={myProfile.name}
+                                  className="comment-user-avatar"
+                                />
+                                <div className="comment-input-wrap">
+                                  {replyTarget && replyTarget.postId === post.id && (
+                                    <div className="reply-banner-pill">
+                                      <span>Replying to @{replyTarget.handle}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setReplyTarget(null)}
+                                        style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}
+                                      >
+                                        <IconX size={12} />
+                                      </button>
+                                    </div>
+                                  )}
+                                  <input
+                                    type="text"
+                                    id={`comment-input-${post.id}`}
+                                    className="comment-text-field"
+                                    placeholder={
+                                      replyTarget && replyTarget.postId === post.id
+                                        ? `Replying to @${replyTarget.handle}...`
+                                        : 'Add a thoughtful reply...'
+                                    }
+                                    value={commentInputs[post.id] || ''}
+                                    onChange={(e) =>
+                                      setCommentInputs({ ...commentInputs, [post.id]: e.target.value })
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleAddComment(post.id);
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    className="btn-comment-post"
+                                    onClick={() => handleAddComment(post.id)}
+                                  >
+                                    Send
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </article>
                       ))
@@ -3566,29 +3900,49 @@ export function App() {
                   <div style={{ marginTop: '16px' }}>
                     {profile.mediaItems && profile.mediaItems.length > 0 ? (
                       <div className="profile-media-grid">
-                        {profile.mediaItems.map((item) => (
-                          <div
-                            key={item.id}
-                            className="profile-media-cell"
-                            onClick={() => setLightboxUrl(item.url)}
-                          >
-                            <img src={item.url} alt="Studio Media" loading="lazy" />
-                            <div className="profile-media-hover-overlay">
-                              <div
-                                className="media-interactive-heart"
-                                onClick={(e) => handleLikeMedia(profile.handle, item.id, e)}
-                                title={item.isLiked ? 'Unlike photo' : 'Like photo'}
-                              >
-                                <IconHeart size={16} filled={item.isLiked} color={item.isLiked ? 'var(--heart-rose)' : '#fff'} />
-                                <span style={{ marginLeft: '4px', fontWeight: 700 }}>{item.likes}</span>
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <IconChat size={16} color="#fff" />
-                                <span>{item.comments}</span>
+                        {profile.mediaItems.map((item) => {
+                          const baseKey = extractMediaBaseKey(item.url);
+                          const photoRecord = photoLikesMap[item.url] || (baseKey ? photoLikesMap[baseKey] : undefined);
+                          const isItemLiked = photoRecord !== undefined ? photoRecord.isLiked : item.isLiked;
+                          const itemLikesCount = photoRecord !== undefined ? photoRecord.count : item.likes;
+                          const matchingPost = posts.find((p) => isSameMedia(p.contentUrl, item.url) || isSameMedia(p.thumbnailUrl, item.url));
+                          const itemCommentsCount = matchingPost ? matchingPost.commentsCount : item.comments;
+
+                          return (
+                            <div
+                              key={item.id}
+                              className="profile-media-cell"
+                              onClick={() => {
+                                setLightboxUrl(item.url);
+                                setLightboxShowComments(false);
+                              }}
+                            >
+                              <img src={item.url} alt="Studio Media" loading="lazy" />
+                              <div className="profile-media-hover-overlay">
+                                <div
+                                  className="media-interactive-heart"
+                                  onClick={(e) => handleLikeMedia(profile.handle, item.id, e)}
+                                  title={isItemLiked ? 'Unlike photo' : 'Like photo'}
+                                >
+                                  <IconHeart size={16} filled={isItemLiked} color={isItemLiked ? 'var(--heart-rose)' : '#fff'} />
+                                  <span style={{ marginLeft: '4px', fontWeight: 700 }}>{itemLikesCount}</span>
+                                </div>
+                                <div
+                                  style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setLightboxUrl(item.url);
+                                    setLightboxShowComments(true);
+                                  }}
+                                  title="View & add comments"
+                                >
+                                  <IconChat size={16} color="#fff" />
+                                  <span>{itemCommentsCount}</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
@@ -3799,9 +4153,10 @@ export function App() {
 
       {/* LIGHTBOX FOR FULLSCREEN MEDIA — APPLE VISIONOS SPECULAR GLASS */}
       {lightboxUrl && (() => {
-        const record = photoLikesMap[lightboxUrl];
-        const matchingMedia = Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => m.url === lightboxUrl);
-        const matchingPost = posts.find((p) => p.contentUrl === lightboxUrl || p.thumbnailUrl === lightboxUrl);
+        const baseKey = extractMediaBaseKey(lightboxUrl);
+        const record = photoLikesMap[lightboxUrl] || (baseKey ? photoLikesMap[baseKey] : undefined);
+        const matchingMedia = Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => isSameMedia(m.url, lightboxUrl));
+        const matchingPost = posts.find((p) => isSameMedia(p.contentUrl, lightboxUrl) || isSameMedia(p.thumbnailUrl, lightboxUrl));
 
         // Real-time reactive like calculation
         const isPhotoLiked = record !== undefined
@@ -3811,6 +4166,14 @@ export function App() {
         const photoLikesCount = record !== undefined
           ? record.count
           : (matchingMedia ? matchingMedia.likes : (matchingPost ? matchingPost.likesCount : 0));
+
+        const resolvedComments = matchingPost?.comments || [];
+        const resolvedCommentsCount = matchingPost?.commentsCount ?? (matchingMedia?.comments ?? resolvedComments.length);
+
+        const closeLightbox = () => {
+          setLightboxUrl(null);
+          setLightboxShowComments(false);
+        };
 
         const handleLightboxLikeToggle = (e?: React.MouseEvent) => {
           e?.stopPropagation();
@@ -3826,47 +4189,82 @@ export function App() {
             const next = {
               ...prev,
               [lightboxUrl]: { isLiked: nextLiked, count: nextCount },
+              ...(baseKey ? { [baseKey]: { isLiked: nextLiked, count: nextCount } } : {}),
             };
             safeSaveStorage('privity_photo_likes_v5', next);
             return next;
           });
 
-          // 3. Update matching post in posts if any
-          if (matchingPost) {
-            setPosts((prevPosts) => {
-              const nextPosts = prevPosts.map((p) => {
-                if (p.id === matchingPost.id) {
-                  let nextLikers = [...(p.likersList || [])];
-                  if (nextLiked) {
-                    if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
-                  } else {
-                    nextLikers = nextLikers.filter((h) => h !== 'luciano');
-                  }
-                  return {
-                    ...p,
-                    isLiked: nextLiked,
-                    likersList: nextLikers,
-                    likesCount: nextCount,
-                  };
+          // 3. Update matching post in posts if any, or create one if missing
+          setPosts((prevPosts) => {
+            let matched = false;
+            const nextPosts = prevPosts.map((p) => {
+              if (isSameMedia(p.contentUrl, lightboxUrl) || isSameMedia(p.thumbnailUrl, lightboxUrl)) {
+                matched = true;
+                let nextLikers = [...(p.likersList || [])];
+                if (nextLiked) {
+                  if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
+                } else {
+                  nextLikers = nextLikers.filter((h) => h !== 'luciano');
                 }
-                return p;
-              });
+                return {
+                  ...p,
+                  isLiked: nextLiked,
+                  likersList: nextLikers,
+                  likesCount: nextCount,
+                };
+              }
+              return p;
+            });
+            if (matched) {
               safeSaveStorage('privity_posts_v5', nextPosts);
               return nextPosts;
-            });
-          }
+            } else if (nextLiked) {
+              const ownerProfile = Object.values(profiles).find((prof) =>
+                prof.mediaItems?.some((m) => isSameMedia(m.url, lightboxUrl))
+              ) || getUserProfile('luciano');
+              const newPost: PostItem = {
+                id: `p-media-${extractMediaBaseKey(lightboxUrl) || Date.now()}`,
+                authorId: ownerProfile.id,
+                authorName: ownerProfile.name,
+                authorHandle: ownerProfile.handle,
+                authorAvatar: ownerProfile.avatar,
+                isVerified: ownerProfile.isVerified,
+                verifiedCategory: ownerProfile.category || ownerProfile.verifiedCategory,
+                cryptoProofId: ownerProfile.cryptoProofId,
+                type: 'image',
+                contentUrl: lightboxUrl,
+                caption: `Studio visual release by @${ownerProfile.handle}.`,
+                tags: ['studio', 'media', 'visuals'],
+                privacy: 'public',
+                likesCount: nextCount,
+                likersList: ['luciano'],
+                commentsCount: matchingMedia ? matchingMedia.comments : 0,
+                sharesCount: 0,
+                savesCount: 0,
+                isLiked: true,
+                isSaved: false,
+                timeAgo: 'Just now',
+                comments: [],
+              };
+              const created = [newPost, ...prevPosts];
+              safeSaveStorage('privity_posts_v5', created);
+              return created;
+            }
+            return nextPosts;
+          });
 
           // 4. Update matching media across all profiles
           setProfiles((prevProfs) => {
             let changed = false;
             const nextProfs = { ...prevProfs };
             for (const [h, prof] of Object.entries(nextProfs)) {
-              if (prof.mediaItems?.some((m) => m.url === lightboxUrl || (matchingMedia && m.id === matchingMedia.id))) {
+              if (prof.mediaItems?.some((m) => isSameMedia(m.url, lightboxUrl) || (matchingMedia && m.id === matchingMedia.id))) {
                 changed = true;
                 nextProfs[h] = {
                   ...prof,
                   mediaItems: prof.mediaItems.map((m) => {
-                    if (m.url === lightboxUrl || (matchingMedia && m.id === matchingMedia.id)) {
+                    if (isSameMedia(m.url, lightboxUrl) || (matchingMedia && m.id === matchingMedia.id)) {
                       return {
                         ...m,
                         isLiked: nextLiked,
@@ -3887,13 +4285,95 @@ export function App() {
           triggerToast(nextLiked ? 'Liked photo' : 'Unliked photo');
         };
 
+        const handleLightboxCommentSubmit = () => {
+          const text = lightboxCommentInput.trim();
+          if (!text) return;
+
+          let targetPost = posts.find((p) => isSameMedia(p.contentUrl, lightboxUrl) || isSameMedia(p.thumbnailUrl, lightboxUrl));
+
+          if (targetPost) {
+            handleAddComment(targetPost.id, text);
+          } else {
+            const ownerProfile = Object.values(profiles).find((prof) =>
+              prof.mediaItems?.some((m) => isSameMedia(m.url, lightboxUrl))
+            ) || getUserProfile('luciano');
+
+            const newComment: PostComment = {
+              id: `c-lb-${Date.now()}`,
+              authorName: myProfile.name,
+              authorHandle: myProfile.handle || 'luciano',
+              authorAvatar: myProfile.avatar,
+              isVerified: myProfile.isVerified,
+              text: text,
+              timeAgo: 'Just now',
+              likesCount: 0,
+              isLiked: false,
+            };
+
+            const newPost: PostItem = {
+              id: `p-media-${extractMediaBaseKey(lightboxUrl) || Date.now()}`,
+              authorId: ownerProfile.id,
+              authorName: ownerProfile.name,
+              authorHandle: ownerProfile.handle,
+              authorAvatar: ownerProfile.avatar,
+              isVerified: ownerProfile.isVerified,
+              verifiedCategory: ownerProfile.category || ownerProfile.verifiedCategory,
+              cryptoProofId: ownerProfile.cryptoProofId,
+              type: 'image',
+              contentUrl: lightboxUrl,
+              caption: `Studio visual release by @${ownerProfile.handle}.`,
+              tags: ['studio', 'media', 'visuals'],
+              privacy: 'public',
+              likesCount: photoLikesCount,
+              likersList: isPhotoLiked ? ['luciano'] : [],
+              commentsCount: (matchingMedia ? matchingMedia.comments : 0) + 1,
+              sharesCount: 0,
+              savesCount: 0,
+              isLiked: isPhotoLiked,
+              isSaved: false,
+              timeAgo: 'Just now',
+              comments: [newComment],
+            };
+
+            setPosts((prevPosts) => {
+              const updated = [newPost, ...prevPosts];
+              safeSaveStorage('privity_posts_v5', updated);
+              return updated;
+            });
+
+            setProfiles((prevProfs) => {
+              let changed = false;
+              const nextProfs = { ...prevProfs };
+              for (const [h, prof] of Object.entries(nextProfs)) {
+                if (prof.mediaItems?.some((m) => isSameMedia(m.url, lightboxUrl))) {
+                  changed = true;
+                  nextProfs[h] = {
+                    ...prof,
+                    mediaItems: prof.mediaItems.map((m) =>
+                      isSameMedia(m.url, lightboxUrl) ? { ...m, comments: m.comments + 1 } : m
+                    ),
+                  };
+                }
+              }
+              if (changed) {
+                safeSaveStorage('privity_profiles_v5', nextProfs);
+              }
+              return nextProfs;
+            });
+
+            triggerToast('Comment posted');
+          }
+
+          setLightboxCommentInput('');
+        };
+
         return (
-          <div className="lightbox-stage-overlay" onClick={() => setLightboxUrl(null)}>
+          <div className="lightbox-stage-overlay" onClick={closeLightbox}>
             {/* Top Close Button */}
             <div style={{ position: 'absolute', top: '24px', right: '28px', zIndex: 100 }} onClick={(e) => e.stopPropagation()}>
               <button
                 className="btn-glass-back"
-                onClick={() => setLightboxUrl(null)}
+                onClick={closeLightbox}
                 style={{
                   background: 'rgba(15, 23, 42, 0.85)',
                   backdropFilter: 'blur(24px)',
@@ -3946,6 +4426,21 @@ export function App() {
 
               <button
                 type="button"
+                className={`vision-dock-btn comment-btn ${lightboxShowComments ? 'active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLightboxShowComments((prev) => !prev);
+                }}
+                title="View & Add Comments"
+              >
+                <IconChat size={18} color="currentColor" />
+                <span className="vision-dock-count">{resolvedCommentsCount}</span>
+              </button>
+
+              <div className="vision-dock-divider" />
+
+              <button
+                type="button"
                 className="vision-dock-btn copy-btn"
                 onClick={() => {
                   navigator.clipboard?.writeText(lightboxUrl);
@@ -3958,6 +4453,90 @@ export function App() {
                 <span>{copiedLightboxUrl ? 'Copied' : 'Copy URL'}</span>
               </button>
             </div>
+
+            {/* Lightbox Frosted Comments Drawer */}
+            {lightboxShowComments && (
+              <aside className="lightbox-comments-drawer" onClick={(e) => e.stopPropagation()}>
+                <div className="lightbox-comments-header">
+                  <div className="lightbox-comments-title">
+                    <IconChat size={18} color="var(--brand)" />
+                    <span>Comments ({resolvedComments.length})</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-close-strip"
+                    onClick={() => setLightboxShowComments(false)}
+                    title="Close comments drawer"
+                  >
+                    <IconX size={16} />
+                  </button>
+                </div>
+
+                <div className="lightbox-comments-list">
+                  {resolvedComments.length > 0 ? (
+                    resolvedComments.map((c) => (
+                      <div key={c.id} className="lightbox-comment-item">
+                        <img
+                          src={c.authorAvatar}
+                          alt={c.authorName}
+                          className="lightbox-comment-avatar"
+                          onClick={() => {
+                            closeLightbox();
+                            navigateToProfile(c.authorHandle);
+                          }}
+                          style={{ cursor: 'pointer' }}
+                          title={`View @${c.authorHandle}'s profile`}
+                        />
+                        <div className="lightbox-comment-bubble">
+                          <div className="lightbox-comment-author">
+                            <span
+                              style={{ cursor: 'pointer', fontWeight: 700 }}
+                              onClick={() => {
+                                closeLightbox();
+                                navigateToProfile(c.authorHandle);
+                              }}
+                            >
+                              {c.authorName}
+                            </span>
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '11px' }}>
+                              @{c.authorHandle}
+                            </span>
+                            <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: '10px' }}>
+                              {c.timeAgo}
+                            </span>
+                          </div>
+                          <div className="lightbox-comment-text">{c.text}</div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px 10px', fontSize: '13px' }}>
+                      No comments yet on this visual. Be the first to share your thoughts!
+                    </div>
+                  )}
+                </div>
+
+                <form
+                  className="lightbox-comment-composer"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleLightboxCommentSubmit();
+                  }}
+                >
+                  <input
+                    type="text"
+                    className="lightbox-comment-input"
+                    placeholder="Add a comment to this photo..."
+                    value={lightboxCommentInput}
+                    onChange={(e) => setLightboxCommentInput(e.target.value)}
+                    autoFocus
+                  />
+                  <button type="submit" className="lightbox-comment-submit">
+                    Send
+                  </button>
+                </form>
+              </aside>
+            )}
           </div>
         );
       })()}
