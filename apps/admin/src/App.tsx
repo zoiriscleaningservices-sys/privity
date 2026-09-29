@@ -47,6 +47,8 @@ import {
   IconPause,
   IconSend,
   IconVideo,
+  IconRadio,
+  IconFeedStream,
 } from './components/Icons';
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -719,9 +721,92 @@ const INITIAL_PROFILES_REGISTRY: Record<string, UserProfile> = {
   },
 };
 
+// ==================== LIVE ENCRYPTED STREAMS MODEL ====================
+export type FeedFilterTab = 'live' | 'feed' | 'all' | 'close_friends' | 'followers';
+export const FEED_TABS: FeedFilterTab[] = ['live', 'feed', 'all', 'close_friends', 'followers'];
 
+export interface LiveStreamSession {
+  id: string;
+  creatorHandle: string;
+  creatorName: string;
+  creatorAvatar: string;
+  isVerified: boolean;
+  category: string;
+  title: string;
+  description: string;
+  viewersCount: number;
+  previewUrl: string;
+  participants: Array<{ name: string; avatar: string; role: string }>;
+  tags: string[];
+}
 
-// Preset Avatars for 1-Click Profile Personalization
+export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
+  {
+    id: 'live-elena-1',
+    creatorHandle: 'elena_rodriguez',
+    creatorName: 'Elena Rodriguez',
+    creatorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    isVerified: true,
+    category: 'System Architect',
+    title: 'Architecting Real-Time P2P Mesh Networks & Privacy Ledgers',
+    description: 'Deep dive into zero-latency WebSocket ratchet protocols and local-first decentralized feeds without algorithmic intermediaries.',
+    viewersCount: 1420,
+    previewUrl: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800',
+    participants: [
+      { name: 'Marcus Vance', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', role: 'Speaker' },
+      { name: 'Julian Thorne', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', role: 'Co-Host' },
+      { name: 'Sara Lin', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', role: 'Listener' },
+    ],
+    tags: ['Architecture', 'P2P', 'Privacy', 'WebRTC'],
+  },
+  {
+    id: 'live-marcus-2',
+    creatorHandle: 'marcus_dev',
+    creatorName: 'Marcus Vance',
+    creatorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+    isVerified: true,
+    category: 'Security Lead',
+    title: 'Live Ed25519 Cryptographic Key Exchange & Proof Auditing',
+    description: 'Demonstrating how Privity verifies post identity and prevents sybil spam with zero personal data leakage.',
+    viewersCount: 894,
+    previewUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
+    participants: [
+      { name: 'Elena Rodriguez', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', role: 'Speaker' },
+    ],
+    tags: ['Cryptography', 'Ed25519', 'Security'],
+  },
+  {
+    id: 'live-julian-3',
+    creatorHandle: 'julian_analogue',
+    creatorName: 'Julian Thorne',
+    creatorAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
+    isVerified: false,
+    category: 'Film Photographer',
+    title: 'Tokyo Rain & Neon: 35mm Live Photowalk & Darkroom Notes',
+    description: 'Walking through Shinjuku with a Leica M6, sharing live analog grain framing techniques.',
+    viewersCount: 632,
+    previewUrl: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800',
+    participants: [
+      { name: 'Chloe Vance', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150', role: 'Listener' },
+    ],
+    tags: ['Analog', 'Photography', 'Tokyo'],
+  },
+  {
+    id: 'live-chloe-4',
+    creatorHandle: 'chloe_visuals',
+    creatorName: 'Chloe Vance',
+    creatorAvatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150',
+    isVerified: false,
+    category: 'Sound Artist',
+    title: 'Modular Synthesizer & Ambient Sound Lab Live',
+    description: 'Generative patches on Eurorack, exploring spatial audio fields and analog warmth.',
+    viewersCount: 418,
+    previewUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800',
+    participants: [],
+    tags: ['Ambient', 'Modular', 'SoundDesign'],
+  },
+];
+
 const PRESET_AVATARS = [
   'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
   'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
@@ -1088,7 +1173,16 @@ export function App() {
   const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'messages' | 'activity' | 'profile' | 'safety'>(() =>
     readStorage('privity_active_tab_v5', 'feed')
   );
-  const [feedFilter, setFeedFilter] = useState<'all' | PostPrivacy>('all');
+  const [feedFilter, setFeedFilter] = useState<FeedFilterTab>('feed');
+  const [liveStreamsList] = useState<LiveStreamSession[]>(INITIAL_LIVE_STREAMS);
+  const [activeLiveStream, setActiveLiveStream] = useState<LiveStreamSession | null>(null);
+  const [liveChatInput, setLiveChatInput] = useState('');
+  const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; time: string }>>([
+    { id: '1', user: 'marcus_dev', text: 'Latency is under 12ms across peers! 🔥', time: 'now' },
+    { id: '2', user: 'julian_analogue', text: 'The clarity on this live feed is unreal.', time: 'now' },
+    { id: '3', user: 'sara_lin', text: 'Verified Ed25519 signature checked out clean.', time: 'now' },
+  ]);
+  const [floatingHearts, setFloatingHearts] = useState<Array<{ id: number; left: number }>>([]);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
 
   // Real-Time Photo Likes Registry (synchronizes lightbox, posts, and profile media items)
@@ -2232,6 +2326,141 @@ export function App() {
   // Comment input per post
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [replyTarget, setReplyTarget] = useState<{ postId: string; commentId: string; handle: string } | null>(null);
+
+  // Feed Audience Sub-Tabs Swipe and Selection
+  const feedTouchStartXRef = React.useRef<number | null>(null);
+  const feedTouchStartYRef = React.useRef<number | null>(null);
+  const feedPointerStartXRef = React.useRef<number | null>(null);
+  const feedPointerStartYRef = React.useRef<number | null>(null);
+  const feedLastSwipeTimeRef = React.useRef<number>(0);
+
+  const handleSelectFeedTab = (tab: FeedFilterTab) => {
+    setFeedFilter(tab);
+    setTimeout(() => {
+      const el = document.getElementById(`tab-feed-${tab}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }, 20);
+  };
+
+  const processFeedSwipeDelta = (deltaX: number, deltaY: number) => {
+    const now = Date.now();
+    if (now - feedLastSwipeTimeRef.current < 260) return;
+
+    if (Math.abs(deltaX) > 36 && Math.abs(deltaX) > Math.abs(deltaY) * 0.75) {
+      feedLastSwipeTimeRef.current = now;
+      const currentIndex = FEED_TABS.indexOf(feedFilter);
+      if (currentIndex === -1) return;
+
+      if (deltaX < 0) {
+        // Swiped Left -> Move forward to next tab
+        if (currentIndex < FEED_TABS.length - 1) {
+          handleSelectFeedTab(FEED_TABS[currentIndex + 1]);
+        }
+      } else {
+        // Swiped Right -> Move back to previous tab
+        if (currentIndex > 0) {
+          handleSelectFeedTab(FEED_TABS[currentIndex - 1]);
+        }
+      }
+    }
+  };
+
+  const handleFeedTouchStart = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('.circles-story-rail, .composer-attachments-group, .lightbox-overlay, input, textarea, button, a, select, .live-stream-modal-window')) {
+      return;
+    }
+    if (e.touches.length === 1) {
+      feedTouchStartXRef.current = e.touches[0].clientX;
+      feedTouchStartYRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleFeedTouchEnd = (e: React.TouchEvent) => {
+    if (feedTouchStartXRef.current === null || feedTouchStartYRef.current === null) return;
+    if (isModalOpen || isSettingsOpen || isEditProfileOpen || lightboxUrl || rosterModal || postMenuModal || activeLiveStream) return;
+
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const deltaX = touchEndX - feedTouchStartXRef.current;
+    const deltaY = touchEndY - feedTouchStartYRef.current;
+
+    feedTouchStartXRef.current = null;
+    feedTouchStartYRef.current = null;
+
+    processFeedSwipeDelta(deltaX, deltaY);
+  };
+
+  const handleFeedPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') return;
+    const target = e.target as HTMLElement;
+    if (target.closest('.circles-story-rail, .composer-attachments-group, .lightbox-overlay, input, textarea, button, a, select, .live-stream-modal-window')) {
+      return;
+    }
+    feedPointerStartXRef.current = e.clientX;
+    feedPointerStartYRef.current = e.clientY;
+  };
+
+  const handleFeedPointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') return;
+    if (feedPointerStartXRef.current === null || feedPointerStartYRef.current === null) return;
+    if (isModalOpen || isSettingsOpen || isEditProfileOpen || lightboxUrl || rosterModal || postMenuModal || activeLiveStream) return;
+
+    const deltaX = e.clientX - feedPointerStartXRef.current;
+    const deltaY = e.clientY - feedPointerStartYRef.current;
+
+    feedPointerStartXRef.current = null;
+    feedPointerStartYRef.current = null;
+
+    processFeedSwipeDelta(deltaX, deltaY);
+  };
+
+  const handleLiveHeartBurst = () => {
+    const newHeart = {
+      id: Date.now() + Math.random(),
+      left: 65 + Math.floor(Math.random() * 25),
+    };
+    setFloatingHearts((prev) => [...prev, newHeart]);
+    setTimeout(() => {
+      setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
+    }, 1800);
+  };
+
+  const handleSendLiveComment = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!liveChatInput.trim()) return;
+    const newEntry = {
+      id: String(Date.now()),
+      user: myProfile.handle,
+      text: liveChatInput.trim(),
+      time: 'now',
+    };
+    setLiveComments((prev) => [...prev, newEntry]);
+    setLiveChatInput('');
+    handleLiveHeartBurst();
+  };
+
+  const handleStartGoLive = () => {
+    const userStream: LiveStreamSession = {
+      id: `live-user-${Date.now()}`,
+      creatorHandle: myProfile.handle,
+      creatorName: myProfile.name,
+      creatorAvatar: myProfile.avatar,
+      isVerified: myProfile.isVerified,
+      category: 'Visionary Host',
+      title: 'Decentralized Live Broadcast · Sovereign Node',
+      description: 'Streaming live directly to authorized circles with local encryption keys.',
+      viewersCount: 1,
+      previewUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800',
+      participants: [{ name: myProfile.name, avatar: myProfile.avatar, role: 'Host' }],
+      tags: ['Live', 'P2P', 'Privity'],
+    };
+    setActiveLiveStream(userStream);
+    triggerToast('Broadcast initialized: Live on P2P mesh network');
+  };
+
 
   // User Profile View State & Navigation History Stack (persisted across refreshes)
   const [viewedUserHandle, setViewedUserHandle] = useState<string>(() =>
@@ -3731,7 +3960,12 @@ export function App() {
 
           <div className="mobile-header-center">
             <span className="mobile-active-tab-title">
-              {activeTab === 'feed' && (feedFilter === 'close_friends' ? 'Close Friends' : feedFilter === 'followers' ? 'Audience' : 'Chronological')}
+              {activeTab === 'feed' && (
+                feedFilter === 'live' ? 'Live Broadcasts' :
+                feedFilter === 'feed' ? 'Chronological Feed' :
+                feedFilter === 'close_friends' ? 'Close Friends' :
+                feedFilter === 'followers' ? 'Followers' : 'All Circles'
+              )}
               {activeTab === 'discover' && 'Discover'}
               {activeTab === 'activity' && 'Activity'}
               {activeTab === 'messages' && 'Direct Messages'}
@@ -3879,40 +4113,210 @@ export function App() {
       <main className={`feed-column ${activeTab === 'messages' ? 'messages-expanded-view' : ''}`}>
         {/* --- VIEW 1: HOME FEED --- */}
         {activeTab === 'feed' && (
-          <div>
+          <div
+            className="feed-swipe-container"
+            onTouchStart={handleFeedTouchStart}
+            onTouchEnd={handleFeedTouchEnd}
+            onPointerDown={handleFeedPointerDown}
+            onPointerUp={handleFeedPointerUp}
+          >
             <header className="feed-sticky-nav">
               <div className="feed-title-line">
-                <div className="feed-main-heading">Home</div>
-                <div className="feed-pulse-indicator" title="Chronological algorithm synchronized in real time">
-                  <span className="live-green-orb"></span>
-                  Chronological Algorithm • Synced
+                <div className="feed-main-heading">
+                  {feedFilter === 'live' && 'Live Broadcasts'}
+                  {feedFilter === 'feed' && 'Feed'}
+                  {feedFilter === 'all' && 'All Circles'}
+                  {feedFilter === 'close_friends' && 'Close Friends'}
+                  {feedFilter === 'followers' && 'Followers Only'}
+                </div>
+                <div className="feed-pulse-indicator" title="Decentralized algorithm synchronized in real time">
+                  {feedFilter === 'live' ? (
+                    <>
+                      <span className="live-red-orb"></span>
+                      <span>P2P Encrypted Mesh • 4 Streams Active</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="live-green-orb"></span>
+                      <span>Chronological Algorithm • Synced</span>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Feed Audience Tabs */}
-              <div className="audience-tabs-bar">
+              {/* Feed Audience Tabs: 1st Live, 2nd Feed, 3rd All Circles, 4th Close Friends, 5th Followers Only */}
+              <div className="audience-tabs-bar" role="tablist" aria-label="Feed channels">
                 <button
-                  className={`audience-tab-btn ${feedFilter === 'all' ? 'active' : ''}`}
-                  onClick={() => setFeedFilter('all')}
+                  id="tab-feed-live"
+                  type="button"
+                  role="tab"
+                  aria-selected={feedFilter === 'live'}
+                  className={`audience-tab-btn live ${feedFilter === 'live' ? 'active' : ''}`}
+                  onClick={() => handleSelectFeedTab('live')}
                 >
-                  All Circles
+                  <span className="live-tab-radar">
+                    <span className="live-radar-ping"></span>
+                    <span className="live-radar-core"></span>
+                  </span>
+                  <span>Live</span>
+                  <span className="live-badge-count">{liveStreamsList.length}</span>
                 </button>
+
                 <button
+                  id="tab-feed-feed"
+                  type="button"
+                  role="tab"
+                  aria-selected={feedFilter === 'feed'}
+                  className={`audience-tab-btn feed ${feedFilter === 'feed' ? 'active' : ''}`}
+                  onClick={() => handleSelectFeedTab('feed')}
+                >
+                  <IconFeedStream size={13} color="var(--primary-light)" />
+                  <span>Feed</span>
+                </button>
+
+                <button
+                  id="tab-feed-all"
+                  type="button"
+                  role="tab"
+                  aria-selected={feedFilter === 'all'}
+                  className={`audience-tab-btn ${feedFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => handleSelectFeedTab('all')}
+                >
+                  <IconGlobe size={13} color="var(--public-cyan)" />
+                  <span>All Circles</span>
+                </button>
+
+                <button
+                  id="tab-feed-close_friends"
+                  type="button"
+                  role="tab"
+                  aria-selected={feedFilter === 'close_friends'}
                   className={`audience-tab-btn cf ${feedFilter === 'close_friends' ? 'active' : ''}`}
-                  onClick={() => setFeedFilter('close_friends')}
+                  onClick={() => handleSelectFeedTab('close_friends')}
                 >
                   <IconStarCloseFriends size={13} color="var(--cf-emerald)" />
-                  Close Friends
+                  <span>Close Friends</span>
                 </button>
+
                 <button
+                  id="tab-feed-followers"
+                  type="button"
+                  role="tab"
+                  aria-selected={feedFilter === 'followers'}
                   className={`audience-tab-btn followers ${feedFilter === 'followers' ? 'active' : ''}`}
-                  onClick={() => setFeedFilter('followers')}
+                  onClick={() => handleSelectFeedTab('followers')}
                 >
                   <IconUsers size={14} color="var(--followers-iris)" />
-                  Followers Only
+                  <span>Followers Only</span>
                 </button>
               </div>
             </header>
+
+            {/* LIVE BROADCASTS STAGE WHEN LIVE TAB IS SELECTED */}
+            {feedFilter === 'live' ? (
+              <div className="live-broadcasts-stage">
+                {/* Live Hero Header */}
+                <div className="live-stage-hero-banner">
+                  <div className="live-stage-hero-left">
+                    <div className="live-pill-active">
+                      <span className="live-radar-ping"></span>
+                      <span className="live-radar-core"></span>
+                      <span>ENCRYPTED P2P MESH</span>
+                    </div>
+                    <h2 className="live-stage-title">Decentralized Live Broadcasts</h2>
+                    <p className="live-stage-subtitle">
+                      Zero-latency WebRTC streams with cryptographic identity verification and peer-to-peer circle encryption.
+                    </p>
+                  </div>
+                  <div className="live-stage-hero-right">
+                    <button
+                      type="button"
+                      className="btn-go-live-studio"
+                      onClick={handleStartGoLive}
+                      title="Launch your own encrypted live broadcast"
+                    >
+                      <IconRadio size={16} />
+                      <span>Go Live Studio</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live Streams Cards Grid */}
+                <div className="live-streams-grid">
+                  {liveStreamsList.map((stream) => (
+                    <article
+                      key={stream.id}
+                      className="live-stream-card"
+                      onClick={() => setActiveLiveStream(stream)}
+                      title={`Tune in to ${stream.creatorName}'s live broadcast`}
+                    >
+                      <div className="live-stream-preview-box">
+                        <img src={stream.previewUrl} alt={stream.title} className="live-stream-preview-img" />
+                        <div className="live-stream-badge-row">
+                          <span className="live-badge-red">
+                            <span className="live-radar-core small"></span>
+                            LIVE
+                          </span>
+                          <span className="live-viewers-tag">
+                            <IconUser size={11} /> {stream.viewersCount.toLocaleString()}
+                          </span>
+                        </div>
+                        <span className="live-category-chip">{stream.category}</span>
+                        <div className="live-stream-play-hint">
+                          <div className="live-play-btn-circle">
+                            <IconPlay size={18} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="live-stream-card-body">
+                        <div className="live-stream-card-author-line">
+                          <img src={stream.creatorAvatar} alt={stream.creatorName} className="live-stream-author-img" />
+                          <div className="live-stream-card-author-meta">
+                            <div className="live-stream-author-name">
+                              <span>{stream.creatorName}</span>
+                              {stream.isVerified && <IconVerifiedStar size={12} />}
+                            </div>
+                            <span className="live-stream-author-handle">@{stream.creatorHandle}</span>
+                          </div>
+                        </div>
+
+                        <h3 className="live-stream-card-title">{stream.title}</h3>
+                        <p className="live-stream-card-desc">{stream.description}</p>
+
+                        <div className="live-stream-card-footer">
+                          <div className="live-stream-tags-list">
+                            {stream.tags.slice(0, 3).map((tag) => (
+                              <span key={tag} className="live-stream-tag-pill">#{tag}</span>
+                            ))}
+                          </div>
+                          {stream.participants.length > 0 && (
+                            <div className="live-stream-facepile" title={`Co-hosts: ${stream.participants.map((p) => p.name).join(', ')}`}>
+                              {stream.participants.slice(0, 3).map((p, i) => (
+                                <img key={i} src={p.avatar} alt={p.name} className="live-facepile-avatar" />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn-join-stream"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveLiveStream(stream);
+                          }}
+                        >
+                          <span>Join Live Stream</span>
+                          <IconRadio size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <>
 
             {/* Circles & Stories Rail */}
             <div className="circles-story-rail">
@@ -4066,7 +4470,7 @@ export function App() {
             {/* Posts Stream */}
             <div>
               {posts
-                .filter((p) => feedFilter === 'all' || p.privacy === feedFilter)
+                .filter((p) => feedFilter === 'feed' || feedFilter === 'all' || p.privacy === feedFilter)
                 .filter((p) => {
                   if (!activeTagFilter) return true;
                   return p.tags && p.tags.map((t) => t.toLowerCase()).includes(activeTagFilter.toLowerCase());
@@ -4563,6 +4967,8 @@ export function App() {
                 No hidden algorithm • Chronological & relationship-driven feed
               </div>
             </div>
+            </>
+            )}
           </div>
         )}
 
@@ -6596,6 +7002,139 @@ export function App() {
       {/* ======================================================== */}
       {/* 4. MODALS & LIGHTBOXES                                   */}
       {/* ======================================================== */}
+
+      {/* INTERACTIVE LIVE BROADCAST MODAL — VISIONOS FROSTED STAGE */}
+      {activeLiveStream && (
+        <div
+          className="live-modal-backdrop"
+          onClick={() => setActiveLiveStream(null)}
+        >
+          <div
+            className="live-stream-modal-window"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Live Modal Top Bar */}
+            <div className="live-modal-top-bar">
+              <div className="live-modal-author-group">
+                <img
+                  src={activeLiveStream.creatorAvatar}
+                  alt={activeLiveStream.creatorName}
+                  className="live-modal-creator-avatar"
+                />
+                <div className="live-modal-creator-meta">
+                  <div className="live-modal-creator-name-row">
+                    <span className="live-modal-creator-name">{activeLiveStream.creatorName}</span>
+                    {activeLiveStream.isVerified && <IconVerifiedStar size={13} />}
+                    <span className="live-badge-red small">
+                      <span className="live-radar-core small"></span>
+                      LIVE
+                    </span>
+                  </div>
+                  <div className="live-modal-stream-topic">
+                    @{activeLiveStream.creatorHandle} · {activeLiveStream.category}
+                  </div>
+                </div>
+              </div>
+
+              <div className="live-modal-top-actions">
+                <div className="live-modal-viewers-pill">
+                  <IconUser size={13} />
+                  <span>{activeLiveStream.viewersCount.toLocaleString()} watching</span>
+                </div>
+                <button
+                  type="button"
+                  className="live-modal-close-btn"
+                  onClick={() => setActiveLiveStream(null)}
+                  title="Close Live Stream"
+                >
+                  <IconX size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Video Canvas & Floating Hearts Stage */}
+            <div className="live-modal-main-stage">
+              <div className="live-video-screen">
+                <img
+                  src={activeLiveStream.previewUrl}
+                  alt={activeLiveStream.title}
+                  className="live-video-media-feed"
+                />
+                <div className="live-video-overlay-gradient"></div>
+
+                {/* Floating Heart Bursts Layer */}
+                <div className="live-floating-hearts-layer">
+                  {floatingHearts.map((heart) => (
+                    <div
+                      key={heart.id}
+                      className="floating-heart-burst"
+                      style={{ left: `${heart.left}%` }}
+                    >
+                      <IconHeart size={28} color="#f43f5e" filled />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Stream Info Overlay */}
+                <div className="live-stream-overlay-title-card">
+                  <h3 className="live-stream-overlay-h3">{activeLiveStream.title}</h3>
+                  <div className="live-stream-overlay-tags">
+                    {activeLiveStream.tags.map((tag) => (
+                      <span key={tag} className="live-overlay-tag">#{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Live Chat & Interaction Column */}
+              <div className="live-chat-panel">
+                <div className="live-chat-header">
+                  <div className="live-chat-title">
+                    <IconChat size={14} />
+                    <span>Real-Time Circle Chat</span>
+                  </div>
+                  <span className="live-chat-badge">Ed25519 Encrypted</span>
+                </div>
+
+                <div className="live-chat-messages-box">
+                  {liveComments.map((msg) => (
+                    <div key={msg.id} className="live-chat-msg-row">
+                      <span className="live-chat-user-handle">@{msg.user}:</span>
+                      <span className="live-chat-text-bubble">{msg.text}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <form onSubmit={handleSendLiveComment} className="live-chat-input-bar">
+                  <input
+                    type="text"
+                    className="live-chat-input-field"
+                    placeholder="Say something to the circle..."
+                    value={liveChatInput}
+                    onChange={(e) => setLiveChatInput(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="live-heart-reaction-btn"
+                    onClick={handleLiveHeartBurst}
+                    title="Send Heart Reaction"
+                  >
+                    <IconHeart size={18} color="#f43f5e" filled />
+                  </button>
+                  <button
+                    type="submit"
+                    className="live-send-comment-btn"
+                    disabled={!liveChatInput.trim()}
+                    title="Send Comment"
+                  >
+                    <IconSend size={15} />
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* LIGHTBOX FOR FULLSCREEN MEDIA — APPLE VISIONOS SPECULAR GLASS */}
       {lightboxUrl && (() => {
