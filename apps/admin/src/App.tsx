@@ -1065,29 +1065,74 @@ export function App() {
       verifiedCategory: editForm.category.trim() || myProfile.verifiedCategory,
     };
 
-    setProfiles((prev) => ({
-      ...prev,
-      luciano: updated,
-      ...(cleanHandle !== 'luciano' ? { [cleanHandle]: updated } : {}),
-    }));
+    setProfiles((prev) => {
+      const next = {
+        ...prev,
+        luciano: updated,
+        ...(cleanHandle !== 'luciano' ? { [cleanHandle]: updated } : {}),
+      };
+      try {
+        localStorage.setItem('privity_profiles_v5', JSON.stringify(next));
+      } catch (err) {
+        console.warn(err);
+      }
+      return next;
+    });
 
-    // Synchronize posts authored by Luciano so new name & avatar appear everywhere
+    // Synchronize posts, comments, and replies authored by user in real time
     setPosts((prev) =>
       prev.map((p) => {
-        if (p.authorId === 'usr-luciano' || p.authorHandle === 'luciano' || p.authorHandle === myProfile.handle) {
+        const isPostAuthor =
+          p.authorId === 'usr-luciano' ||
+          p.authorHandle === 'luciano' ||
+          p.authorHandle === myProfile.handle;
+
+        const updatedComments = p.comments.map((c) => {
+          const isCommentAuthor = c.authorHandle === 'luciano' || c.authorHandle === myProfile.handle;
+          const updatedReplies = (c.replies || []).map((r) => {
+            const isReplyAuthor = r.authorHandle === 'luciano' || r.authorHandle === myProfile.handle;
+            if (isReplyAuthor) {
+              return {
+                ...r,
+                authorName: updated.name,
+                authorAvatar: updated.avatar,
+                authorHandle: updated.handle,
+              };
+            }
+            return r;
+          });
+
+          if (isCommentAuthor) {
+            return {
+              ...c,
+              authorName: updated.name,
+              authorAvatar: updated.avatar,
+              authorHandle: updated.handle,
+              replies: updatedReplies,
+            };
+          }
+          return { ...c, replies: updatedReplies };
+        });
+
+        if (isPostAuthor) {
           return {
             ...p,
             authorName: updated.name,
             authorAvatar: updated.avatar,
             authorHandle: updated.handle,
+            comments: updatedComments,
           };
         }
-        return p;
+        return { ...p, comments: updatedComments };
       })
     );
 
+    if (viewedUserHandle === 'luciano' || viewedUserHandle === myProfile.handle) {
+      setViewedUserHandle(cleanHandle);
+    }
+
     setIsEditProfileOpen(false);
-    triggerToast('Profile updated & saved permanently!');
+    triggerToast('Profile updated & saved in real time!');
   };
 
   // Like media item directly on profile
@@ -1095,7 +1140,7 @@ export function App() {
     e?.stopPropagation();
     const clean = profileHandle.replace(/^@/, '');
     setProfiles((prev) => {
-      const prof = prev[clean];
+      const prof = prev[clean] || getUserProfile(clean);
       if (!prof || !prof.mediaItems) return prev;
       const nextMedia = prof.mediaItems.map((m) => {
         if (m.id === mediaId) {
@@ -1116,7 +1161,7 @@ export function App() {
         },
       };
     });
-    triggerToast('Photo reaction updated and saved');
+    triggerToast('Photo reaction updated and saved in real time');
   };
 
   // Post Actions Menu & Caption Editing State
@@ -1206,41 +1251,83 @@ export function App() {
     const clean = handleOrId.replace(/^@/, '');
     const current = !!followingMap[clean];
     const next = !current;
-    setFollowingMap((prev) => ({ ...prev, [clean]: next }));
+    const myHandle = myProfile.handle || 'luciano';
+
+    setFollowingMap((prev) => {
+      const nextMap = { ...prev, [clean]: next };
+      try {
+        localStorage.setItem('privity_following_v5', JSON.stringify(nextMap));
+      } catch (err) {
+        console.warn(err);
+      }
+      return nextMap;
+    });
 
     setProfiles((prev) => {
-      const target = prev[clean];
-      let nextTarget = target ? { ...target } : null;
-      if (nextTarget) {
-        let followers = [...(nextTarget.followersList || [])];
-        if (next) {
-          if (!followers.includes('luciano')) followers = ['luciano', ...followers];
-        } else {
-          followers = followers.filter((h) => h !== 'luciano');
-        }
-        nextTarget.followersList = followers;
+      const target = prev[clean] || getUserProfile(clean);
+      let targetFollowers = [...(target.followersList || [])];
+      if (next) {
+        if (!targetFollowers.includes('luciano')) targetFollowers.push('luciano');
+        if (myHandle !== 'luciano' && !targetFollowers.includes(myHandle)) targetFollowers.push(myHandle);
+      } else {
+        targetFollowers = targetFollowers.filter((h) => h !== 'luciano' && h !== myHandle);
       }
+      const nextTarget = { ...target, followersList: targetFollowers };
 
-      const myProf = prev['luciano'];
-      let nextMyProf = myProf ? { ...myProf } : null;
-      if (nextMyProf) {
-        let followings = [...(nextMyProf.followingList || [])];
-        if (next) {
-          if (!followings.includes(clean)) followings = [...followings, clean];
-        } else {
-          followings = followings.filter((h) => h !== clean);
-        }
-        nextMyProf.followingList = followings;
+      const myProf = prev['luciano'] || prev[myHandle] || getUserProfile('luciano');
+      let myFollowing = [...(myProf.followingList || [])];
+      if (next) {
+        if (!myFollowing.includes(clean)) myFollowing.push(clean);
+      } else {
+        myFollowing = myFollowing.filter((h) => h !== clean);
       }
+      const nextMyProf = { ...myProf, followingList: myFollowing };
 
-      return {
+      const nextProfiles = {
         ...prev,
-        ...(nextTarget ? { [clean]: nextTarget } : {}),
-        ...(nextMyProf ? { luciano: nextMyProf } : {}),
+        [clean]: nextTarget,
+        luciano: nextMyProf,
+        ...(myHandle !== 'luciano' ? { [myHandle]: nextMyProf } : {}),
       };
+      try {
+        localStorage.setItem('privity_profiles_v5', JSON.stringify(nextProfiles));
+      } catch (err) {
+        console.warn(err);
+      }
+      return nextProfiles;
     });
 
     triggerToast(next ? `Now following ${name || '@' + clean}` : `Unfollowed ${name || '@' + clean}`);
+  };
+
+  const handleRemoveFollower = (followerHandle: string) => {
+    const clean = followerHandle.replace(/^@/, '');
+    const myHandle = myProfile.handle || 'luciano';
+
+    setProfiles((prev) => {
+      const myProf = prev['luciano'] || prev[myHandle] || getUserProfile('luciano');
+      const updatedFollowers = (myProf.followersList || []).filter((h) => h !== clean);
+      const nextMyProf = { ...myProf, followersList: updatedFollowers };
+
+      const targetProf = prev[clean] || getUserProfile(clean);
+      const targetFollowing = (targetProf.followingList || []).filter((h) => h !== 'luciano' && h !== myHandle);
+      const nextTargetProf = { ...targetProf, followingList: targetFollowing };
+
+      const nextProfiles = {
+        ...prev,
+        luciano: nextMyProf,
+        ...(myHandle !== 'luciano' ? { [myHandle]: nextMyProf } : {}),
+        [clean]: nextTargetProf,
+      };
+      try {
+        localStorage.setItem('privity_profiles_v5', JSON.stringify(nextProfiles));
+      } catch (err) {
+        console.warn(err);
+      }
+      return nextProfiles;
+    });
+
+    triggerToast(`Removed @${clean} from your followers in real time`);
   };
 
   const toggleCloseFriends = (handle: string) => {
@@ -1283,53 +1370,25 @@ export function App() {
     mode: 'followers' | 'following' | 'circle' | 'likes',
     customHandles?: string[],
   ) => {
-    const profile = getUserProfile(targetHandle);
-    const isOwn = targetHandle === 'luciano';
+    const cleanTarget = targetHandle.replace(/^@/, '');
+    const profile = getUserProfile(cleanTarget);
+    const isOwn = cleanTarget === 'luciano' || cleanTarget === myProfile.handle;
     const effectiveIsPrivate = isOwn ? isPrivateAccount : !!profile.isPrivate;
-    const isFollowing = !!followingMap[targetHandle] || isOwn;
+    const isFollowing = !!followingMap[cleanTarget] || isOwn;
 
     // Enforce User Privacy Requirement:
-    // "Make it so as long as they don't have their private account I'm able to click on the followers and see who all follows followers and following and anything else that I need to click on"
     if (effectiveIsPrivate && !isFollowing && mode !== 'likes') {
-      setPrivateLockModal({ handle: targetHandle, name: targetName });
-      triggerToast(`Account is Private: Follow @${targetHandle} to view their ${mode} directory.`);
+      setPrivateLockModal({ handle: cleanTarget, name: targetName });
+      triggerToast(`Account is Private: Follow @${cleanTarget} to view their ${mode} directory.`);
       return;
-    }
-
-    let list: string[] = [];
-    if (customHandles) {
-      list = customHandles;
-    } else if (mode === 'followers') {
-      if (isOwn) {
-        list = [...(profile.followersList || [])];
-      } else {
-        const base = (profile.followersList || []).filter((h) => h !== 'luciano');
-        if (followingMap[targetHandle]) {
-          list = ['luciano', ...base];
-        } else {
-          list = base;
-        }
-      }
-    } else if (mode === 'following') {
-      if (isOwn) {
-        list = Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano');
-      } else {
-        list = [...(profile.followingList || [])];
-      }
-    } else if (mode === 'circle') {
-      if (isOwn) {
-        list = [...closeFriendsList];
-      } else {
-        list = [...(profile.trustCirclesList || [])];
-      }
     }
 
     setRosterSearch('');
     setRosterModal({
-      targetHandle,
+      targetHandle: cleanTarget,
       targetName,
       mode,
-      handles: list,
+      handles: customHandles || [],
     });
   };
 
@@ -1496,8 +1555,8 @@ export function App() {
     const text = commentInputs[postId]?.trim();
     if (!text) return;
 
-    setPosts((prev) =>
-      prev.map((p) => {
+    setPosts((prev) => {
+      const nextPosts = prev.map((p) => {
         if (p.id === postId) {
           if (replyTarget && replyTarget.postId === postId) {
             const updated = p.comments.map((c) => {
@@ -1531,12 +1590,82 @@ export function App() {
           }
         }
         return p;
-      }),
-    );
+      });
+      try {
+        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
+      } catch (err) {
+        console.warn(err);
+      }
+      return nextPosts;
+    });
 
     setCommentInputs({ ...commentInputs, [postId]: '' });
     setReplyTarget(null);
-    triggerToast('Comment posted and saved');
+    triggerToast('Comment posted and saved in real time');
+  };
+
+  // Delete comment or nested reply in real time
+  const handleDeleteComment = (postId: string, commentId: string, replyId?: string) => {
+    setPosts((prev) => {
+      const nextPosts = prev.map((p) => {
+        if (p.id !== postId) return p;
+        if (replyId) {
+          const updated = p.comments.map((c) => {
+            if (c.id !== commentId) return c;
+            return {
+              ...c,
+              replies: (c.replies || []).filter((r) => r.id !== replyId),
+            };
+          });
+          return {
+            ...p,
+            commentsCount: Math.max(0, p.commentsCount - 1),
+            comments: updated,
+          };
+        } else {
+          const targetComment = p.comments.find((c) => c.id === commentId);
+          const repliesTotal = targetComment?.replies?.length || 0;
+          const updated = p.comments.filter((c) => c.id !== commentId);
+          return {
+            ...p,
+            commentsCount: Math.max(0, p.commentsCount - (1 + repliesTotal)),
+            comments: updated,
+          };
+        }
+      });
+      try {
+        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
+      } catch (err) {
+        console.warn(err);
+      }
+      return nextPosts;
+    });
+    triggerToast('Comment removed in real time');
+  };
+
+  // Like or unlike comment in real time
+  const handleLikeComment = (postId: string, commentId: string) => {
+    setPosts((prev) => {
+      const nextPosts = prev.map((p) => {
+        if (p.id !== postId) return p;
+        const updated = p.comments.map((c) => {
+          if (c.id !== commentId) return c;
+          const nextLiked = !c.isLiked;
+          return {
+            ...c,
+            isLiked: nextLiked,
+            likesCount: nextLiked ? (c.likesCount || 0) + 1 : Math.max(0, (c.likesCount || 0) - 1),
+          };
+        });
+        return { ...p, comments: updated };
+      });
+      try {
+        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
+      } catch (err) {
+        console.warn(err);
+      }
+      return nextPosts;
+    });
   };
 
   // Publish from inline composer
@@ -1572,7 +1701,7 @@ export function App() {
 
     if (composerPhotoUrl) {
       setProfiles((prev) => {
-        const prof = prev['luciano'] || myProfile;
+        const prof = prev['luciano'] || prev[myProfile.handle] || myProfile;
         const newMedia: UserMediaItem = {
           id: `m-luciano-${Date.now()}`,
           url: composerPhotoUrl,
@@ -1581,20 +1710,42 @@ export function App() {
           comments: 0,
           isLiked: false,
         };
-        return {
+        const nextProfiles = {
           ...prev,
           luciano: {
             ...prof,
             mediaItems: [newMedia, ...(prof.mediaItems || [])],
           },
+          ...(myProfile.handle !== 'luciano'
+            ? {
+                [myProfile.handle]: {
+                  ...prof,
+                  mediaItems: [newMedia, ...(prof.mediaItems || [])],
+                },
+              }
+            : {}),
         };
+        try {
+          localStorage.setItem('privity_profiles_v5', JSON.stringify(nextProfiles));
+        } catch (err) {
+          console.warn(err);
+        }
+        return nextProfiles;
       });
     }
 
-    setPosts((prev) => [newPost, ...prev]);
+    setPosts((prev) => {
+      const nextPosts = [newPost, ...prev];
+      try {
+        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
+      } catch (err) {
+        console.warn(err);
+      }
+      return nextPosts;
+    });
     setComposerCaption('');
     setComposerPhotoUrl(null);
-    triggerToast(`Shared with ${composerPrivacy.replace('_', ' ')} audience!`);
+    triggerToast(`Shared with ${composerPrivacy.replace('_', ' ')} audience in real time!`);
   };
 
   // Publish from modal
@@ -1635,7 +1786,7 @@ export function App() {
 
     if (modalPhoto) {
       setProfiles((prev) => {
-        const prof = prev['luciano'] || myProfile;
+        const prof = prev['luciano'] || prev[myProfile.handle] || myProfile;
         const newMedia: UserMediaItem = {
           id: `m-luciano-${Date.now()}`,
           url: modalPhoto,
@@ -1644,22 +1795,44 @@ export function App() {
           comments: 0,
           isLiked: false,
         };
-        return {
+        const nextProfiles = {
           ...prev,
           luciano: {
             ...prof,
             mediaItems: [newMedia, ...(prof.mediaItems || [])],
           },
+          ...(myProfile.handle !== 'luciano'
+            ? {
+                [myProfile.handle]: {
+                  ...prof,
+                  mediaItems: [newMedia, ...(prof.mediaItems || [])],
+                },
+              }
+            : {}),
         };
+        try {
+          localStorage.setItem('privity_profiles_v5', JSON.stringify(nextProfiles));
+        } catch (err) {
+          console.warn(err);
+        }
+        return nextProfiles;
       });
     }
 
-    setPosts((prev) => [newPost, ...prev]);
+    setPosts((prev) => {
+      const nextPosts = [newPost, ...prev];
+      try {
+        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
+      } catch (err) {
+        console.warn(err);
+      }
+      return nextPosts;
+    });
     setIsModalOpen(false);
     setModalCaption('');
     setModalTags('');
     setModalPhoto(null);
-    triggerToast(`Published to ${modalPrivacy.replace('_', ' ')} circle!`);
+    triggerToast(`Published to ${modalPrivacy.replace('_', ' ')} circle in real time!`);
   };
 
   return (
@@ -2250,29 +2423,76 @@ export function App() {
                                   <span className="thread-time">{comment.timeAgo}</span>
                                 </div>
                                 <div className="thread-content-text">{comment.text}</div>
-                                <button
-                                  style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    color: 'var(--followers-iris)',
-                                    fontSize: '11px',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                    marginTop: '6px',
-                                    padding: 0,
-                                  }}
-                                  onClick={() => {
-                                    setReplyTarget({
-                                      postId: post.id,
-                                      commentId: comment.id,
-                                      handle: comment.authorHandle,
-                                    });
-                                    const el = document.getElementById(`comment-input-${post.id}`);
-                                    el?.focus();
-                                  }}
-                                >
-                                  Reply
-                                </button>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginTop: '6px' }}>
+                                  <button
+                                    type="button"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: 'var(--followers-iris)',
+                                      fontSize: '11px',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      padding: 0,
+                                    }}
+                                    onClick={() => {
+                                      setReplyTarget({
+                                        postId: post.id,
+                                        commentId: comment.id,
+                                        handle: comment.authorHandle,
+                                      });
+                                      const el = document.getElementById(`comment-input-${post.id}`);
+                                      el?.focus();
+                                    }}
+                                  >
+                                    Reply
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      color: comment.isLiked ? '#ef4444' : 'var(--text-muted)',
+                                      fontSize: '11px',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px',
+                                      padding: 0,
+                                    }}
+                                    onClick={() => handleLikeComment(post.id, comment.id)}
+                                    title="Like comment"
+                                  >
+                                    <IconHeart size={11} filled={comment.isLiked} color={comment.isLiked ? '#ef4444' : 'currentColor'} />
+                                    <span>{(comment.likesCount || 0) > 0 ? comment.likesCount : 'Like'}</span>
+                                  </button>
+                                  {(comment.authorHandle === myProfile.handle ||
+                                    comment.authorHandle === 'luciano' ||
+                                    post.authorHandle === myProfile.handle ||
+                                    post.authorId === 'usr-luciano') && (
+                                    <button
+                                      type="button"
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: '#f87171',
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px',
+                                        padding: 0,
+                                      }}
+                                      onClick={() => handleDeleteComment(post.id, comment.id)}
+                                      title="Remove comment"
+                                    >
+                                      <IconTrash size={11} />
+                                      <span>Remove</span>
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
 
@@ -2304,6 +2524,33 @@ export function App() {
                                       <span className="thread-time">{reply.timeAgo}</span>
                                     </div>
                                     <div className="thread-content-text">{reply.text}</div>
+                                    {(reply.authorHandle === myProfile.handle ||
+                                      reply.authorHandle === 'luciano' ||
+                                      post.authorHandle === myProfile.handle ||
+                                      post.authorId === 'usr-luciano') && (
+                                      <div style={{ marginTop: '5px' }}>
+                                        <button
+                                          type="button"
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            color: '#f87171',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '3px',
+                                            padding: 0,
+                                          }}
+                                          onClick={() => handleDeleteComment(post.id, comment.id, reply.id)}
+                                          title="Remove reply"
+                                        >
+                                          <IconTrash size={11} />
+                                          <span>Remove</span>
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -2564,11 +2811,20 @@ export function App() {
         {/* --- VIEW 4: DYNAMIC APPLE VISIONOS PROFILE --- */}
         {activeTab === 'profile' && (() => {
           const profile = getUserProfile(viewedUserHandle);
-          const isOwnProfile = profile.handle === 'luciano';
+          const isOwnProfile =
+            profile.handle === 'luciano' ||
+            profile.handle === myProfile.handle ||
+            viewedUserHandle === 'luciano' ||
+            viewedUserHandle === myProfile.handle;
           const isFollowingThisUser = !!followingMap[profile.handle] || !!followingMap[profile.id];
           const isInCloseFriends = closeFriendsList.includes(profile.handle);
           const userDispatches = posts.filter(
-            (p) => p.authorHandle.toLowerCase() === profile.handle.toLowerCase() || (isOwnProfile && p.authorId === 'usr-luciano')
+            (p) =>
+              p.authorHandle.toLowerCase() === profile.handle.toLowerCase() ||
+              (isOwnProfile &&
+                (p.authorId === 'usr-luciano' ||
+                  p.authorHandle.toLowerCase() === 'luciano' ||
+                  p.authorHandle.toLowerCase() === myProfile.handle.toLowerCase()))
           );
 
           return (
@@ -2773,10 +3029,10 @@ export function App() {
                 {/* Real Numerical Stats Bar - Fully Clickable Directories */}
                 {(() => {
                   const dynamicFollowersCount = isOwnProfile
-                    ? (profile.followersList || []).length
-                    : (profile.followersList || []).filter((h) => h !== 'luciano').length + (isFollowingThisUser ? 1 : 0);
+                    ? (myProfile.followersList || profile.followersList || []).length
+                    : (profile.followersList || []).filter((h) => h !== 'luciano' && h !== myProfile.handle).length + (isFollowingThisUser ? 1 : 0);
                   const dynamicFollowingCount = isOwnProfile
-                    ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano').length
+                    ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano' && k !== myProfile.handle).length
                     : (profile.followingList || []).length;
                   const dynamicCirclesCount = isOwnProfile
                     ? closeFriendsList.length
@@ -4142,7 +4398,7 @@ export function App() {
                   {rosterModal.mode === 'likes' ? 'Liked By' : `${rosterModal.targetName}'s ${rosterModal.mode}`}
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  @{rosterModal.targetHandle} · {rosterModal.handles.length} {rosterModal.mode === 'likes' ? 'likes' : rosterModal.mode === 'circle' ? 'circle members' : rosterModal.mode}
+                  @{rosterModal.targetHandle} · Real-time directory
                 </div>
               </div>
               <button className="btn-close-strip" onClick={() => setRosterModal(null)}>
@@ -4152,14 +4408,15 @@ export function App() {
 
             {/* Tab switchers if on followers/following/circle */}
             {rosterModal.mode !== 'likes' && (() => {
-              const p = getUserProfile(rosterModal.targetHandle);
-              const isTargetOwn = rosterModal.targetHandle === 'luciano';
-              const isTargetFollowing = !!followingMap[rosterModal.targetHandle];
+              const cleanTarget = rosterModal.targetHandle.replace(/^@/, '');
+              const p = getUserProfile(cleanTarget);
+              const isTargetOwn = cleanTarget === 'luciano' || cleanTarget === myProfile.handle;
+              const isTargetFollowing = !!followingMap[cleanTarget];
               const followersCount = isTargetOwn
-                ? (p.followersList || []).length
-                : (p.followersList || []).filter((h) => h !== 'luciano').length + (isTargetFollowing ? 1 : 0);
+                ? (myProfile.followersList || p.followersList || []).length
+                : (p.followersList || []).filter((h) => h !== 'luciano' && h !== myProfile.handle).length + (isTargetFollowing ? 1 : 0);
               const followingCount = isTargetOwn
-                ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano').length
+                ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano' && k !== myProfile.handle).length
                 : (p.followingList || []).length;
               const circlesCount = isTargetOwn
                 ? closeFriendsList.length
@@ -4168,18 +4425,21 @@ export function App() {
               return (
                 <div className="roster-tab-strip">
                   <button
+                    type="button"
                     className={`roster-tab-btn ${rosterModal.mode === 'followers' ? 'active' : ''}`}
                     onClick={() => openRoster(rosterModal.targetHandle, rosterModal.targetName, 'followers')}
                   >
                     Followers ({followersCount})
                   </button>
                   <button
+                    type="button"
                     className={`roster-tab-btn ${rosterModal.mode === 'following' ? 'active' : ''}`}
                     onClick={() => openRoster(rosterModal.targetHandle, rosterModal.targetName, 'following')}
                   >
                     Following ({followingCount})
                   </button>
                   <button
+                    type="button"
                     className={`roster-tab-btn ${rosterModal.mode === 'circle' ? 'active' : ''}`}
                     onClick={() => openRoster(rosterModal.targetHandle, rosterModal.targetName, 'circle')}
                   >
@@ -4204,62 +4464,117 @@ export function App() {
             </div>
 
             {/* People List */}
-            <div className="roster-list-scroll">
-              {rosterModal.handles.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  No members found in this roster.
-                </div>
-              ) : (
-                rosterModal.handles
-                  .filter((h) => {
-                    const p = getUserProfile(h);
-                    const q = rosterSearch.toLowerCase();
-                    return (
-                      p.name.toLowerCase().includes(q) ||
-                      p.handle.toLowerCase().includes(q) ||
-                      (p.category && p.category.toLowerCase().includes(q))
-                    );
-                  })
-                  .map((handle) => {
-                    const p = getUserProfile(handle);
-                    const isF = !!followingMap[p.handle];
-                    const isSelf = p.handle === 'luciano';
+            {(() => {
+              const cleanTarget = rosterModal.targetHandle.replace(/^@/, '');
+              const p = getUserProfile(cleanTarget);
+              const isTargetOwn = cleanTarget === 'luciano' || cleanTarget === myProfile.handle;
+              let currentHandles: string[] = [];
 
-                    return (
-                      <div key={p.handle} className="roster-person-card">
-                        <div
-                          className="roster-person-left"
-                          onClick={() => {
-                            setRosterModal(null);
-                            navigateToProfile(p.handle);
-                          }}
-                          title={`Open @${p.handle}'s profile`}
-                        >
-                          <img src={p.avatar} alt={p.name} className="roster-person-avatar" />
-                          <div>
-                            <div className="roster-person-name">
-                              {p.name}
-                              {p.isVerified && <VerifiedBadge authorName={p.name} category={p.verifiedCategory} />}
-                            </div>
-                            <div className="roster-person-handle">@{p.handle}</div>
-                            <div className="roster-person-bio">{p.category || p.bio}</div>
-                          </div>
-                        </div>
+              if (rosterModal.mode === 'likes') {
+                currentHandles = rosterModal.handles;
+              } else if (rosterModal.mode === 'followers') {
+                if (isTargetOwn) {
+                  currentHandles = [...(myProfile.followersList || p.followersList || [])];
+                } else {
+                  const isTargetFollowing = !!followingMap[cleanTarget];
+                  const base = (p.followersList || []).filter((h) => h !== 'luciano' && h !== myProfile.handle);
+                  currentHandles = isTargetFollowing ? [myProfile.handle, ...base] : base;
+                }
+              } else if (rosterModal.mode === 'following') {
+                if (isTargetOwn) {
+                  currentHandles = Object.keys(followingMap).filter(
+                    (k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano' && k !== myProfile.handle
+                  );
+                } else {
+                  currentHandles = [...(p.followingList || [])];
+                }
+              } else if (rosterModal.mode === 'circle') {
+                if (isTargetOwn) {
+                  currentHandles = [...closeFriendsList];
+                } else {
+                  currentHandles = [...(p.trustCirclesList || [])];
+                }
+              }
 
-                        {!isSelf && (
-                          <button
-                            className={`btn-follow-toggle ${isF ? 'following' : ''}`}
-                            style={{ padding: '6px 14px', fontSize: '12px' }}
-                            onClick={() => toggleFollow(p.handle, p.name)}
+              const filteredHandles = currentHandles.filter((h) => {
+                const user = getUserProfile(h);
+                const q = rosterSearch.toLowerCase();
+                return (
+                  user.name.toLowerCase().includes(q) ||
+                  user.handle.toLowerCase().includes(q) ||
+                  (user.category && user.category.toLowerCase().includes(q))
+                );
+              });
+
+              return (
+                <div className="roster-list-scroll">
+                  {filteredHandles.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                      No members found in this roster.
+                    </div>
+                  ) : (
+                    filteredHandles.map((handle) => {
+                      const user = getUserProfile(handle);
+                      const isF = !!followingMap[user.handle];
+                      const isSelf = user.handle === 'luciano' || user.handle === myProfile.handle;
+
+                      return (
+                        <div key={user.handle} className="roster-person-card">
+                          <div
+                            className="roster-person-left"
+                            onClick={() => {
+                              setRosterModal(null);
+                              navigateToProfile(user.handle);
+                            }}
+                            title={`Open @${user.handle}'s profile`}
                           >
-                            {isF ? 'Following' : 'Follow'}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })
-              )}
-            </div>
+                            <img src={user.avatar} alt={user.name} className="roster-person-avatar" />
+                            <div>
+                              <div className="roster-person-name">
+                                {user.name}
+                                {user.isVerified && <VerifiedBadge authorName={user.name} category={user.verifiedCategory} />}
+                              </div>
+                              <div className="roster-person-handle">@{user.handle}</div>
+                              <div className="roster-person-bio">{user.category || user.bio}</div>
+                            </div>
+                          </div>
+
+                          {!isSelf && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <button
+                                type="button"
+                                className={`btn-follow-toggle ${isF ? 'following' : ''}`}
+                                style={{ padding: '6px 14px', fontSize: '12px' }}
+                                onClick={() => toggleFollow(user.handle, user.name)}
+                              >
+                                {isF ? 'Following' : 'Follow'}
+                              </button>
+                              {isTargetOwn && rosterModal.mode === 'followers' && (
+                                <button
+                                  type="button"
+                                  className="btn-glass-back"
+                                  style={{
+                                    padding: '6px 10px',
+                                    fontSize: '11.5px',
+                                    color: '#f87171',
+                                    borderColor: 'rgba(239, 68, 68, 0.3)',
+                                  }}
+                                  onClick={() => handleRemoveFollower(user.handle)}
+                                  title="Remove from your followers"
+                                >
+                                  <IconTrash size={12} />
+                                  <span>Remove</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
