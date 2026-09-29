@@ -47,8 +47,12 @@ import {
   IconPause,
   IconSend,
   IconVideo,
-  IconRadio,
   IconFeedStream,
+  IconGift,
+  IconSwords,
+  IconZap,
+  IconSmile,
+  IconMaximize,
 } from './components/Icons';
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -725,6 +729,51 @@ const INITIAL_PROFILES_REGISTRY: Record<string, UserProfile> = {
 export type FeedFilterTab = 'live' | 'feed' | 'all' | 'close_friends' | 'followers';
 export const FEED_TABS: FeedFilterTab[] = ['live', 'feed', 'all', 'close_friends', 'followers'];
 
+export interface LiveGuestSlot {
+  id: string;
+  name: string;
+  avatar: string;
+  viewers: string;
+  isMuted?: boolean;
+  isSpeaking?: boolean;
+  role?: string;
+  tag?: string;
+  flag?: string;
+}
+
+export interface LiveBattleInfo {
+  opponentName: string;
+  opponentHandle: string;
+  opponentAvatar: string;
+  opponentVideoUrl: string;
+  coHostName?: string;
+  coHostVideoUrl?: string;
+  hostScore: number;
+  opponentScore: number;
+  timeLeft: string;
+  isMatchActive: boolean;
+  matchTitle: string;
+}
+
+export interface LiveGiftItem {
+  id: string;
+  name: string;
+  icon: string;
+  sparksCost: number;
+  effect: string;
+  color: string;
+  tag: string;
+}
+
+export const LIVE_GIFTS_CATALOG: LiveGiftItem[] = [
+  { id: 'gift-rose', name: 'Privity Rose', icon: '🌹', sparksCost: 1, effect: 'rose_burst', color: '#f43f5e', tag: 'Fast' },
+  { id: 'gift-diamond', name: 'Sovereign Gem', icon: '💎', sparksCost: 10, effect: 'gem_shimmer', color: '#38bdf8', tag: 'VIP' },
+  { id: 'gift-rocket', name: 'Falcon Rocket', icon: '🚀', sparksCost: 50, effect: 'rocket_launch', color: '#f97316', tag: 'Hype' },
+  { id: 'gift-crown', name: 'Visionary Crown', icon: '👑', sparksCost: 100, effect: 'crown_rain', color: '#fbbf24', tag: 'Luxury' },
+  { id: 'gift-orbit', name: 'Galactic Orbit', icon: '🪐', sparksCost: 500, effect: 'orbit_supernova', color: '#a855f7', tag: 'Epic' },
+  { id: 'gift-quantum', name: 'Quantum Key', icon: '⚡', sparksCost: 1000, effect: 'quantum_laser', color: '#10b981', tag: 'Mythic' },
+];
+
 export interface LiveStreamSession {
   id: string;
   creatorHandle: string;
@@ -735,7 +784,11 @@ export interface LiveStreamSession {
   title: string;
   description: string;
   viewersCount: number;
+  likesCount: number;
+  dailyRank: string;
   previewUrl: string;
+  battleInfo: LiveBattleInfo;
+  multiGuests: LiveGuestSlot[];
   participants: Array<{ name: string; avatar: string; role: string }>;
   tags: string[];
 }
@@ -748,16 +801,42 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
     creatorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
     isVerified: true,
     category: 'System Architect',
-    title: 'Architecting Real-Time P2P Mesh Networks & Privacy Ledgers',
-    description: 'Deep dive into zero-latency WebSocket ratchet protocols and local-first decentralized feeds without algorithmic intermediaries.',
-    viewersCount: 1420,
-    previewUrl: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800',
+    title: 'Live Battle Match · Mesh Protocol Defense vs Sybil Attacks',
+    description: 'Real-time interactive live battle! Cheer with gifts and boost the sovereign cryptographic ledger.',
+    viewersCount: 1840,
+    likesCount: 14820,
+    dailyRank: '🔥 Daily Ranking #2',
+    previewUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
+    battleInfo: {
+      opponentName: 'Marcus Vance',
+      opponentHandle: 'marcus_dev',
+      opponentAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+      opponentVideoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
+      coHostName: 'Julian Thorne',
+      coHostVideoUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
+      hostScore: 3840,
+      opponentScore: 3260,
+      timeLeft: '02:45',
+      isMatchActive: true,
+      matchTitle: 'LIVE PK Battle · Speed Round',
+    },
+    multiGuests: [
+      { id: 'g1', name: 'Elena R.', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', viewers: 'Host', isSpeaking: true, role: 'Host', flag: '👑' },
+      { id: 'g2', name: 'Marcus', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', viewers: '2.71K', isSpeaking: false, flag: '💎' },
+      { id: 'g3', name: 'Julian', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', viewers: '840', isSpeaking: false, flag: '⭐' },
+      { id: 'g4', name: 'Chloe V.', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', viewers: '445', isSpeaking: true, flag: '✨' },
+      { id: 'g5', name: 'Sara Lin', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150', viewers: '310', isSpeaking: false, flag: '🔥' },
+      { id: 'g6', name: 'Alex M.', avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150', viewers: '190', isSpeaking: false, flag: '🚀' },
+      { id: 'g7', name: 'Linda K.', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150', viewers: '95', isSpeaking: false, flag: '🌸' },
+      { id: 'g8', name: 'Daniel B.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150', viewers: '148', isSpeaking: false, flag: '⚡' },
+      { id: 'g9', name: 'Take Seat', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150', viewers: 'Open', isMuted: true, role: 'Join' },
+    ],
     participants: [
-      { name: 'Marcus Vance', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', role: 'Speaker' },
+      { name: 'Marcus Vance', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', role: 'Opponent' },
       { name: 'Julian Thorne', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', role: 'Co-Host' },
       { name: 'Sara Lin', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', role: 'Listener' },
     ],
-    tags: ['Architecture', 'P2P', 'Privacy', 'WebRTC'],
+    tags: ['Battle', 'PKMatch', 'P2P', 'WebRTC'],
   },
   {
     id: 'live-marcus-2',
@@ -766,10 +845,29 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
     creatorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
     isVerified: true,
     category: 'Security Lead',
-    title: 'Live Ed25519 Cryptographic Key Exchange & Proof Auditing',
+    title: 'Live Ed25519 Cryptographic Proof Auditing & Key Battles',
     description: 'Demonstrating how Privity verifies post identity and prevents sybil spam with zero personal data leakage.',
-    viewersCount: 894,
-    previewUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800',
+    viewersCount: 1120,
+    likesCount: 9840,
+    dailyRank: '🔥 Daily Ranking #4',
+    previewUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
+    battleInfo: {
+      opponentName: 'Elena Rodriguez',
+      opponentHandle: 'elena_rodriguez',
+      opponentAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+      opponentVideoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
+      hostScore: 2940,
+      opponentScore: 3100,
+      timeLeft: '01:50',
+      isMatchActive: true,
+      matchTitle: 'LIVE PK Battle · Key Challenge',
+    },
+    multiGuests: [
+      { id: 'mg1', name: 'Marcus', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', viewers: 'Host', isSpeaking: true, role: 'Host', flag: '👑' },
+      { id: 'mg2', name: 'Elena', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', viewers: '1.8K', isSpeaking: false, flag: '💎' },
+      { id: 'mg3', name: 'Sara', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150', viewers: '420', isSpeaking: false, flag: '⭐' },
+      { id: 'mg4', name: 'Julian', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', viewers: '380', isSpeaking: false, flag: '✨' },
+    ],
     participants: [
       { name: 'Elena Rodriguez', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', role: 'Speaker' },
     ],
@@ -785,7 +883,21 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
     title: 'Tokyo Rain & Neon: 35mm Live Photowalk & Darkroom Notes',
     description: 'Walking through Shinjuku with a Leica M6, sharing live analog grain framing techniques.',
     viewersCount: 632,
-    previewUrl: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800',
+    likesCount: 6320,
+    dailyRank: '⭐ Spotlight #7',
+    previewUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
+    battleInfo: {
+      opponentName: 'Chloe Vance',
+      opponentHandle: 'chloe_visuals',
+      opponentAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
+      opponentVideoUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=900',
+      hostScore: 1980,
+      opponentScore: 1850,
+      timeLeft: '03:10',
+      isMatchActive: true,
+      matchTitle: 'Visuals vs Audio Battle',
+    },
+    multiGuests: [],
     participants: [
       { name: 'Chloe Vance', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150', role: 'Listener' },
     ],
@@ -800,8 +912,22 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
     category: 'Sound Artist',
     title: 'Modular Synthesizer & Ambient Sound Lab Live',
     description: 'Generative patches on Eurorack, exploring spatial audio fields and analog warmth.',
-    viewersCount: 418,
-    previewUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800',
+    viewersCount: 520,
+    likesCount: 4890,
+    dailyRank: '🎵 Music Spotlight',
+    previewUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900',
+    battleInfo: {
+      opponentName: 'Julian Thorne',
+      opponentHandle: 'julian_analogue',
+      opponentAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
+      opponentVideoUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
+      hostScore: 2150,
+      opponentScore: 2300,
+      timeLeft: '02:00',
+      isMatchActive: true,
+      matchTitle: 'Sound vs Light Duel',
+    },
+    multiGuests: [],
     participants: [],
     tags: ['Ambient', 'Modular', 'SoundDesign'],
   },
@@ -1174,16 +1300,60 @@ export function App() {
     readStorage('privity_active_tab_v5', 'feed')
   );
   const [feedFilter, setFeedFilter] = useState<FeedFilterTab>('feed');
-  const [liveStreamsList] = useState<LiveStreamSession[]>(INITIAL_LIVE_STREAMS);
+  const [liveStreamsList, setLiveStreamsList] = useState<LiveStreamSession[]>(INITIAL_LIVE_STREAMS);
+  const [activeLiveIndex, setActiveLiveIndex] = useState(0);
+  const [liveLayoutMode, setLiveLayoutMode] = useState<'battle' | 'multiguest' | 'solo'>('battle');
+  const [isGiftTrayOpen, setIsGiftTrayOpen] = useState(false);
+  const [selectedGiftId, setSelectedGiftId] = useState<string>('gift-rocket');
+  const [userSparksBalance, setUserSparksBalance] = useState(2450);
+  const [activeGiftBanner, setActiveGiftBanner] = useState<{ id: string; sender: string; giftName: string; giftIcon: string; count: number; creatorName: string } | null>(null);
+  const [battleScoreHost, setBattleScoreHost] = useState(3840);
+  const [battleScoreOpponent, setBattleScoreOpponent] = useState(3260);
+  const [battleTimeSeconds, setBattleTimeSeconds] = useState(165);
+  const [isBattleMatchActive, setIsBattleMatchActive] = useState(true);
+  const [followedCreators, setFollowedCreators] = useState<Record<string, boolean>>({
+    elena_rodriguez: false,
+    marcus_dev: true,
+  });
+  const [hostLiveLikes, setHostLiveLikes] = useState<Record<string, number>>({
+    'live-elena-1': 14820,
+    'live-marcus-2': 9840,
+    'live-julian-3': 6320,
+    'live-chloe-4': 4890,
+  });
+  const [fullScreenLive, setFullScreenLive] = useState(false);
   const [activeLiveStream, setActiveLiveStream] = useState<LiveStreamSession | null>(null);
   const [liveChatInput, setLiveChatInput] = useState('');
-  const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; time: string }>>([
-    { id: '1', user: 'marcus_dev', text: 'Latency is under 12ms across peers! 🔥', time: 'now' },
-    { id: '2', user: 'julian_analogue', text: 'The clarity on this live feed is unreal.', time: 'now' },
-    { id: '3', user: 'sara_lin', text: 'Verified Ed25519 signature checked out clean.', time: 'now' },
+  const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; badge?: string; level?: number; isHost?: boolean; isJoin?: boolean; giftName?: string; giftIcon?: string }>>([
+    { id: '1', user: 'Carlos', text: 'became the No. 19 fan in the Fan Club ⭐', isJoin: true },
+    { id: '2', user: 'TRIPLE', text: 'pretty clean audio compression 🔥', badge: 'VIP', level: 26 },
+    { id: '3', user: 'ELIKS', text: 'Oho where is old Elena?', badge: 'Top', level: 10 },
+    { id: '4', user: 'mlChAEL', text: 'joined the live', isJoin: true, level: 4 },
+    { id: '5', user: 'marcus_dev', text: 'Keep throwing roses for the speed boost! 🥊', isHost: false, level: 29 },
   ]);
-  const [floatingHearts, setFloatingHearts] = useState<Array<{ id: number; left: number }>>([]);
+  const [floatingHearts, setFloatingHearts] = useState<Array<{ id: number; left: number; color: string; size: number }>>([]);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+
+  // Live Battle Timer Countdown & Dynamic Opponent Simulation
+  useEffect(() => {
+    if (!isBattleMatchActive) return;
+    const interval = setInterval(() => {
+      setBattleTimeSeconds((prev) => (prev <= 1 ? 180 : prev - 1));
+
+      // Occasional random opponent battle cheer
+      if (Math.random() < 0.28) {
+        const delta = Math.floor(Math.random() * 35) + 12;
+        setBattleScoreOpponent((prev) => prev + delta);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isBattleMatchActive]);
+
+  const formatBattleTime = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   // Real-Time Photo Likes Registry (synchronizes lightbox, posts, and profile media items)
   const [photoLikesMap, setPhotoLikesMap] = useState<Record<string, { isLiked: boolean; count: number }>>(() =>
@@ -2417,15 +2587,83 @@ export function App() {
     processFeedSwipeDelta(deltaX, deltaY);
   };
 
-  const handleLiveHeartBurst = () => {
+  const handleLiveHeartBurst = (customColor?: string) => {
+    const currentStream = liveStreamsList[activeLiveIndex] || liveStreamsList[0];
+    setHostLiveLikes((prev) => ({
+      ...prev,
+      [currentStream.id]: (prev[currentStream.id] || 14820) + 1,
+    }));
+
+    const colors = ['#f43f5e', '#ec4899', '#8b5cf6', '#06b6d4', '#e11d48', '#f59e0b', '#10b981'];
+    const chosen = customColor || colors[Math.floor(Math.random() * colors.length)];
     const newHeart = {
       id: Date.now() + Math.random(),
-      left: 65 + Math.floor(Math.random() * 25),
+      left: 68 + Math.floor(Math.random() * 24),
+      color: chosen,
+      size: 22 + Math.floor(Math.random() * 16),
     };
     setFloatingHearts((prev) => [...prev, newHeart]);
     setTimeout(() => {
       setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
-    }, 1800);
+    }, 1900);
+  };
+
+  const handleThrowGift = (gift: LiveGiftItem) => {
+    if (userSparksBalance < gift.sparksCost) {
+      triggerToast(`Insufficient Sparks! Need ${gift.sparksCost} Sparks.`);
+      return;
+    }
+    setUserSparksBalance((prev) => prev - gift.sparksCost);
+    setIsGiftTrayOpen(false);
+
+    // Boost Host's Battle Points
+    const pts = gift.sparksCost * 15;
+    setBattleScoreHost((prev) => prev + pts);
+
+    const currentStream = liveStreamsList[activeLiveIndex] || liveStreamsList[0];
+    const banner = {
+      id: String(Date.now()),
+      sender: myProfile.name,
+      giftName: gift.name,
+      giftIcon: gift.icon,
+      count: 1,
+      creatorName: currentStream.creatorName,
+    };
+    setActiveGiftBanner(banner);
+    setTimeout(() => {
+      setActiveGiftBanner(null);
+    }, 3400);
+
+    // Append gift comment in live chat
+    setLiveComments((prev) => [
+      ...prev,
+      {
+        id: String(Date.now()),
+        user: myProfile.handle,
+        text: `sent ${gift.name} ${gift.icon} (+${pts} pts)!`,
+        badge: 'Top Gifter',
+        level: 30,
+        giftName: gift.name,
+        giftIcon: gift.icon,
+      },
+    ]);
+
+    // Burst hearts with gift color
+    for (let i = 0; i < 6; i++) {
+      setTimeout(() => handleLiveHeartBurst(gift.color), i * 110);
+    }
+
+    triggerToast(`Sent ${gift.name} ${gift.icon} (+${pts} battle pts)!`);
+  };
+
+  const handleQuickRose = () => {
+    handleThrowGift(LIVE_GIFTS_CATALOG[0]);
+  };
+
+  const handleToggleFollowLiveHost = (creatorHandle: string) => {
+    const isNow = !followedCreators[creatorHandle];
+    setFollowedCreators((prev) => ({ ...prev, [creatorHandle]: isNow }));
+    triggerToast(isNow ? `✓ You are now following @${creatorHandle} live!` : `Unfollowed @${creatorHandle}`);
   };
 
   const handleSendLiveComment = (e?: React.FormEvent) => {
@@ -2435,7 +2673,8 @@ export function App() {
       id: String(Date.now()),
       user: myProfile.handle,
       text: liveChatInput.trim(),
-      time: 'now',
+      level: 25,
+      badge: 'VIP',
     };
     setLiveComments((prev) => [...prev, newEntry]);
     setLiveChatInput('');
@@ -2453,11 +2692,27 @@ export function App() {
       title: 'Decentralized Live Broadcast · Sovereign Node',
       description: 'Streaming live directly to authorized circles with local encryption keys.',
       viewersCount: 1,
-      previewUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800',
+      likesCount: 1,
+      dailyRank: '🔥 Genesis Host',
+      previewUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
+      battleInfo: {
+        opponentName: 'Marcus Vance',
+        opponentHandle: 'marcus_dev',
+        opponentAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+        opponentVideoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
+        hostScore: 100,
+        opponentScore: 50,
+        timeLeft: '03:00',
+        isMatchActive: true,
+        matchTitle: 'Genesis PK Match',
+      },
+      multiGuests: [],
       participants: [{ name: myProfile.name, avatar: myProfile.avatar, role: 'Host' }],
       tags: ['Live', 'P2P', 'Privity'],
     };
-    setActiveLiveStream(userStream);
+    setLiveStreamsList((prev) => [userStream, ...prev]);
+    setActiveLiveIndex(0);
+    setFeedFilter('live');
     triggerToast('Broadcast initialized: Live on P2P mesh network');
   };
 
@@ -4212,110 +4467,463 @@ export function App() {
               </div>
             </header>
 
-            {/* LIVE BROADCASTS STAGE WHEN LIVE TAB IS SELECTED */}
-            {feedFilter === 'live' ? (
-              <div className="live-broadcasts-stage">
-                {/* Live Hero Header */}
-                <div className="live-stage-hero-banner">
-                  <div className="live-stage-hero-left">
-                    <div className="live-pill-active">
-                      <span className="live-radar-ping"></span>
-                      <span className="live-radar-core"></span>
-                      <span>ENCRYPTED P2P MESH</span>
+            {/* LIVE BROADCASTS FULL-SCREEN ARENA WHEN LIVE TAB IS SELECTED */}
+            {feedFilter === 'live' ? (() => {
+              const currentLive = liveStreamsList[activeLiveIndex] || liveStreamsList[0];
+              const isFollowing = !!followedCreators[currentLive.creatorHandle];
+              const currentLikes = (hostLiveLikes[currentLive.id] || currentLive.likesCount);
+              const battleTotal = battleScoreHost + battleScoreOpponent;
+              const hostPct = battleTotal > 0 ? Math.min(88, Math.max(12, (battleScoreHost / battleTotal) * 100)) : 50;
+
+              return (
+                <div className={`fullscreen-live-arena ${fullScreenLive ? 'expanded-fullscreen' : ''}`}>
+                  {/* STREAM SWITCHER QUICK PILLS BAR */}
+                  <div className="live-stream-switcher-row">
+                    <div className="live-stream-switcher-label">
+                      <span className="live-radar-core small"></span>
+                      <span>ACTIVE FEEDS:</span>
                     </div>
-                    <h2 className="live-stage-title">Decentralized Live Broadcasts</h2>
-                    <p className="live-stage-subtitle">
-                      Zero-latency WebRTC streams with cryptographic identity verification and peer-to-peer circle encryption.
-                    </p>
-                  </div>
-                  <div className="live-stage-hero-right">
+                    <div className="live-stream-pills-list">
+                      {liveStreamsList.map((stream, idx) => (
+                        <button
+                          key={stream.id}
+                          type="button"
+                          className={`live-switcher-pill ${activeLiveIndex === idx ? 'active' : ''}`}
+                          onClick={() => {
+                            setActiveLiveIndex(idx);
+                            setBattleScoreHost(stream.battleInfo.hostScore);
+                            setBattleScoreOpponent(stream.battleInfo.opponentScore);
+                          }}
+                        >
+                          <img src={stream.creatorAvatar} alt={stream.creatorName} className="live-switcher-avatar" />
+                          <span>{stream.creatorName.split(' ')[0]}</span>
+                          <span className="live-switcher-viewers">{stream.viewersCount}</span>
+                        </button>
+                      ))}
+                    </div>
                     <button
                       type="button"
-                      className="btn-go-live-studio"
+                      className="live-go-live-quick-btn"
                       onClick={handleStartGoLive}
-                      title="Launch your own encrypted live broadcast"
+                      title="Broadcast Live Now"
                     >
-                      <IconRadio size={16} />
-                      <span>Go Live Studio</span>
+                      + Go Live
                     </button>
                   </div>
-                </div>
 
-                {/* Live Streams Cards Grid */}
-                <div className="live-streams-grid">
-                  {liveStreamsList.map((stream) => (
-                    <article
-                      key={stream.id}
-                      className="live-stream-card"
-                      onClick={() => setActiveLiveStream(stream)}
-                      title={`Tune in to ${stream.creatorName}'s live broadcast`}
-                    >
-                      <div className="live-stream-preview-box">
-                        <img src={stream.previewUrl} alt={stream.title} className="live-stream-preview-img" />
-                        <div className="live-stream-badge-row">
-                          <span className="live-badge-red">
-                            <span className="live-radar-core small"></span>
-                            LIVE
-                          </span>
-                          <span className="live-viewers-tag">
-                            <IconUser size={11} /> {stream.viewersCount.toLocaleString()}
-                          </span>
+                  {/* MAIN LIVE VIDEO VIEWPORT */}
+                  <div className="live-feed-viewport" onDoubleClick={() => handleLiveHeartBurst()}>
+                    {/* 1. TOP LIVE HEADER (OVERLAY) */}
+                    <div className="live-arena-top-bar">
+                      <div className="live-arena-host-pill">
+                        <div className="live-host-avatar-ring">
+                          <img
+                            src={currentLive.creatorAvatar}
+                            alt={currentLive.creatorName}
+                            className="live-host-avatar-img"
+                            onClick={() => navigateToProfile(currentLive.creatorHandle)}
+                          />
                         </div>
-                        <span className="live-category-chip">{stream.category}</span>
-                        <div className="live-stream-play-hint">
-                          <div className="live-play-btn-circle">
-                            <IconPlay size={18} />
+                        <div className="live-host-info" onClick={() => navigateToProfile(currentLive.creatorHandle)}>
+                          <div className="live-host-name-row">
+                            <span className="live-host-name">{currentLive.creatorName}</span>
+                            {currentLive.isVerified && <IconVerifiedStar size={12} />}
                           </div>
-                        </div>
-                      </div>
-
-                      <div className="live-stream-card-body">
-                        <div className="live-stream-card-author-line">
-                          <img src={stream.creatorAvatar} alt={stream.creatorName} className="live-stream-author-img" />
-                          <div className="live-stream-card-author-meta">
-                            <div className="live-stream-author-name">
-                              <span>{stream.creatorName}</span>
-                              {stream.isVerified && <IconVerifiedStar size={12} />}
-                            </div>
-                            <span className="live-stream-author-handle">@{stream.creatorHandle}</span>
+                          <div className="live-host-likes">
+                            ♥ {currentLikes.toLocaleString()}
                           </div>
-                        </div>
-
-                        <h3 className="live-stream-card-title">{stream.title}</h3>
-                        <p className="live-stream-card-desc">{stream.description}</p>
-
-                        <div className="live-stream-card-footer">
-                          <div className="live-stream-tags-list">
-                            {stream.tags.slice(0, 3).map((tag) => (
-                              <span key={tag} className="live-stream-tag-pill">#{tag}</span>
-                            ))}
-                          </div>
-                          {stream.participants.length > 0 && (
-                            <div className="live-stream-facepile" title={`Co-hosts: ${stream.participants.map((p) => p.name).join(', ')}`}>
-                              {stream.participants.slice(0, 3).map((p, i) => (
-                                <img key={i} src={p.avatar} alt={p.name} className="live-facepile-avatar" />
-                              ))}
-                            </div>
-                          )}
                         </div>
 
                         <button
                           type="button"
-                          className="btn-join-stream"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveLiveStream(stream);
-                          }}
+                          className={`live-follow-action-btn ${isFollowing ? 'following' : ''}`}
+                          onClick={() => handleToggleFollowLiveHost(currentLive.creatorHandle)}
                         >
-                          <span>Join Live Stream</span>
-                          <IconRadio size={14} />
+                          {isFollowing ? '✓' : '+ Follow'}
                         </button>
                       </div>
-                    </article>
-                  ))}
+
+                      <div className="live-arena-top-right">
+                        {/* Top Gifters Facepile */}
+                        <div className="live-top-gifters-pile">
+                          <div className="live-gifter-slot rank-1" title="Top Gifter #1">
+                            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100" alt="Gifter 1" />
+                            <span className="gifter-rank-tag">1</span>
+                          </div>
+                          <div className="live-gifter-slot rank-2" title="Top Gifter #2">
+                            <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100" alt="Gifter 2" />
+                            <span className="gifter-rank-tag">2</span>
+                          </div>
+                        </div>
+
+                        <div className="live-viewers-count-pill">
+                          <IconUser size={12} />
+                          <span>{currentLive.viewersCount.toLocaleString()}</span>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="live-fullscreen-toggle-btn"
+                          onClick={() => setFullScreenLive((prev) => !prev)}
+                          title={fullScreenLive ? "Exit Fullscreen" : "Go Fullscreen"}
+                        >
+                          <IconMaximize size={16} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* SUB-HEADER: RANKING & Sparks */}
+                    <div className="live-arena-sub-bar">
+                      <div className="live-ranking-badge">
+                        <span>{currentLive.dailyRank}</span>
+                      </div>
+                      <div className="live-sparks-balance-chip" onClick={() => setIsGiftTrayOpen(true)}>
+                        <IconZap size={12} color="#f59e0b" />
+                        <span>{userSparksBalance.toLocaleString()} Sparks</span>
+                      </div>
+                      <div className="live-mode-toggle-group">
+                        <button
+                          type="button"
+                          className={`live-mode-chip ${liveLayoutMode === 'battle' ? 'active' : ''}`}
+                          onClick={() => setLiveLayoutMode('battle')}
+                          title="Switch to 1v1 Battle PK Mode"
+                        >
+                          <IconSwords size={12} />
+                          <span>Battle</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`live-mode-chip ${liveLayoutMode === 'multiguest' ? 'active' : ''}`}
+                          onClick={() => setLiveLayoutMode('multiguest')}
+                          title="Switch to 9-Box Multi-Guest Panel"
+                        >
+                          <IconUsers size={12} />
+                          <span>9-Guest</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`live-mode-chip ${liveLayoutMode === 'solo' ? 'active' : ''}`}
+                          onClick={() => setLiveLayoutMode('solo')}
+                          title="Switch to Solo Live View"
+                        >
+                          <IconUser size={12} />
+                          <span>Solo</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 2. BATTLE PK PROGRESS TUG-OF-WAR BAR (WHEN BATTLE MODE) */}
+                    {liveLayoutMode === 'battle' && (
+                      <div className="live-battle-score-bar-shell">
+                        <div className="live-battle-scores-row">
+                          <div className="live-battle-host-score">
+                            <span className="live-battle-rank-badge host">1st</span>
+                            <span className="live-battle-pts">{battleScoreHost.toLocaleString()} pts</span>
+                          </div>
+
+                          <div
+                            className="live-battle-center-tag"
+                            onClick={() => setIsBattleMatchActive((prev) => !prev)}
+                            style={{ cursor: 'pointer' }}
+                            title={isBattleMatchActive ? 'Click to Pause Battle' : 'Click to Resume Battle'}
+                          >
+                            <span className="live-battle-pk-icon">{isBattleMatchActive ? '🥊 LIVE PK' : '⏸️ PAUSED'}</span>
+                            <span className="live-battle-countdown">⏱️ {formatBattleTime(battleTimeSeconds)}</span>
+                          </div>
+
+                          <div className="live-battle-opponent-score">
+                            <span className="live-battle-pts">{battleScoreOpponent.toLocaleString()} pts</span>
+                            <span className="live-battle-rank-badge opponent">2nd</span>
+                          </div>
+                        </div>
+
+                        {/* Animated Tug-of-war Bar */}
+                        <div className="live-battle-tug-bar">
+                          <div
+                            className="live-battle-bar-host"
+                            style={{ width: `${hostPct}%` }}
+                          ></div>
+                          <div className="live-battle-divider-spark"></div>
+                          <div
+                            className="live-battle-bar-opponent"
+                            style={{ width: `${100 - hostPct}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. DYNAMIC STAGE CONTENT ACCORDING TO MODE */}
+                    <div className="live-stage-surface">
+                      {/* --- A. BATTLE PK SPLIT-SCREEN LAYOUT --- */}
+                      {liveLayoutMode === 'battle' && (
+                        <div className="battle-split-stage">
+                          {/* Left Panel: Host Creator */}
+                          <div className="battle-panel host-side">
+                            <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="battle-camera-feed" />
+                            <div className="battle-cam-overlay-gradient"></div>
+                            <div className="battle-cam-badge-top">
+                              <span className="battle-side-tag host">HOST · 1st</span>
+                              <span className="battle-audio-wave"><span /><span /><span /></span>
+                            </div>
+                            <div className="battle-cam-footer">
+                              <span className="battle-creator-label">@{currentLive.creatorHandle}</span>
+                            </div>
+                          </div>
+
+                          {/* Right Panel: Opponent / Co-Hosts */}
+                          <div className="battle-panel opponent-side">
+                            <div className="battle-opponent-main">
+                              <img src={currentLive.battleInfo.opponentVideoUrl} alt={currentLive.battleInfo.opponentName} className="battle-camera-feed" />
+                              <div className="battle-cam-overlay-gradient"></div>
+                              <div className="battle-cam-badge-top">
+                                <span className="battle-side-tag opponent">RIVAL · 2nd</span>
+                              </div>
+                              <div className="battle-cam-footer">
+                                <span className="battle-creator-label">@{currentLive.battleInfo.opponentHandle}</span>
+                              </div>
+                            </div>
+
+                            {/* 3-Way Co-Host Panel if available */}
+                            {currentLive.battleInfo.coHostVideoUrl && (
+                              <div className="battle-opponent-sub">
+                                <img src={currentLive.battleInfo.coHostVideoUrl} alt="Co-Host" className="battle-camera-feed" />
+                                <div className="battle-cam-overlay-gradient"></div>
+                                <div className="battle-cam-badge-top">
+                                  <span className="battle-side-tag cohost">3rd</span>
+                                </div>
+                                <div className="battle-cam-footer">
+                                  <span className="battle-creator-label">@{currentLive.battleInfo.coHostName}</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* --- B. 9-GUEST BOXES MULTI-ROOM LAYOUT --- */}
+                      {liveLayoutMode === 'multiguest' && (
+                        <div className="multiguest-9box-grid">
+                          {currentLive.multiGuests.map((guest) => (
+                            <div
+                              key={guest.id}
+                              className={`guest-box-cell ${guest.role === 'Host' ? 'is-host' : ''} ${guest.role === 'Join' ? 'is-empty-chair' : ''}`}
+                              onClick={() => {
+                                if (guest.role === 'Join') {
+                                  triggerToast('Requested to take guest chair in this live mesh room! 💺');
+                                }
+                              }}
+                            >
+                              <div className="guest-box-avatar-wrap">
+                                <img src={guest.avatar} alt={guest.name} className="guest-box-img" />
+                                {guest.isSpeaking && <div className="guest-speaking-ring"></div>}
+                              </div>
+                              <div className="guest-box-meta">
+                                <span className="guest-box-name">{guest.flag || ''} {guest.name}</span>
+                                <span className="guest-box-viewers">{guest.viewers}</span>
+                              </div>
+                              {guest.role === 'Join' && (
+                                <div className="guest-join-hover-badge">+ Take Seat</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* --- C. SOLO CREATOR FULLSCREEN LAYOUT --- */}
+                      {liveLayoutMode === 'solo' && (
+                        <div className="solo-creator-stage">
+                          <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="solo-camera-feed" />
+                          <div className="solo-cam-overlay-gradient"></div>
+                          <div className="solo-stage-topic-card">
+                            <h3 className="solo-stage-title">{currentLive.title}</h3>
+                            <div className="solo-stage-tags">
+                              {currentLive.tags.map((t) => (
+                                <span key={t} className="solo-tag-pill">#{t}</span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 4. ACTIVE GIFT BANNER POPUP ANIMATION (TOP/CENTER) */}
+                    {activeGiftBanner && (
+                      <div className="live-active-gift-banner-flyin">
+                        <div className="gift-banner-avatar-wrap">
+                          <img src={myProfile.avatar} alt="Sender" className="gift-banner-sender-pic" />
+                        </div>
+                        <div className="gift-banner-text-wrap">
+                          <div className="gift-banner-sender-name">
+                            {activeGiftBanner.sender} <span className="gift-banner-sent-to">sent {activeGiftBanner.creatorName}</span>
+                          </div>
+                          <div className="gift-banner-gift-line">
+                            <span className="gift-banner-gift-name">{activeGiftBanner.giftName}</span>
+                            <span className="gift-banner-gift-icon">{activeGiftBanner.giftIcon}</span>
+                            <span className="gift-banner-gift-count">x {activeGiftBanner.count}</span>
+                          </div>
+                        </div>
+                        <div className="gift-banner-sparks-badge">+Boosted</div>
+                      </div>
+                    )}
+
+                    {/* 5. FLOATING HEARTS ANIMATION LAYER */}
+                    <div className="live-arena-floating-hearts-layer" onClick={() => handleLiveHeartBurst()}>
+                      {floatingHearts.map((heart) => (
+                        <div
+                          key={heart.id}
+                          className="floating-heart-particle"
+                          style={{
+                            left: `${heart.left}%`,
+                            color: heart.color || '#f43f5e',
+                            fontSize: `${heart.size || 26}px`,
+                          }}
+                        >
+                          ♥
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 6. TRANSPARENT OVERLAY LIVE CHAT STREAM */}
+                    <div className="live-arena-chat-overlay">
+                      <div className="live-arena-chat-scroll">
+                        {liveComments.map((c) => (
+                          <div
+                            key={c.id}
+                            className={`live-chat-bubble-row ${c.isJoin ? 'join-notice' : ''} ${c.giftName ? 'gift-notice' : ''}`}
+                          >
+                            {c.level && (
+                              <span className="live-chat-badge-diamond">
+                                💎 {c.level}
+                              </span>
+                            )}
+                            {c.badge && <span className="live-chat-badge-tag">{c.badge}</span>}
+                            <span className="live-chat-author-handle">@{c.user}</span>
+                            <span className="live-chat-bubble-text">{c.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 7. FLOATING BOTTOM ACTION CONTROLS BAR */}
+                    <div className="live-arena-bottom-controls-bar">
+                      <form onSubmit={handleSendLiveComment} className="live-comment-input-pill">
+                        <input
+                          type="text"
+                          className="live-comment-input-field"
+                          placeholder="Type a thoughtful comment..."
+                          value={liveChatInput}
+                          onChange={(e) => setLiveChatInput(e.target.value)}
+                        />
+                        <button
+                          type="submit"
+                          className="btn-live-send-comment"
+                          disabled={!liveChatInput.trim()}
+                          title="Send Comment"
+                        >
+                          <IconSend size={15} />
+                        </button>
+                      </form>
+
+                      <button
+                        type="button"
+                        className="live-action-icon-circle"
+                        onClick={() => handleLiveHeartBurst('#fbbf24')}
+                        title="Cheer with Emote"
+                      >
+                        <IconSmile size={18} />
+                      </button>
+
+                      <button
+                        type="button"
+                        className="live-action-icon-circle quick-rose"
+                        onClick={handleQuickRose}
+                        title="Throw Privity Rose (1 Spark)"
+                      >
+                        <span className="live-rose-emoji">🌹</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="live-action-icon-circle gift-box"
+                        onClick={() => setIsGiftTrayOpen(true)}
+                        title="Open Gift Gallery"
+                      >
+                        <IconGift size={19} color="#fff" />
+                        <span className="gift-btn-glow"></span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="live-action-icon-circle"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(window.location.href);
+                          triggerToast('Live stream link copied to clipboard! 🔗');
+                        }}
+                        title="Share Live Stream"
+                      >
+                        <IconShare size={17} />
+                      </button>
+                    </div>
+
+                    {/* 8. FROSTED GLASS GIFT TRAY DRAWER */}
+                    {isGiftTrayOpen && (
+                      <div className="live-gift-tray-backdrop" onClick={() => setIsGiftTrayOpen(false)}>
+                        <div className="live-gift-tray-sheet" onClick={(e) => e.stopPropagation()}>
+                          <div className="gift-tray-header">
+                            <div className="gift-tray-title-row">
+                              <span className="gift-tray-title">Gift Gallery & Battle Boosters</span>
+                              <div className="gift-tray-balance-pill">
+                                <IconZap size={13} color="#f59e0b" />
+                                <span>{userSparksBalance.toLocaleString()} Sparks</span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="gift-tray-close-btn"
+                              onClick={() => setIsGiftTrayOpen(false)}
+                            >
+                              <IconX size={16} />
+                            </button>
+                          </div>
+
+                          <div className="gift-tray-grid">
+                            {LIVE_GIFTS_CATALOG.map((gift) => (
+                              <div
+                                key={gift.id}
+                                className={`gift-tray-card ${selectedGiftId === gift.id ? 'selected' : ''}`}
+                                onClick={() => setSelectedGiftId(gift.id)}
+                              >
+                                <span className="gift-tray-tag">{gift.tag}</span>
+                                <div className="gift-tray-icon-box">{gift.icon}</div>
+                                <span className="gift-tray-name">{gift.name}</span>
+                                <div className="gift-tray-cost">
+                                  <IconZap size={11} color="#f59e0b" />
+                                  <span>{gift.sparksCost}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="gift-tray-footer">
+                            <button
+                              type="button"
+                              className="btn-send-gift-action"
+                              onClick={() => {
+                                const g = LIVE_GIFTS_CATALOG.find((item) => item.id === selectedGiftId) || LIVE_GIFTS_CATALOG[0];
+                                handleThrowGift(g);
+                              }}
+                            >
+                              <span>Throw {LIVE_GIFTS_CATALOG.find((item) => item.id === selectedGiftId)?.name || 'Gift'}</span>
+                              <span>{LIVE_GIFTS_CATALOG.find((item) => item.id === selectedGiftId)?.icon}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ) : (
+              );
+            })() : (
               <>
 
             {/* Circles & Stories Rail */}
@@ -7116,7 +7724,7 @@ export function App() {
                   <button
                     type="button"
                     className="live-heart-reaction-btn"
-                    onClick={handleLiveHeartBurst}
+                    onClick={() => handleLiveHeartBurst()}
                     title="Send Heart Reaction"
                   >
                     <IconHeart size={18} color="#f43f5e" filled />
