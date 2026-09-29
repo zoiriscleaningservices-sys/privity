@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   PostPrivacy,
   PostType,
@@ -880,9 +880,21 @@ const VerifiedBadge: React.FC<{
 // ==================== MAIN COMPONENT ====================
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'activity' | 'profile' | 'safety'>('feed');
-  const [feedFilter, setFeedFilter] = useState<'all' | PostPrivacy>('all');
-  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+  // Safe localStorage storage helper with quota management
+  const safeSaveStorage = (key: string, data: any) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (e) {
+      console.warn(`Storage quota reached for ${key}, trimming payload`, e);
+      if (Array.isArray(data) && data.length > 20) {
+        try {
+          localStorage.setItem(key, JSON.stringify(data.slice(0, 20)));
+        } catch (err2) {
+          console.warn('Trimmed fallback failed', err2);
+        }
+      }
+    }
+  };
 
   // Helper for persistent localStorage retrieval with safe fallback
   const readStorage = <T,>(key: string, fallback: T): T => {
@@ -894,6 +906,39 @@ export function App() {
     }
     return fallback;
   };
+
+  // 0. Persistent Active Section / Tab (stays on current section upon refresh)
+  const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'activity' | 'profile' | 'safety'>(() =>
+    readStorage('privity_active_tab_v5', 'feed')
+  );
+  const [feedFilter, setFeedFilter] = useState<'all' | PostPrivacy>('all');
+  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+
+  // Real-Time Photo Likes Registry (synchronizes lightbox, posts, and profile media items)
+  const [photoLikesMap, setPhotoLikesMap] = useState<Record<string, { isLiked: boolean; count: number }>>(() =>
+    readStorage('privity_photo_likes_v5', {})
+  );
+
+  const [highlightPostId, setHighlightPostId] = useState<string | null>(null);
+  const [copiedLightboxUrl, setCopiedLightboxUrl] = useState(false);
+  const [lightboxHeartAnim, setLightboxHeartAnim] = useState(false);
+
+  // Take user all the way to the top of the preserved section upon page refresh / load
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, []);
+
+  // Save active section across refreshes
+  useEffect(() => {
+    safeSaveStorage('privity_active_tab_v5', activeTab);
+  }, [activeTab]);
+
+  // Save photo likes registry
+  useEffect(() => {
+    safeSaveStorage('privity_photo_likes_v5', photoLikesMap);
+  }, [photoLikesMap]);
 
   // 1. Persistent Profiles State
   const [profiles, setProfiles] = useState<Record<string, UserProfile>>(() =>
@@ -933,45 +978,25 @@ export function App() {
     readStorage('privity_private_account_v5', false)
   );
 
-  // Auto-sync all changes to localStorage so they persist across page refreshes
+  // Auto-sync all changes to localStorage with quota protection
   useEffect(() => {
-    try {
-      localStorage.setItem('privity_profiles_v5', JSON.stringify(profiles));
-    } catch (e) {
-      console.warn('Failed to save profiles to localStorage', e);
-    }
+    safeSaveStorage('privity_profiles_v5', profiles);
   }, [profiles]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('privity_posts_v5', JSON.stringify(posts));
-    } catch (e) {
-      console.warn('Failed to save posts to localStorage', e);
-    }
+    safeSaveStorage('privity_posts_v5', posts);
   }, [posts]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('privity_following_v5', JSON.stringify(followingMap));
-    } catch (e) {
-      console.warn('Failed to save followingMap to localStorage', e);
-    }
+    safeSaveStorage('privity_following_v5', followingMap);
   }, [followingMap]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('privity_close_friends_v5', JSON.stringify(closeFriendsList));
-    } catch (e) {
-      console.warn('Failed to save closeFriendsList to localStorage', e);
-    }
+    safeSaveStorage('privity_close_friends_v5', closeFriendsList);
   }, [closeFriendsList]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('privity_private_account_v5', JSON.stringify(isPrivateAccount));
-    } catch (e) {
-      console.warn('Failed to save isPrivateAccount to localStorage', e);
-    }
+    safeSaveStorage('privity_private_account_v5', isPrivateAccount);
   }, [isPrivateAccount]);
 
   // 6. Persistent VisionOS User Settings
@@ -1132,36 +1157,85 @@ export function App() {
     }
 
     setIsEditProfileOpen(false);
-    triggerToast('Profile updated & saved in real time!');
+    triggerToast('Profile updated');
   };
 
-  // Like media item directly on profile
+  // Like media item directly on profile with synchronized posts & photo likes registry
   const handleLikeMedia = (profileHandle: string, mediaId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const clean = profileHandle.replace(/^@/, '');
+    let updatedUrl = '';
+    let updatedLiked = false;
+    let updatedCount = 0;
+
     setProfiles((prev) => {
       const prof = prev[clean] || getUserProfile(clean);
       if (!prof || !prof.mediaItems) return prev;
       const nextMedia = prof.mediaItems.map((m) => {
         if (m.id === mediaId) {
           const nextLiked = !m.isLiked;
+          const nextLikes = nextLiked ? m.likes + 1 : Math.max(0, m.likes - 1);
+          updatedUrl = m.url;
+          updatedLiked = nextLiked;
+          updatedCount = nextLikes;
           return {
             ...m,
             isLiked: nextLiked,
-            likes: nextLiked ? m.likes + 1 : Math.max(0, m.likes - 1),
+            likes: nextLikes,
           };
         }
         return m;
       });
-      return {
+      const nextProfs = {
         ...prev,
         [clean]: {
           ...prof,
           mediaItems: nextMedia,
         },
       };
+      safeSaveStorage('privity_profiles_v5', nextProfs);
+      return nextProfs;
     });
-    triggerToast('Photo reaction updated and saved in real time');
+
+    if (updatedUrl) {
+      const targetUrl = updatedUrl;
+      setPhotoLikesMap((prev) => {
+        const next = {
+          ...prev,
+          [targetUrl]: { isLiked: updatedLiked, count: updatedCount },
+        };
+        safeSaveStorage('privity_photo_likes_v5', next);
+        return next;
+      });
+
+      setPosts((prevPosts) => {
+        let matched = false;
+        const nextPosts = prevPosts.map((p) => {
+          if (p.contentUrl === targetUrl || p.thumbnailUrl === targetUrl) {
+            matched = true;
+            let nextLikers = [...(p.likersList || [])];
+            if (updatedLiked) {
+              if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
+            } else {
+              nextLikers = nextLikers.filter((h) => h !== 'luciano');
+            }
+            return {
+              ...p,
+              isLiked: updatedLiked,
+              likersList: nextLikers,
+              likesCount: updatedCount,
+            };
+          }
+          return p;
+        });
+        if (matched) {
+          safeSaveStorage('privity_posts_v5', nextPosts);
+        }
+        return nextPosts;
+      });
+    }
+
+    triggerToast(updatedLiked ? 'Liked photo' : 'Unliked photo');
   };
 
   // Post Actions Menu & Caption Editing State
@@ -1208,10 +1282,16 @@ export function App() {
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [replyTarget, setReplyTarget] = useState<{ postId: string; commentId: string; handle: string } | null>(null);
 
-  // User Profile View State & Navigation History Stack
-  const [viewedUserHandle, setViewedUserHandle] = useState<string>('luciano');
+  // User Profile View State & Navigation History Stack (persisted across refreshes)
+  const [viewedUserHandle, setViewedUserHandle] = useState<string>(() =>
+    readStorage('privity_viewed_handle_v5', 'luciano')
+  );
   const [profileHistory, setProfileHistory] = useState<string[]>([]);
   const [profileSubTab, setProfileSubTab] = useState<'dispatches' | 'media' | 'circles'>('dispatches');
+
+  useEffect(() => {
+    safeSaveStorage('privity_viewed_handle_v5', viewedUserHandle);
+  }, [viewedUserHandle]);
 
   // Private Account Shield Modal State
   const [privateLockModal, setPrivateLockModal] = useState<{ handle: string; name: string } | null>(null);
@@ -1327,7 +1407,7 @@ export function App() {
       return nextProfiles;
     });
 
-    triggerToast(`Removed @${clean} from your followers in real time`);
+    triggerToast(`Removed @${clean} from your followers`);
   };
 
   const toggleCloseFriends = (handle: string) => {
@@ -1497,8 +1577,12 @@ export function App() {
     setHeartExplodingPostId(postId);
     setTimeout(() => setHeartExplodingPostId(null), 750);
 
-    setPosts((prev) =>
-      prev.map((p) => {
+    let targetPhotoUrl: string | undefined = undefined;
+    let targetLiked = false;
+    let targetCount = 0;
+
+    setPosts((prev) => {
+      const nextPosts = prev.map((p) => {
         if (p.id === postId) {
           const isCurrentlyLiked = !!p.isLiked;
           const nextLiked = fromDoubleTap ? true : !isCurrentlyLiked;
@@ -1513,6 +1597,9 @@ export function App() {
           } else {
             nextLikers = nextLikers.filter((h) => h !== 'luciano');
           }
+          targetPhotoUrl = p.contentUrl;
+          targetLiked = nextLiked;
+          targetCount = nextLikers.length;
           return {
             ...p,
             isLiked: nextLiked,
@@ -1521,8 +1608,42 @@ export function App() {
           };
         }
         return p;
-      }),
-    );
+      });
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+
+    if (targetPhotoUrl) {
+      const photoUrl = targetPhotoUrl;
+      setPhotoLikesMap((prev) => {
+        const next = {
+          ...prev,
+          [photoUrl]: { isLiked: targetLiked, count: targetCount },
+        };
+        safeSaveStorage('privity_photo_likes_v5', next);
+        return next;
+      });
+
+      setProfiles((prevProfs) => {
+        let changed = false;
+        const nextProfs = { ...prevProfs };
+        for (const [h, prof] of Object.entries(nextProfs)) {
+          if (prof.mediaItems?.some((m) => m.url === photoUrl)) {
+            changed = true;
+            nextProfs[h] = {
+              ...prof,
+              mediaItems: prof.mediaItems.map((m) =>
+                m.url === photoUrl ? { ...m, isLiked: targetLiked, likes: targetCount } : m
+              ),
+            };
+          }
+        }
+        if (changed) {
+          safeSaveStorage('privity_profiles_v5', nextProfs);
+        }
+        return nextProfs;
+      });
+    }
   };
 
   // Bookmark / Save
@@ -1591,20 +1712,16 @@ export function App() {
         }
         return p;
       });
-      try {
-        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
-      } catch (err) {
-        console.warn(err);
-      }
+      safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
 
     setCommentInputs({ ...commentInputs, [postId]: '' });
     setReplyTarget(null);
-    triggerToast('Comment posted and saved in real time');
+    triggerToast('Comment posted');
   };
 
-  // Delete comment or nested reply in real time
+  // Delete comment or nested reply
   const handleDeleteComment = (postId: string, commentId: string, replyId?: string) => {
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
@@ -1633,17 +1750,13 @@ export function App() {
           };
         }
       });
-      try {
-        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
-      } catch (err) {
-        console.warn(err);
-      }
+      safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
-    triggerToast('Comment removed in real time');
+    triggerToast('Comment deleted');
   };
 
-  // Like or unlike comment in real time
+  // Like or unlike comment
   const handleLikeComment = (postId: string, commentId: string) => {
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
@@ -1659,19 +1772,18 @@ export function App() {
         });
         return { ...p, comments: updated };
       });
-      try {
-        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
-      } catch (err) {
-        console.warn(err);
-      }
+      safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
   };
 
-  // Publish from inline composer
+  // Publish instantly from inline composer without requiring refresh
   const handleInlinePublish = (e: React.FormEvent) => {
     e.preventDefault();
     if (!composerCaption.trim()) return;
+
+    const extractedTags = (composerCaption.match(/#[\w-]+/g) || []).map((t) => t.slice(1));
+    const finalTags = extractedTags.length > 0 ? extractedTags : ['privity', 'authentic'];
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
@@ -1685,8 +1797,9 @@ export function App() {
       cryptoProofId: myProfile.cryptoProofId,
       type: composerPhotoUrl ? 'image' : 'text',
       contentUrl: composerPhotoUrl || undefined,
+      thumbnailUrl: composerPhotoUrl || undefined,
       caption: composerCaption,
-      tags: ['privity', 'authentic'],
+      tags: finalTags,
       privacy: composerPrivacy,
       likesCount: 0,
       commentsCount: 0,
@@ -1700,11 +1813,21 @@ export function App() {
     };
 
     if (composerPhotoUrl) {
+      const photoUrl = composerPhotoUrl;
+      setPhotoLikesMap((prev) => {
+        const next = {
+          ...prev,
+          [photoUrl]: { isLiked: false, count: 0 },
+        };
+        safeSaveStorage('privity_photo_likes_v5', next);
+        return next;
+      });
+
       setProfiles((prev) => {
         const prof = prev['luciano'] || prev[myProfile.handle] || myProfile;
         const newMedia: UserMediaItem = {
           id: `m-luciano-${Date.now()}`,
-          url: composerPhotoUrl,
+          url: photoUrl,
           type: 'image',
           likes: 0,
           comments: 0,
@@ -1725,30 +1848,32 @@ export function App() {
               }
             : {}),
         };
-        try {
-          localStorage.setItem('privity_profiles_v5', JSON.stringify(nextProfiles));
-        } catch (err) {
-          console.warn(err);
-        }
+        safeSaveStorage('privity_profiles_v5', nextProfiles);
         return nextProfiles;
       });
     }
 
     setPosts((prev) => {
       const nextPosts = [newPost, ...prev];
-      try {
-        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
-      } catch (err) {
-        console.warn(err);
-      }
+      safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
+
     setComposerCaption('');
     setComposerPhotoUrl(null);
-    triggerToast(`Shared with ${composerPrivacy.replace('_', ' ')} audience in real time!`);
+    setFeedFilter('all');
+    setActiveTagFilter(null);
+    setHighlightPostId(newPost.id);
+    setTimeout(() => setHighlightPostId(null), 3500);
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
+    triggerToast('Published to your feed');
   };
 
-  // Publish from modal
+  // Publish instantly from modal without requiring refresh
   const handleModalPublish = (e: React.FormEvent) => {
     e.preventDefault();
     if (!modalCaption.trim()) return;
@@ -1757,6 +1882,9 @@ export function App() {
       .split(' ')
       .map((t) => t.replace('#', '').trim())
       .filter(Boolean);
+    const captionTags = (modalCaption.match(/#[\w-]+/g) || []).map((t) => t.slice(1));
+    const combinedTags = Array.from(new Set([...tagsArr, ...captionTags]));
+    const finalTags = combinedTags.length > 0 ? combinedTags : ['privity'];
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
@@ -1770,8 +1898,9 @@ export function App() {
       cryptoProofId: myProfile.cryptoProofId,
       type: modalPhoto ? 'image' : 'text',
       contentUrl: modalPhoto || undefined,
+      thumbnailUrl: modalPhoto || undefined,
       caption: modalCaption,
-      tags: tagsArr.length > 0 ? tagsArr : ['privity'],
+      tags: finalTags,
       privacy: modalPrivacy,
       likesCount: 0,
       commentsCount: 0,
@@ -1785,11 +1914,21 @@ export function App() {
     };
 
     if (modalPhoto) {
+      const photoUrl = modalPhoto;
+      setPhotoLikesMap((prev) => {
+        const next = {
+          ...prev,
+          [photoUrl]: { isLiked: false, count: 0 },
+        };
+        safeSaveStorage('privity_photo_likes_v5', next);
+        return next;
+      });
+
       setProfiles((prev) => {
         const prof = prev['luciano'] || prev[myProfile.handle] || myProfile;
         const newMedia: UserMediaItem = {
           id: `m-luciano-${Date.now()}`,
-          url: modalPhoto,
+          url: photoUrl,
           type: 'image',
           likes: 0,
           comments: 0,
@@ -1810,51 +1949,72 @@ export function App() {
               }
             : {}),
         };
-        try {
-          localStorage.setItem('privity_profiles_v5', JSON.stringify(nextProfiles));
-        } catch (err) {
-          console.warn(err);
-        }
+        safeSaveStorage('privity_profiles_v5', nextProfiles);
         return nextProfiles;
       });
     }
 
     setPosts((prev) => {
       const nextPosts = [newPost, ...prev];
-      try {
-        localStorage.setItem('privity_posts_v5', JSON.stringify(nextPosts));
-      } catch (err) {
-        console.warn(err);
-      }
+      safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
+
     setIsModalOpen(false);
     setModalCaption('');
     setModalTags('');
     setModalPhoto(null);
-    triggerToast(`Published to ${modalPrivacy.replace('_', ' ')} circle in real time!`);
+    setFeedFilter('all');
+    setActiveTagFilter(null);
+
+    // Switch to feed view unless currently on own profile
+    if (activeTab !== 'profile' || viewedUserHandle !== 'luciano') {
+      setActiveTab('feed');
+    }
+
+    setHighlightPostId(newPost.id);
+    setTimeout(() => setHighlightPostId(null), 3500);
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
+    triggerToast('Published to your feed');
   };
+
+  // Dynamic trending topics refreshed based on active reverse-chronological stream
+  const dynamicTrendingTags = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of posts) {
+      for (const t of p.tags || []) {
+        const clean = t.toLowerCase().replace(/^#/, '');
+        counts[clean] = (counts[clean] || 0) + 1;
+      }
+    }
+    const sorted = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([tag, count]) => ({
+        tag,
+        count: `${count * 120 + 80} dispatches`,
+      }));
+    return sorted.length > 0
+      ? sorted
+      : [
+          { tag: 'mindful', count: '1.4k dispatches' },
+          { tag: 'photography', count: '890 dispatches' },
+          { tag: 'privacyfirst', count: '620 dispatches' },
+          { tag: 'slowlife', count: '410 dispatches' },
+        ];
+  }, [posts]);
 
   return (
     <div className="app-container">
-      {/* Toast Notification */}
+      {/* Apple visionOS Mirror Glass Toast Notification */}
       {toastMsg && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '24px',
-            right: '24px',
-            background: 'var(--brand-gradient)',
-            color: '#fff',
-            padding: '12px 24px',
-            borderRadius: 'var(--radius-pill)',
-            boxShadow: 'var(--shadow-float)',
-            zIndex: 9999,
-            fontWeight: 800,
-            fontSize: '13px',
-          }}
-        >
-          {toastMsg}
+        <div className="apple-glass-toast">
+          <div className="glass-toast-dot" />
+          <span>{toastMsg}</span>
         </div>
       )}
 
@@ -1967,9 +2127,9 @@ export function App() {
             <header className="feed-sticky-nav">
               <div className="feed-title-line">
                 <div className="feed-main-heading">Home</div>
-                <div className="feed-pulse-indicator">
+                <div className="feed-pulse-indicator" title="Chronological algorithm synchronized in real time">
                   <span className="live-green-orb"></span>
-                  Relationship Feed Active
+                  Chronological Algorithm • Synced
                 </div>
               </div>
 
@@ -2156,7 +2316,7 @@ export function App() {
                   return p.tags && p.tags.map((t) => t.toLowerCase()).includes(activeTagFilter.toLowerCase());
                 })
                 .map((post) => (
-                  <article key={post.id} className="feed-post-card">
+                  <article key={post.id} className={`feed-post-card ${highlightPostId === post.id ? 'post-just-published-shimmer' : ''}`}>
                     <img
                       src={post.authorAvatar}
                       alt={post.authorName}
@@ -3216,7 +3376,7 @@ export function App() {
                   <div style={{ marginTop: '14px' }}>
                     {userDispatches.length > 0 ? (
                       userDispatches.map((post) => (
-                        <article key={post.id} className="feed-post-card" style={{ paddingLeft: '8px', paddingRight: '8px' }}>
+                        <article key={post.id} className={`feed-post-card ${highlightPostId === post.id ? 'post-just-published-shimmer' : ''}`} style={{ paddingLeft: '8px', paddingRight: '8px' }}>
                           <img
                             src={post.authorAvatar}
                             alt={post.authorName}
@@ -3601,13 +3761,19 @@ export function App() {
         <div className="glass-panel-card">
           <div className="panel-title-text">Trending in Your Network</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {[
-              { tag: 'mindful', count: '1.4k dispatches' },
-              { tag: 'photography', count: '890 dispatches' },
-              { tag: 'privacyfirst', count: '620 dispatches' },
-              { tag: 'slowlife', count: '410 dispatches' },
-            ].map((t) => (
-              <div key={t.tag} className="trending-topic-cell">
+            {dynamicTrendingTags.map((t) => (
+              <div
+                key={t.tag}
+                className="trending-topic-cell"
+                onClick={() => {
+                  setActiveTagFilter(t.tag);
+                  setActiveTab('feed');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                  triggerToast(`Filtered feed by #${t.tag}`);
+                }}
+                style={{ cursor: 'pointer' }}
+                title={`Filter feed by #${t.tag}`}
+              >
                 <div className="topic-hashtag-title">#{t.tag}</div>
                 <div className="topic-volume-sub">{t.count}</div>
               </div>
@@ -3631,87 +3797,165 @@ export function App() {
       {/* 4. MODALS & LIGHTBOXES                                   */}
       {/* ======================================================== */}
 
-      {/* LIGHTBOX FOR FULLSCREEN MEDIA */}
+      {/* LIGHTBOX FOR FULLSCREEN MEDIA — APPLE VISIONOS SPECULAR GLASS */}
       {lightboxUrl && (() => {
+        const record = photoLikesMap[lightboxUrl];
         const matchingMedia = Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => m.url === lightboxUrl);
         const matchingPost = posts.find((p) => p.contentUrl === lightboxUrl || p.thumbnailUrl === lightboxUrl);
-        const isPhotoLiked = !!(matchingMedia?.isLiked || matchingPost?.isLiked);
-        const photoLikesCount = matchingMedia?.likes ?? (matchingPost?.likesCount ?? 0);
 
-        const handleLightboxLikeToggle = (e: React.MouseEvent) => {
-          e.stopPropagation();
+        // Real-time reactive like calculation
+        const isPhotoLiked = record !== undefined
+          ? record.isLiked
+          : !!(matchingMedia?.isLiked || matchingPost?.isLiked);
+
+        const photoLikesCount = record !== undefined
+          ? record.count
+          : (matchingMedia ? matchingMedia.likes : (matchingPost ? matchingPost.likesCount : 0));
+
+        const handleLightboxLikeToggle = (e?: React.MouseEvent) => {
+          e?.stopPropagation();
+          const nextLiked = !isPhotoLiked;
+          const nextCount = nextLiked ? photoLikesCount + 1 : Math.max(0, photoLikesCount - 1);
+
+          // 1. Trigger heart burst animation
+          setLightboxHeartAnim(true);
+          setTimeout(() => setLightboxHeartAnim(false), 850);
+
+          // 2. Update photoLikesMap immediately
+          setPhotoLikesMap((prev) => {
+            const next = {
+              ...prev,
+              [lightboxUrl]: { isLiked: nextLiked, count: nextCount },
+            };
+            safeSaveStorage('privity_photo_likes_v5', next);
+            return next;
+          });
+
+          // 3. Update matching post in posts if any
           if (matchingPost) {
-            handleLike(matchingPost.id);
-          } else if (matchingMedia) {
-            for (const p of Object.values(profiles)) {
-              if (p.mediaItems?.some((m) => m.id === matchingMedia.id)) {
-                handleLikeMedia(p.handle, matchingMedia.id);
-                break;
+            setPosts((prevPosts) => {
+              const nextPosts = prevPosts.map((p) => {
+                if (p.id === matchingPost.id) {
+                  let nextLikers = [...(p.likersList || [])];
+                  if (nextLiked) {
+                    if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
+                  } else {
+                    nextLikers = nextLikers.filter((h) => h !== 'luciano');
+                  }
+                  return {
+                    ...p,
+                    isLiked: nextLiked,
+                    likersList: nextLikers,
+                    likesCount: nextCount,
+                  };
+                }
+                return p;
+              });
+              safeSaveStorage('privity_posts_v5', nextPosts);
+              return nextPosts;
+            });
+          }
+
+          // 4. Update matching media across all profiles
+          setProfiles((prevProfs) => {
+            let changed = false;
+            const nextProfs = { ...prevProfs };
+            for (const [h, prof] of Object.entries(nextProfs)) {
+              if (prof.mediaItems?.some((m) => m.url === lightboxUrl || (matchingMedia && m.id === matchingMedia.id))) {
+                changed = true;
+                nextProfs[h] = {
+                  ...prof,
+                  mediaItems: prof.mediaItems.map((m) => {
+                    if (m.url === lightboxUrl || (matchingMedia && m.id === matchingMedia.id)) {
+                      return {
+                        ...m,
+                        isLiked: nextLiked,
+                        likes: nextCount,
+                      };
+                    }
+                    return m;
+                  }),
+                };
               }
             }
-          }
+            if (changed) {
+              safeSaveStorage('privity_profiles_v5', nextProfs);
+            }
+            return nextProfs;
+          });
+
+          triggerToast(nextLiked ? 'Liked photo' : 'Unliked photo');
         };
 
         return (
           <div className="lightbox-stage-overlay" onClick={() => setLightboxUrl(null)}>
-            <div style={{ position: 'absolute', top: '24px', right: '28px', zIndex: 10 }} onClick={(e) => e.stopPropagation()}>
-              <button className="btn-glass-back" onClick={() => setLightboxUrl(null)}>
+            {/* Top Close Button */}
+            <div style={{ position: 'absolute', top: '24px', right: '28px', zIndex: 100 }} onClick={(e) => e.stopPropagation()}>
+              <button
+                className="btn-glass-back"
+                onClick={() => setLightboxUrl(null)}
+                style={{
+                  background: 'rgba(15, 23, 42, 0.85)',
+                  backdropFilter: 'blur(24px)',
+                  borderRadius: 'var(--radius-pill)',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
+                  padding: '9px 18px',
+                }}
+              >
                 <IconX size={18} />
                 <span>Close</span>
               </button>
             </div>
 
-            <img
-              src={lightboxUrl}
-              alt="Fullscreen View"
-              className="lightbox-hero-image"
-              onClick={(e) => e.stopPropagation()}
-              onDoubleClick={handleLightboxLikeToggle}
-            />
+            {/* Photo Center with Double-Click & Heart Burst Overlay */}
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <img
+                src={lightboxUrl}
+                alt="Fullscreen View"
+                className="lightbox-hero-image"
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={handleLightboxLikeToggle}
+                title="Double-click to like photo"
+              />
 
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '28px',
-                display: 'flex',
-                gap: '12px',
-                alignItems: 'center',
-                zIndex: 10,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
+              {lightboxHeartAnim && (
+                <div className="lightbox-heart-burst-overlay">
+                  <IconHeart size={96} filled={true} color="var(--heart-rose)" />
+                </div>
+              )}
+            </div>
+
+            {/* Apple VisionOS Floating Specular Mirror Dock */}
+            <div className="apple-vision-dock" onClick={(e) => e.stopPropagation()}>
               <button
-                className={`btn-post-action ${isPhotoLiked ? 'liked' : ''}`}
-                style={{
-                  background: 'rgba(15, 23, 42, 0.85)',
-                  backdropFilter: 'blur(20px)',
-                  padding: '9px 18px',
-                  borderRadius: 'var(--radius-full)',
-                  border: '1px solid var(--glass-border-light)',
-                  color: isPhotoLiked ? 'var(--heart-rose)' : '#fff',
-                }}
+                type="button"
+                className={`vision-dock-btn heart-btn ${isPhotoLiked ? 'liked' : ''}`}
                 onClick={handleLightboxLikeToggle}
+                title={isPhotoLiked ? 'Unlike photo' : 'Like photo'}
               >
-                <IconHeart size={18} filled={isPhotoLiked} color={isPhotoLiked ? 'var(--heart-rose)' : 'currentColor'} />
-                <span>{photoLikesCount}</span>
+                <IconHeart
+                  size={19}
+                  filled={isPhotoLiked}
+                  color={isPhotoLiked ? 'var(--heart-rose)' : 'currentColor'}
+                  className={lightboxHeartAnim ? 'heart-icon-popping' : ''}
+                />
+                <span className="vision-dock-count">{photoLikesCount}</span>
               </button>
 
+              <div className="vision-dock-divider" />
+
               <button
-                className="btn-glass-back"
-                style={{
-                  background: 'rgba(15, 23, 42, 0.85)',
-                  backdropFilter: 'blur(20px)',
-                  padding: '9px 18px',
-                  borderRadius: 'var(--radius-full)',
-                  border: '1px solid var(--glass-border-light)',
-                }}
+                type="button"
+                className="vision-dock-btn copy-btn"
                 onClick={() => {
                   navigator.clipboard?.writeText(lightboxUrl);
+                  setCopiedLightboxUrl(true);
                   triggerToast('Photo URL copied to clipboard');
+                  setTimeout(() => setCopiedLightboxUrl(false), 2000);
                 }}
               >
-                <IconLink size={16} />
-                <span>Copy URL</span>
+                {copiedLightboxUrl ? <IconCheck size={16} color="var(--cf-emerald)" /> : <IconLink size={16} />}
+                <span>{copiedLightboxUrl ? 'Copied' : 'Copy URL'}</span>
               </button>
             </div>
           </div>
@@ -5216,7 +5460,7 @@ export function App() {
                 style={{ padding: '8px 22px', fontSize: '13px' }}
                 onClick={() => {
                   setIsSettingsOpen(false);
-                  triggerToast('All settings saved instantly!');
+                  triggerToast('All settings saved');
                 }}
               >
                 Done
