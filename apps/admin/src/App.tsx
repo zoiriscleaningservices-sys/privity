@@ -1149,10 +1149,11 @@ export function App() {
     readStorage('privity_profiles_v5', INITIAL_PROFILES_REGISTRY)
   );
 
-  // 2. Persistent Posts State
-  const [posts, setPosts] = useState<PostItem[]>(() =>
-    readStorage('privity_posts_v5', SAMPLE_POSTS)
-  );
+  // 2. Persistent Posts State (sanitizes any auto-synthesized p-media- posts from private clicks)
+  const [posts, setPosts] = useState<PostItem[]>(() => {
+    const loaded = readStorage<PostItem[]>('privity_posts_v5', SAMPLE_POSTS);
+    return Array.isArray(loaded) ? loaded.filter((p) => !p.id.startsWith('p-media-')) : SAMPLE_POSTS;
+  });
 
   // 3. Persistent Following Map
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>(() =>
@@ -1444,36 +1445,6 @@ export function App() {
       });
       if (matched) {
         safeSaveStorage('privity_posts_v5', nextPosts);
-        return nextPosts;
-      } else if (nextLiked) {
-        const ownerProf = profiles[clean] || getUserProfile(clean);
-        const newPost: PostItem = {
-          id: `p-media-${baseKey || Date.now()}`,
-          authorId: ownerProf.id,
-          authorName: ownerProf.name,
-          authorHandle: ownerProf.handle,
-          authorAvatar: ownerProf.avatar,
-          isVerified: ownerProf.isVerified,
-          verifiedCategory: ownerProf.category || ownerProf.verifiedCategory,
-          cryptoProofId: ownerProf.cryptoProofId,
-          type: 'image',
-          contentUrl: targetUrl,
-          caption: `Studio visual release by @${ownerProf.handle}.`,
-          tags: ['studio', 'media', 'visuals'],
-          privacy: 'public',
-          likesCount: nextLikes,
-          likersList: ['luciano'],
-          commentsCount: 0,
-          sharesCount: 0,
-          savesCount: 0,
-          isLiked: true,
-          isSaved: false,
-          timeAgo: 'Just now',
-          comments: [],
-        };
-        const createdPosts = [newPost, ...prevPosts];
-        safeSaveStorage('privity_posts_v5', createdPosts);
-        return createdPosts;
       }
       return nextPosts;
     });
@@ -1485,10 +1456,74 @@ export function App() {
   const [postMenuModal, setPostMenuModal] = useState<{ post: PostItem; isOwn: boolean } | null>(null);
   const [editingPostCaption, setEditingPostCaption] = useState<{ id: string; caption: string } | null>(null);
 
+  // Delete post permanently and synchronize with Media & Studio
   const handleDeletePost = (postId: string) => {
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    const targetPost = posts.find((p) => p.id === postId);
+    const targetPhotoUrl = targetPost?.contentUrl || targetPost?.thumbnailUrl;
+
+    // 1. Remove from feed posts
+    setPosts((prev) => {
+      const nextPosts = prev.filter((p) => p.id !== postId);
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+
+    // 2. Remove corresponding visual from Media & Studio
+    if (targetPhotoUrl) {
+      setProfiles((prevProfs) => {
+        let changed = false;
+        const nextProfs = { ...prevProfs };
+        for (const [h, prof] of Object.entries(nextProfs)) {
+          if (prof.mediaItems?.some((m) => isSameMedia(m.url, targetPhotoUrl))) {
+            changed = true;
+            nextProfs[h] = {
+              ...prof,
+              mediaItems: prof.mediaItems.filter((m) => !isSameMedia(m.url, targetPhotoUrl)),
+            };
+          }
+        }
+        if (changed) {
+          safeSaveStorage('privity_profiles_v5', nextProfs);
+        }
+        return nextProfs;
+      });
+    }
+
     setPostMenuModal(null);
-    triggerToast('Dispatch deleted permanently');
+    triggerToast('Dispatch and studio visual removed permanently');
+  };
+
+  // Delete media item directly from Media & Studio
+  const handleDeleteMediaItem = (handle: string, mediaId: string, mediaUrl: string) => {
+    const clean = handle.replace(/^@/, '');
+    setProfiles((prevProfs) => {
+      const prof = prevProfs[clean];
+      if (!prof) return prevProfs;
+      const nextProfs = {
+        ...prevProfs,
+        [clean]: {
+          ...prof,
+          mediaItems: (prof.mediaItems || []).filter((m) => m.id !== mediaId && !isSameMedia(m.url, mediaUrl)),
+        },
+      };
+      safeSaveStorage('privity_profiles_v5', nextProfs);
+      return nextProfs;
+    });
+
+    // Also remove any matching published post in feed
+    setPosts((prevPosts) => {
+      const nextPosts = prevPosts.filter((p) => !isSameMedia(p.contentUrl, mediaUrl) && !isSameMedia(p.thumbnailUrl, mediaUrl));
+      if (nextPosts.length !== prevPosts.length) {
+        safeSaveStorage('privity_posts_v5', nextPosts);
+      }
+      return nextPosts;
+    });
+
+    if (lightboxUrl && isSameMedia(lightboxUrl, mediaUrl)) {
+      setLightboxUrl(null);
+    }
+
+    triggerToast('Visual deleted from Studio & Feed');
   };
 
   const handleSavePostCaption = (e: React.FormEvent) => {
@@ -1505,8 +1540,9 @@ export function App() {
   // Floating heart tracker for double tap
   const [heartExplodingPostId, setHeartExplodingPostId] = useState<string | null>(null);
 
-  // Fullscreen Lightbox
+  // Fullscreen Lightbox & privacy status
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightboxIsPrivateMessage, setLightboxIsPrivateMessage] = useState(false);
   const [discoverSearch, setDiscoverSearch] = useState('');
 
   // Inline Composer State
@@ -4143,8 +4179,11 @@ export function App() {
                                         src={msg.mediaUrl}
                                         alt="Attached visual"
                                         className="spatial-bubble-image"
-                                        onClick={() => setLightboxUrl(msg.mediaUrl || null)}
-                                        title="Click to view in high-res lightbox"
+                                        onClick={() => {
+                                          setLightboxUrl(msg.mediaUrl || null);
+                                          setLightboxIsPrivateMessage(true);
+                                        }}
+                                        title="Click to view in encrypted private lightbox"
                                       />
                                     )}
                                   </div>
@@ -4245,10 +4284,10 @@ export function App() {
                       </div>
                       <div className="composer-staged-info">
                         <span className="composer-staged-label">
-                          {chatMediaType === 'video' ? 'Video Encrypted & Ready' : 'Visual Encrypted & Ready'}
+                          {chatMediaType === 'video' ? 'Private Video Encrypted & Ready' : 'Private Visual Encrypted & Ready'}
                         </span>
                         <span className="composer-staged-hint">
-                          Type your message below and press Send to dispatch both together
+                          Never published publicly · Visible only to this encrypted thread
                         </span>
                       </div>
                     </div>
@@ -4271,7 +4310,7 @@ export function App() {
                               compressImageFile(file, 1200, 0.85, (dataUrl) => {
                                 setChatMediaAttachment(dataUrl);
                                 setChatMediaType('photo');
-                                triggerToast('Photo staged · Ready to dispatch with message');
+                                triggerToast('Private photo staged · Never published publicly');
                               });
                             }
                             e.target.value = '';
@@ -4293,7 +4332,7 @@ export function App() {
                               const videoUrl = URL.createObjectURL(file);
                               setChatMediaAttachment(videoUrl);
                               setChatMediaType('video');
-                              triggerToast('Video staged · Ready to dispatch with message');
+                              triggerToast('Private video staged · Never published publicly');
                             }
                             e.target.value = '';
                           }}
@@ -4311,16 +4350,16 @@ export function App() {
                         <span>{isRecordingVoice ? 'Cancel Mic' : 'Voice Memo'}</span>
                       </button>
 
-                      {/* Studio Presets */}
+                      {/* Studio Presets (Distinct Private Photos) */}
                       <button
                         type="button"
                         className="composer-tool-btn"
                         onClick={() => {
                           const presets = [
-                            'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=1000',
-                            'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1000',
                             'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1000',
                             'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1000',
+                            'https://images.unsplash.com/photo-1493246507139-91e8fad9978e?w=1000',
+                            'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1000',
                           ];
                           const randomPreset = presets[Math.floor(Math.random() * presets.length)];
                           handleStagePresetMedia(randomPreset, 'photo');
@@ -5391,6 +5430,7 @@ export function App() {
                               className="profile-media-cell"
                               onClick={() => {
                                 setLightboxUrl(item.url);
+                                setLightboxIsPrivateMessage(false);
                                 setLightboxShowComments(false);
                               }}
                             >
@@ -5409,6 +5449,7 @@ export function App() {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setLightboxUrl(item.url);
+                                    setLightboxIsPrivateMessage(false);
                                     setLightboxShowComments(true);
                                   }}
                                   title="View & add comments"
@@ -5416,6 +5457,31 @@ export function App() {
                                   <IconChat size={16} color="#fff" />
                                   <span>{itemCommentsCount}</span>
                                 </div>
+
+                                {profile.handle === (myProfile.handle || 'luciano') && (
+                                  <div
+                                    style={{
+                                      marginLeft: 'auto',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      background: 'rgba(239, 68, 68, 0.5)',
+                                      color: '#ffffff',
+                                      borderRadius: '50%',
+                                      width: '28px',
+                                      height: '28px',
+                                      cursor: 'pointer',
+                                      transition: 'all 0.15s ease',
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteMediaItem(profile.handle, item.id, item.url);
+                                    }}
+                                    title="Delete this visual permanently from Studio and Feed"
+                                  >
+                                    <IconTrash size={14} />
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -5649,9 +5715,27 @@ export function App() {
         const resolvedComments = matchingPost?.comments || [];
         const resolvedCommentsCount = matchingPost?.commentsCount ?? (matchingMedia?.comments ?? resolvedComments.length);
 
+        const isMyMedia = !lightboxIsPrivateMessage && (
+          (matchingPost && (matchingPost.authorHandle === myProfile.handle || matchingPost.authorHandle === 'luciano')) ||
+          (matchingMedia && profiles[myProfile.handle]?.mediaItems?.some((m) => m.id === matchingMedia.id))
+        );
+
+        const handleLightboxDelete = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (window.confirm('Delete this photo permanently from your profile, feed, and Media & Studio?')) {
+            if (matchingPost) {
+              handleDeletePost(matchingPost.id);
+            } else if (matchingMedia) {
+              handleDeleteMediaItem(myProfile.handle, matchingMedia.id, matchingMedia.url);
+            }
+            closeLightbox();
+          }
+        };
+
         const closeLightbox = () => {
           setLightboxUrl(null);
           setLightboxShowComments(false);
+          setLightboxIsPrivateMessage(false);
         };
 
         const handleLightboxLikeToggle = (e?: React.MouseEvent) => {
@@ -5697,38 +5781,6 @@ export function App() {
             });
             if (matched) {
               safeSaveStorage('privity_posts_v5', nextPosts);
-              return nextPosts;
-            } else if (nextLiked) {
-              const ownerProfile = Object.values(profiles).find((prof) =>
-                prof.mediaItems?.some((m) => isSameMedia(m.url, lightboxUrl))
-              ) || getUserProfile('luciano');
-              const newPost: PostItem = {
-                id: `p-media-${extractMediaBaseKey(lightboxUrl) || Date.now()}`,
-                authorId: ownerProfile.id,
-                authorName: ownerProfile.name,
-                authorHandle: ownerProfile.handle,
-                authorAvatar: ownerProfile.avatar,
-                isVerified: ownerProfile.isVerified,
-                verifiedCategory: ownerProfile.category || ownerProfile.verifiedCategory,
-                cryptoProofId: ownerProfile.cryptoProofId,
-                type: 'image',
-                contentUrl: lightboxUrl,
-                caption: `Studio visual release by @${ownerProfile.handle}.`,
-                tags: ['studio', 'media', 'visuals'],
-                privacy: 'public',
-                likesCount: nextCount,
-                likersList: ['luciano'],
-                commentsCount: matchingMedia ? matchingMedia.comments : 0,
-                sharesCount: 0,
-                savesCount: 0,
-                isLiked: true,
-                isSaved: false,
-                timeAgo: 'Just now',
-                comments: [],
-              };
-              const created = [newPost, ...prevPosts];
-              safeSaveStorage('privity_posts_v5', created);
-              return created;
             }
             return nextPosts;
           });
@@ -5773,53 +5825,7 @@ export function App() {
           if (targetPost) {
             handleAddComment(targetPost.id, text);
           } else {
-            const ownerProfile = Object.values(profiles).find((prof) =>
-              prof.mediaItems?.some((m) => isSameMedia(m.url, lightboxUrl))
-            ) || getUserProfile('luciano');
-
-            const newComment: PostComment = {
-              id: `c-lb-${Date.now()}`,
-              authorName: myProfile.name,
-              authorHandle: myProfile.handle || 'luciano',
-              authorAvatar: myProfile.avatar,
-              isVerified: myProfile.isVerified,
-              text: text,
-              timeAgo: 'Just now',
-              likesCount: 0,
-              isLiked: false,
-            };
-
-            const newPost: PostItem = {
-              id: `p-media-${extractMediaBaseKey(lightboxUrl) || Date.now()}`,
-              authorId: ownerProfile.id,
-              authorName: ownerProfile.name,
-              authorHandle: ownerProfile.handle,
-              authorAvatar: ownerProfile.avatar,
-              isVerified: ownerProfile.isVerified,
-              verifiedCategory: ownerProfile.category || ownerProfile.verifiedCategory,
-              cryptoProofId: ownerProfile.cryptoProofId,
-              type: 'image',
-              contentUrl: lightboxUrl,
-              caption: `Studio visual release by @${ownerProfile.handle}.`,
-              tags: ['studio', 'media', 'visuals'],
-              privacy: 'public',
-              likesCount: photoLikesCount,
-              likersList: isPhotoLiked ? ['luciano'] : [],
-              commentsCount: (matchingMedia ? matchingMedia.comments : 0) + 1,
-              sharesCount: 0,
-              savesCount: 0,
-              isLiked: isPhotoLiked,
-              isSaved: false,
-              timeAgo: 'Just now',
-              comments: [newComment],
-            };
-
-            setPosts((prevPosts) => {
-              const updated = [newPost, ...prevPosts];
-              safeSaveStorage('privity_posts_v5', updated);
-              return updated;
-            });
-
+            // Update comments count on studio media without fabricating a public post
             setProfiles((prevProfs) => {
               let changed = false;
               const nextProfs = { ...prevProfs };
@@ -5840,7 +5846,7 @@ export function App() {
               return nextProfs;
             });
 
-            triggerToast('Comment posted');
+            triggerToast('Comment registered on studio visual');
           }
 
           setLightboxCommentInput('');
@@ -5848,6 +5854,31 @@ export function App() {
 
         return (
           <div className="lightbox-stage-overlay" onClick={closeLightbox}>
+            {/* Private Visual Indicator Pill if opened from Direct Messages */}
+            {lightboxIsPrivateMessage && (
+              <div style={{ position: 'absolute', top: '24px', left: '28px', zIndex: 100 }} onClick={(e) => e.stopPropagation()}>
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    background: 'rgba(15, 23, 42, 0.88)',
+                    backdropFilter: 'blur(24px)',
+                    borderRadius: 'var(--radius-pill)',
+                    border: '1px solid rgba(99, 102, 241, 0.4)',
+                    padding: '9px 18px',
+                    color: '#c7d2fe',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                  }}
+                >
+                  <IconShield size={16} color="#818cf8" />
+                  <span>Private Direct Visual · End-to-End Encrypted</span>
+                </div>
+              </div>
+            )}
+
             {/* Top Close Button */}
             <div style={{ position: 'absolute', top: '24px', right: '28px', zIndex: 100 }} onClick={(e) => e.stopPropagation()}>
               <button
@@ -5903,20 +5934,43 @@ export function App() {
 
               <div className="vision-dock-divider" />
 
-              <button
-                type="button"
-                className={`vision-dock-btn comment-btn ${lightboxShowComments ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setLightboxShowComments((prev) => !prev);
-                }}
-                title="View & Add Comments"
-              >
-                <IconChat size={18} color="currentColor" />
-                <span className="vision-dock-count">{resolvedCommentsCount}</span>
-              </button>
+              {!lightboxIsPrivateMessage ? (
+                <>
+                  <button
+                    type="button"
+                    className={`vision-dock-btn comment-btn ${lightboxShowComments ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLightboxShowComments((prev) => !prev);
+                    }}
+                    title="View & Add Comments"
+                  >
+                    <IconChat size={18} color="currentColor" />
+                    <span className="vision-dock-count">{resolvedCommentsCount}</span>
+                  </button>
 
-              <div className="vision-dock-divider" />
+                  <div className="vision-dock-divider" />
+                </>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '0 10px',
+                      color: '#a5b4fc',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <IconShield size={14} color="#818cf8" />
+                    <span>Private Media</span>
+                  </div>
+
+                  <div className="vision-dock-divider" />
+                </>
+              )}
 
               <button
                 type="button"
@@ -5931,6 +5985,22 @@ export function App() {
                 {copiedLightboxUrl ? <IconCheck size={16} color="var(--cf-emerald)" /> : <IconLink size={16} />}
                 <span>{copiedLightboxUrl ? 'Copied' : 'Copy URL'}</span>
               </button>
+
+              {isMyMedia && (
+                <>
+                  <div className="vision-dock-divider" />
+                  <button
+                    type="button"
+                    className="vision-dock-btn delete-btn"
+                    style={{ color: '#ef4444' }}
+                    onClick={handleLightboxDelete}
+                    title="Delete visual permanently from Studio and Feed"
+                  >
+                    <IconTrash size={16} color="#ef4444" />
+                    <span>Delete</span>
+                  </button>
+                </>
+              )}
             </div>
 
             {/* Lightbox Frosted Comments Drawer */}
