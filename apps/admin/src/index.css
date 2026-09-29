@@ -4646,8 +4646,12 @@ textarea::placeholder {
     border-right: none !important;
     border-left: none !important;
     padding-top: calc(56px + env(safe-area-inset-top, 0px)) !important;
-    padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(115px + env(safe-area-inset-bottom, 24px)) !important;
     margin: 0 !important;
+  }
+
+  .feed-column.messages-expanded-view {
+    padding-bottom: 0 !important;
   }
 
   .feed-sticky-header {
@@ -4690,6 +4694,34 @@ textarea::placeholder {
     margin: 12px 10px;
     padding: 14px 12px;
     border-radius: 18px;
+  }
+
+  .composer-toolbar {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+  }
+
+  .composer-actions-set {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-shrink: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .privacy-select-glass {
+    padding: 5px 10px !important;
+    font-size: 11.5px !important;
+    max-width: 140px !important;
+  }
+
+  .btn-post-dispatch {
+    padding: 8px 18px !important;
+    font-size: 13px !important;
+    flex-shrink: 0 !important;
   }
 
   .feed-post-card {
@@ -4785,6 +4817,26 @@ textarea::placeholder {
     flex-direction: column !important;
   }
 
+  .feed-column.messages-expanded-view {
+    padding-bottom: 0 !important;
+    padding-top: calc(54px + env(safe-area-inset-top, 0px)) !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  .spatial-messages-container.has-active-chat {
+    height: calc(100dvh - 54px - env(safe-area-inset-top, 0px)) !important;
+    max-height: calc(100dvh - 54px - env(safe-area-inset-top, 0px)) !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
   .spatial-messages-container.no-active-chat .messages-roster-pane {
     display: flex !important;
     width: 100% !important;
@@ -4802,52 +4854,172 @@ textarea::placeholder {
 
   .spatial-messages-container.has-active-chat .messages-active-thread-pane {
     display: flex !important;
+    flex-direction: column !important;
     width: 100% !important;
     height: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    overflow: hidden !important;
+  }
+
+  /* In mobile active chat, the top header handles the chat partner info so inner duplicate is hidden */
+  .spatial-messages-container .messages-thread-header {
+    display: none !important;
+  }
+
+  .mobile-chat-top-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .mobile-chat-header-left {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+
+  .mobile-chat-partner-info {
+    display: flex !important;
+    align-items: center !important;
+    gap: 9px !important;
+    min-width: 0 !important;
+    cursor: pointer !important;
+  }
+
+  .mobile-chat-avatar-wrap {
+    position: relative !important;
+    flex-shrink: 0 !important;
+  }
+
+  .mobile-chat-avatar {
+    width: 36px !important;
+    height: 36px !important;
+    border-radius: 50% !important;
+    object-fit: cover !important;
+    border: 1.5px solid rgba(255, 255, 255, 0.2) !important;
+  }
+
+  .mobile-chat-text-col {
+    display: flex !important;
+    flex-direction: column !important;
+    min-width: 0 !important;
+  }
+
+  .mobile-chat-name {
+    font-size: 13.5px !important;
+    font-weight: 700 !important;
+    color: #ffffff !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .mobile-chat-status {
+    font-size: 10.5px !important;
+    color: var(--cf-emerald) !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    white-space: nowrap !important;
+  }
+
+  .mobile-chat-header-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
   }
 
   .btn-chat-mobile-back {
     display: flex !important;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    color: #ffffff;
-    cursor: pointer;
-    flex-shrink: 0;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 32px !important;
+    height: 32px !important;
+    border-radius: 50% !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.16) !important;
+    color: #ffffff !important;
+    cursor: pointer !important;
+    flex-shrink: 0 !important;
   }
 
   .btn-chat-mobile-back:active {
-    background: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.16) !important;
   }
 
-  .messages-thread-header {
-    padding: 10px 12px;
+  .messages-thread-stream {
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    padding: 10px 10px 8px !important;
   }
 
-  .messages-thread-avatar {
-    width: 36px;
-    height: 36px;
+  .messages-composer-dock {
+    flex-shrink: 0 !important;
+    padding: 6px 10px calc(12px + env(safe-area-inset-bottom, 10px)) 10px !important;
+    background: rgba(10, 15, 26, 0.98) !important;
+    backdrop-filter: blur(28px) !important;
+    -webkit-backdrop-filter: blur(28px) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
   }
 
-  .messages-thread-name {
-    font-size: 13.5px;
+  .composer-quick-bar {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    gap: 6px !important;
+    padding: 2px 0 6px 0 !important;
+    touch-action: pan-x !important;
   }
 
-  .messages-thread-status {
-    font-size: 11px;
+  .composer-quick-bar::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .composer-attachments-group {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .composer-tool-btn {
+    flex-shrink: 0 !important;
+    padding: 5px 10px !important;
+    font-size: 11.5px !important;
+  }
+
+  .btn-roster-remove-action {
+    width: 32px !important;
+    height: 32px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+  }
+
+  .roster-remove-label {
+    display: none !important;
   }
 
   .messages-bubble {
-    max-width: 84% !important;
-  }
-
-  .messages-composer-tray {
-    padding: 8px 10px;
-    gap: 6px;
+    max-width: 86% !important;
   }
 
   /* 6. Profile View Mobile Polish */

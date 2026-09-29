@@ -1247,6 +1247,335 @@ export function App() {
 
   const myProfile = getUserProfile('luciano');
 
+  // ========================================================
+  // REAL-TIME MULTI-DEVICE SYNCHRONIZATION ENGINE
+  // ========================================================
+  const SYNC_TOPIC = 'privity_sync_luciano_live';
+  const SYNC_ENDPOINT = `https://ntfy.sh/${SYNC_TOPIC}`;
+
+  // Unique Device ID generated once per browser/device
+  const myDeviceId = useMemo(() => {
+    let devId = localStorage.getItem('privity_device_id_v1');
+    if (!devId) {
+      devId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+      localStorage.setItem('privity_device_id_v1', devId);
+    }
+    return devId;
+  }, []);
+
+  // BroadcastChannel for instant same-device / multi-tab synchronicity
+  const localSyncBus = useMemo(() => {
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        return new BroadcastChannel('privity_sync_bus');
+      }
+    } catch (e) {
+      console.warn('BroadcastChannel unavailable', e);
+    }
+    return null;
+  }, []);
+
+  // Dispatch mutation across local tabs and all global devices in real time
+  const broadcastSyncEvent = (event: {
+    action: string;
+    [key: string]: any;
+  }) => {
+    const payload = {
+      ...event,
+      senderDeviceId: myDeviceId,
+      timestamp: Date.now(),
+    };
+
+    // 1. Local same-device broadcast
+    try {
+      localSyncBus?.postMessage(payload);
+    } catch (e) {
+      console.warn('Local bus post failed', e);
+    }
+
+    // 2. Cloud broadcast to all active devices (phones, laptops, tablets)
+    try {
+      fetch(SYNC_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch((err) => console.warn('Cloud sync push err', err));
+    } catch (e) {
+      console.warn('Cloud sync err', e);
+    }
+  };
+
+  // Handler to apply incoming remote sync events
+  const applyRemoteSyncEvent = React.useCallback((event: any) => {
+    if (!event || event.senderDeviceId === myDeviceId) return;
+
+    switch (event.action) {
+      case 'LIKE_POST': {
+        const { postId, isLiked, likesCount, userHandle } = event;
+        setPosts((prev) =>
+          prev.map((p) => {
+            if (p.id === postId) {
+              const currentLikers = p.likersList || [];
+              const updatedLikers = isLiked
+                ? Array.from(new Set([...currentLikers, userHandle || 'luciano']))
+                : currentLikers.filter((h) => h !== (userHandle || 'luciano'));
+              return {
+                ...p,
+                isLiked,
+                likesCount: typeof likesCount === 'number' ? likesCount : (isLiked ? p.likesCount + 1 : Math.max(0, p.likesCount - 1)),
+                likersList: updatedLikers,
+              };
+            }
+            return p;
+          })
+        );
+        break;
+      }
+
+      case 'LIKE_MEDIA': {
+        const { mediaId, isLiked, count } = event;
+        setPhotoLikesMap((prev) => ({
+          ...prev,
+          [mediaId]: { isLiked, count },
+        }));
+        break;
+      }
+
+      case 'NEW_POST': {
+        const { post } = event;
+        if (!post || !post.id) return;
+        setPosts((prev) => {
+          if (prev.some((p) => p.id === post.id)) return prev;
+          return [post, ...prev];
+        });
+        if (post.authorHandle === 'luciano' && post.contentUrl) {
+          setProfiles((prev) => {
+            const luc = prev['luciano'] || getUserProfile('luciano');
+            const exists = (luc.mediaItems || []).some((m) => m.id === post.id || isSameMedia(m.url, post.contentUrl));
+            if (exists) return prev;
+            const newMedia: UserMediaItem = {
+              id: post.id,
+              url: post.contentUrl,
+              type: post.type === 'video' ? 'video' : 'image',
+              likes: 0,
+              comments: 0,
+              isLiked: false,
+            };
+            return {
+              ...prev,
+              luciano: {
+                ...luc,
+                mediaItems: [newMedia, ...(luc.mediaItems || [])],
+              },
+            };
+          });
+        }
+        break;
+      }
+
+      case 'DELETE_POST': {
+        const { postId } = event;
+        setPosts((prev) => prev.filter((p) => p.id !== postId));
+        setProfiles((prev) => {
+          const luc = prev['luciano'];
+          if (!luc) return prev;
+          return {
+            ...prev,
+            luciano: {
+              ...luc,
+              mediaItems: (luc.mediaItems || []).filter((m) => m.id !== postId),
+            },
+          };
+        });
+        break;
+      }
+
+      case 'ADD_COMMENT': {
+        const { postId, comment, parentCommentId } = event;
+        if (!postId || !comment) return;
+        setPosts((prev) =>
+          prev.map((p) => {
+            if (p.id !== postId) return p;
+            if (parentCommentId) {
+              const updatedComments = p.comments.map((c) => {
+                if (c.id === parentCommentId) {
+                  return {
+                    ...c,
+                    replies: [...(c.replies || []), comment],
+                  };
+                }
+                return c;
+              });
+              return { ...p, comments: updatedComments };
+            }
+            return {
+              ...p,
+              comments: [...p.comments, comment],
+            };
+          })
+        );
+        break;
+      }
+
+      case 'LIKE_COMMENT': {
+        const { postId, commentId, isLiked, likesCount } = event;
+        setPosts((prev) =>
+          prev.map((p) => {
+            if (p.id !== postId) return p;
+            return {
+              ...p,
+              comments: p.comments.map((c) => {
+                if (c.id === commentId) {
+                  return {
+                    ...c,
+                    isLiked,
+                    likesCount: typeof likesCount === 'number' ? likesCount : (isLiked ? c.likesCount + 1 : Math.max(0, c.likesCount - 1)),
+                  };
+                }
+                return c;
+              }),
+            };
+          })
+        );
+        break;
+      }
+
+      case 'SEND_DM': {
+        const { recipientHandle, message } = event;
+        if (!recipientHandle || !message) return;
+        setDirectMessages((prev) => {
+          const thread = prev[recipientHandle] || [];
+          if (thread.some((m) => m.id === message.id)) return prev;
+          return {
+            ...prev,
+            [recipientHandle]: [...thread, message],
+          };
+        });
+        break;
+      }
+
+      case 'REACT_DM': {
+        const { recipientHandle, messageId, emoji } = event;
+        if (!recipientHandle || !messageId || !emoji) return;
+        setDirectMessages((prev) => {
+          const thread = prev[recipientHandle] || [];
+          return {
+            ...prev,
+            [recipientHandle]: thread.map((m) => {
+              if (m.id !== messageId) return m;
+              const currentReactions = { ...(m.reactions || {}) };
+              const currentCount = currentReactions[emoji] || 0;
+              currentReactions[emoji] = currentCount + 1;
+              return { ...m, reactions: currentReactions };
+            }),
+          };
+        });
+        break;
+      }
+
+      case 'DELETE_DM': {
+        const { recipientHandle, messageId } = event;
+        if (!recipientHandle || !messageId) return;
+        setDirectMessages((prev) => {
+          const thread = prev[recipientHandle] || [];
+          return {
+            ...prev,
+            [recipientHandle]: thread.filter((m) => m.id !== messageId),
+          };
+        });
+        break;
+      }
+
+      case 'CLEAR_CHAT': {
+        const { recipientHandle } = event;
+        if (!recipientHandle) return;
+        setDirectMessages((prev) => ({
+          ...prev,
+          [recipientHandle]: [],
+        }));
+        break;
+      }
+
+      case 'UPDATE_PROFILE': {
+        const { profile } = event;
+        if (!profile || !profile.handle) return;
+        setProfiles((prev) => ({
+          ...prev,
+          [profile.handle]: { ...prev[profile.handle], ...profile },
+        }));
+        break;
+      }
+
+      default:
+        break;
+    }
+  }, [myDeviceId]);
+
+  // Setup Real-Time Listeners (SSE for sub-second cloud sync + BroadcastChannel for same device + Catch-up poll)
+  useEffect(() => {
+    // 1. Initial catch-up from cloud for events in past 12 hours
+    const catchUp = () => {
+      fetch(`${SYNC_ENDPOINT}/json?poll=1&since=12h`)
+        .then((res) => res.text())
+        .then((text) => {
+          const lines = text.trim().split('\n').filter(Boolean);
+          lines.forEach((line) => {
+            try {
+              const item = JSON.parse(line);
+              if (item.event === 'message' && item.message) {
+                const evt = JSON.parse(item.message);
+                applyRemoteSyncEvent(evt);
+              }
+            } catch (e) {}
+          });
+        })
+        .catch(() => {});
+    };
+
+    catchUp();
+
+    // 2. Server-Sent Events (SSE) stream for instant real-time delivery
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`${SYNC_ENDPOINT}/sse`);
+      es.onmessage = (e) => {
+        try {
+          const item = JSON.parse(e.data);
+          if (item.event === 'message' && item.message) {
+            const evt = JSON.parse(item.message);
+            applyRemoteSyncEvent(evt);
+          }
+        } catch (err) {}
+      };
+    } catch (e) {
+      console.warn('SSE subscription failed', e);
+    }
+
+    // 3. Same-device multi-tab listener
+    if (localSyncBus) {
+      localSyncBus.onmessage = (e) => {
+        if (e.data) {
+          applyRemoteSyncEvent(e.data);
+        }
+      };
+    }
+
+    // 4. On window visibility / focus (e.g. user unlocks phone), refresh catchUp
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        catchUp();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', catchUp);
+
+    return () => {
+      es?.close();
+      window.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', catchUp);
+    };
+  }, [applyRemoteSyncEvent, localSyncBus]);
+
   // Edit Personal Profile Modal State
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -1363,6 +1692,10 @@ export function App() {
 
     setIsEditProfileOpen(false);
     triggerToast('Profile updated');
+    broadcastSyncEvent({
+      action: 'UPDATE_PROFILE',
+      profile: updated,
+    });
   };
 
   // Like media item directly on profile with synchronized posts & photo likes registry
@@ -1449,6 +1782,13 @@ export function App() {
       return nextPosts;
     });
 
+    broadcastSyncEvent({
+      action: 'LIKE_MEDIA',
+      mediaId,
+      isLiked: nextLiked,
+      count: nextLikes,
+    });
+
     triggerToast(nextLiked ? 'Liked studio visual' : 'Unliked studio visual');
   };
 
@@ -1490,6 +1830,10 @@ export function App() {
     }
 
     setPostMenuModal(null);
+    broadcastSyncEvent({
+      action: 'DELETE_POST',
+      postId,
+    });
     triggerToast('Dispatch and studio visual removed permanently');
   };
 
@@ -2023,6 +2367,14 @@ export function App() {
       return nextPosts;
     });
 
+    broadcastSyncEvent({
+      action: 'LIKE_POST',
+      postId,
+      isLiked: nextLiked,
+      likesCount: nextCount,
+      userHandle: 'luciano',
+    });
+
     triggerToast(nextLiked ? 'Liked dispatch' : 'Unliked dispatch');
   };
 
@@ -2059,10 +2411,14 @@ export function App() {
     const targetPost = posts.find((p) => p.id === postId);
     const targetPhotoUrl = targetPost?.contentUrl || targetPost?.thumbnailUrl;
 
+    let createdItem: any = null;
+    let parentCommentId: string | undefined = undefined;
+
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
         if (p.id === postId) {
           if (replyTarget && replyTarget.postId === postId && !textOverride) {
+            parentCommentId = replyTarget.commentId;
             const updated = p.comments.map((c) => {
               if (c.id === replyTarget.commentId) {
                 const reply = {
@@ -2074,6 +2430,7 @@ export function App() {
                   text,
                   timeAgo: 'Just now',
                 };
+                createdItem = reply;
                 return { ...c, replies: [...(c.replies || []), reply] };
               }
               return c;
@@ -2090,6 +2447,7 @@ export function App() {
               timeAgo: 'Just now',
               likesCount: 0,
             };
+            createdItem = comment;
             return { ...p, commentsCount: p.commentsCount + 1, comments: [...p.comments, comment] };
           }
         }
@@ -2127,6 +2485,16 @@ export function App() {
       setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
       setReplyTarget(null);
     }
+
+    if (createdItem) {
+      broadcastSyncEvent({
+        action: 'ADD_COMMENT',
+        postId,
+        comment: createdItem,
+        parentCommentId,
+      });
+    }
+
     triggerToast('Comment posted');
   };
 
@@ -2205,6 +2573,11 @@ export function App() {
       safeSaveStorage('privity_direct_messages_v5', updated);
       return updated;
     });
+    broadcastSyncEvent({
+      action: 'DELETE_DM',
+      recipientHandle: cleanRecipient,
+      messageId,
+    });
     triggerToast('Message permanently removed from channel');
   };
 
@@ -2218,6 +2591,10 @@ export function App() {
       };
       safeSaveStorage('privity_direct_messages_v5', updated);
       return updated;
+    });
+    broadcastSyncEvent({
+      action: 'CLEAR_CHAT',
+      recipientHandle: cleanRecipient,
     });
     triggerToast(`Encrypted channel with @${cleanRecipient} cleared`);
   };
@@ -2334,6 +2711,14 @@ export function App() {
       };
       safeSaveStorage('privity_direct_messages_v5', updated);
       return updated;
+    });
+
+    broadcastSyncEvent({
+      action: 'REACT_DM',
+      recipientHandle: cleanRecipient,
+      messageId,
+      emoji,
+      userHandle: cleanMyHandle,
     });
   };
 
@@ -2582,6 +2967,12 @@ export function App() {
       return updated;
     });
 
+    broadcastSyncEvent({
+      action: 'SEND_DM',
+      recipientHandle,
+      message: newMsg,
+    });
+
     setChatDraftText('');
     setChatMediaAttachment(null);
     setChatMediaType('photo');
@@ -2609,6 +3000,11 @@ export function App() {
         safeSaveStorage('privity_direct_messages_v5', updated);
         return updated;
       });
+      broadcastSyncEvent({
+        action: 'SEND_DM',
+        recipientHandle,
+        message: replyMsg,
+      });
       setIsRecipientTyping(false);
       triggerToast(`New encrypted message from @${recipientHandle}`);
     }, 1300);
@@ -2616,22 +3012,34 @@ export function App() {
 
   // Like or unlike comment
   const handleLikeComment = (postId: string, commentId: string) => {
+    let nextLikedState = false;
+    let nextLikesTotal = 0;
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
         if (p.id !== postId) return p;
         const updated = p.comments.map((c) => {
           if (c.id !== commentId) return c;
           const nextLiked = !c.isLiked;
+          nextLikedState = nextLiked;
+          nextLikesTotal = nextLiked ? (c.likesCount || 0) + 1 : Math.max(0, (c.likesCount || 0) - 1);
           return {
             ...c,
             isLiked: nextLiked,
-            likesCount: nextLiked ? (c.likesCount || 0) + 1 : Math.max(0, (c.likesCount || 0) - 1),
+            likesCount: nextLikesTotal,
           };
         });
         return { ...p, comments: updated };
       });
       safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
+    });
+
+    broadcastSyncEvent({
+      action: 'LIKE_COMMENT',
+      postId,
+      commentId,
+      isLiked: nextLikedState,
+      likesCount: nextLikesTotal,
     });
   };
 
@@ -2715,6 +3123,11 @@ export function App() {
       const nextPosts = [newPost, ...prev];
       safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
+    });
+
+    broadcastSyncEvent({
+      action: 'NEW_POST',
+      post: newPost,
     });
 
     setComposerCaption('');
@@ -2816,6 +3229,11 @@ export function App() {
       const nextPosts = [newPost, ...prev];
       safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
+    });
+
+    broadcastSyncEvent({
+      action: 'NEW_POST',
+      post: newPost,
     });
 
     setIsModalOpen(false);
@@ -2932,47 +3350,104 @@ export function App() {
       {/* ======================================================== */}
       {/* MOBILE TOP STATUS & BRAND HEADER (<= 768px)             */}
       {/* ======================================================== */}
-      <header className="mobile-top-header">
-        <div className="mobile-header-left" onClick={() => { setActiveTab('feed'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-          <div className="brand-emblem-box" style={{ width: '36px', height: '36px', borderRadius: '10px' }}>
-            <img src="./privity-emblem.png" alt="Privity Emblem" className="brand-emblem-img" style={{ width: '22px', height: '22px' }} />
+      {activeTab === 'messages' && activeChatUser ? (
+        <header className="mobile-top-header mobile-chat-top-header">
+          <div className="mobile-chat-header-left">
+            <button
+              type="button"
+              className="btn-chat-mobile-back"
+              onClick={() => setActiveChatUser(null)}
+              title="Back to all channels"
+            >
+              <IconArrowLeft size={18} />
+            </button>
+            <div
+              className="mobile-chat-partner-info"
+              onClick={() => navigateToProfile(activeChatUser.handle)}
+              title={`View @${activeChatUser.handle}'s profile`}
+            >
+              <div className="mobile-chat-avatar-wrap">
+                <img src={activeChatUser.avatar} alt={activeChatUser.name} className="mobile-chat-avatar" />
+                <span className="online-presence-dot" />
+              </div>
+              <div className="mobile-chat-text-col">
+                <div className="mobile-chat-name">
+                  <span>{activeChatUser.name}</span>
+                  {activeChatUser.isVerified && (
+                    <VerifiedBadge authorName={activeChatUser.name} category={activeChatUser.verifiedCategory} />
+                  )}
+                </div>
+                <div className="mobile-chat-status">
+                  <span className="status-indicator-dot" />
+                  <span>{isRecipientTyping ? 'Typing in real-time...' : 'Active Now · 🔒 Encrypted'}</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="brand-logo-text" style={{ display: 'flex', alignItems: 'center' }}>
-            <img src="./privity-wordmark.png" alt="PRIVITY" className="brand-wordmark-img" style={{ height: '17px', width: 'auto' }} />
-            <span className="brand-pulsing-orbit"></span>
+
+          <div className="mobile-chat-header-right">
+            <button
+              type="button"
+              className="mobile-header-icon-btn"
+              onClick={() => navigateToProfile(activeChatUser.handle)}
+              title="View creator profile"
+            >
+              <IconUser size={18} />
+            </button>
+            <button
+              type="button"
+              className="mobile-header-icon-btn"
+              style={{ color: '#f87171' }}
+              onClick={() => handleClearConversation(activeChatUser.handle.replace(/^@/, ''))}
+              title="Clear channel conversation"
+            >
+              <IconTrash size={16} />
+            </button>
           </div>
-        </div>
+        </header>
+      ) : (
+        <header className="mobile-top-header">
+          <div className="mobile-header-left" onClick={() => { setActiveTab('feed'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+            <div className="brand-emblem-box" style={{ width: '36px', height: '36px', borderRadius: '10px' }}>
+              <img src="./privity-emblem.png" alt="Privity Emblem" className="brand-emblem-img" style={{ width: '22px', height: '22px' }} />
+            </div>
+            <div className="brand-logo-text" style={{ display: 'flex', alignItems: 'center' }}>
+              <img src="./privity-wordmark.png" alt="PRIVITY" className="brand-wordmark-img" style={{ height: '17px', width: 'auto' }} />
+              <span className="brand-pulsing-orbit"></span>
+            </div>
+          </div>
 
-        <div className="mobile-header-center">
-          <span className="mobile-active-tab-title">
-            {activeTab === 'feed' && (feedFilter === 'close_friends' ? 'Close Friends' : feedFilter === 'followers' ? 'Audience' : 'Chronological')}
-            {activeTab === 'discover' && 'Discover'}
-            {activeTab === 'activity' && 'Activity'}
-            {activeTab === 'messages' && (activeChatUser ? activeChatUser.name : 'Direct Messages')}
-            {activeTab === 'profile' && `@${viewedUserHandle}`}
-            {activeTab === 'safety' && 'Security'}
-          </span>
-        </div>
+          <div className="mobile-header-center">
+            <span className="mobile-active-tab-title">
+              {activeTab === 'feed' && (feedFilter === 'close_friends' ? 'Close Friends' : feedFilter === 'followers' ? 'Audience' : 'Chronological')}
+              {activeTab === 'discover' && 'Discover'}
+              {activeTab === 'activity' && 'Activity'}
+              {activeTab === 'messages' && 'Direct Messages'}
+              {activeTab === 'profile' && `@${viewedUserHandle}`}
+              {activeTab === 'safety' && 'Security'}
+            </span>
+          </div>
 
-        <div className="mobile-header-right">
-          <button
-            type="button"
-            className="mobile-header-icon-btn"
-            onClick={() => setIsSettingsOpen(true)}
-            title="Account & Privacy Settings"
-          >
-            <IconSettings size={18} />
-          </button>
-          <button
-            type="button"
-            className="mobile-header-icon-btn mobile-header-compose-btn"
-            onClick={() => setIsModalOpen(true)}
-            title="Create New Dispatch"
-          >
-            <IconPlus size={18} color="#ffffff" />
-          </button>
-        </div>
-      </header>
+          <div className="mobile-header-right">
+            <button
+              type="button"
+              className="mobile-header-icon-btn"
+              onClick={() => setIsSettingsOpen(true)}
+              title="Account & Privacy Settings"
+            >
+              <IconSettings size={18} />
+            </button>
+            <button
+              type="button"
+              className="mobile-header-icon-btn mobile-header-compose-btn"
+              onClick={() => setIsModalOpen(true)}
+              title="Create New Dispatch"
+            >
+              <IconPlus size={18} color="#ffffff" />
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* ======================================================== */}
       {/* 1. LEFT SIDEBAR NAVIGATION (BESPOKE VECTOR ICONS)        */}
@@ -7175,7 +7650,7 @@ export function App() {
                               {isTargetOwn && rosterModal.mode === 'followers' && (
                                 <button
                                   type="button"
-                                  className="btn-glass-back"
+                                  className="btn-glass-back btn-roster-remove-action"
                                   style={{
                                     padding: '6px 10px',
                                     fontSize: '11.5px',
@@ -7185,8 +7660,8 @@ export function App() {
                                   onClick={() => handleRemoveFollower(user.handle)}
                                   title="Remove from your followers"
                                 >
-                                  <IconTrash size={12} />
-                                  <span>Remove</span>
+                                  <IconTrash size={13} />
+                                  <span className="roster-remove-label">Remove</span>
                                 </button>
                               )}
                             </div>
@@ -7864,78 +8339,80 @@ export function App() {
       {/* ======================================================== */}
       {/* MOBILE BOTTOM NAVIGATION DOCK (<= 768px)                */}
       {/* ======================================================== */}
-      <nav className="mobile-bottom-nav">
-        <button
-          type="button"
-          className={`mobile-nav-item ${activeTab === 'feed' ? 'active' : ''}`}
-          onClick={() => {
-            setActiveTab('feed');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
-          title="Home Feed"
-        >
-          <IconHome size={22} color={activeTab === 'feed' ? '#ffffff' : 'currentColor'} />
-          <span className="mobile-nav-label">Feed</span>
-          {activeTab === 'feed' && <span className="mobile-nav-indicator" />}
-        </button>
+      {!(activeTab === 'messages' && activeChatUser) && (
+        <nav className="mobile-bottom-nav">
+          <button
+            type="button"
+            className={`mobile-nav-item ${activeTab === 'feed' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('feed');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            title="Home Feed"
+          >
+            <IconHome size={22} color={activeTab === 'feed' ? '#ffffff' : 'currentColor'} />
+            <span className="mobile-nav-label">Feed</span>
+            {activeTab === 'feed' && <span className="mobile-nav-indicator" />}
+          </button>
 
-        <button
-          type="button"
-          className={`mobile-nav-item ${activeTab === 'discover' ? 'active' : ''}`}
-          onClick={() => {
-            setActiveTab('discover');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
-          title="Discover Creators"
-        >
-          <IconDiscover size={22} />
-          <span className="mobile-nav-label">Discover</span>
-          {activeTab === 'discover' && <span className="mobile-nav-indicator" />}
-        </button>
+          <button
+            type="button"
+            className={`mobile-nav-item ${activeTab === 'discover' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('discover');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            title="Discover Creators"
+          >
+            <IconDiscover size={22} />
+            <span className="mobile-nav-label">Discover</span>
+            {activeTab === 'discover' && <span className="mobile-nav-indicator" />}
+          </button>
 
-        <button
-          type="button"
-          className="mobile-nav-item mobile-nav-compose-center"
-          onClick={() => setIsModalOpen(true)}
-          title="Create New Dispatch"
-        >
-          <div className="mobile-compose-orb">
-            <IconPlus size={22} color="#ffffff" />
-          </div>
-        </button>
+          <button
+            type="button"
+            className="mobile-nav-item mobile-nav-compose-center"
+            onClick={() => setIsModalOpen(true)}
+            title="Create New Dispatch"
+          >
+            <div className="mobile-compose-orb">
+              <IconPlus size={22} color="#ffffff" />
+            </div>
+          </button>
 
-        <button
-          type="button"
-          className={`mobile-nav-item ${activeTab === 'messages' ? 'active' : ''}`}
-          onClick={() => {
-            setActiveTab('messages');
-          }}
-          title="Encrypted Messages"
-        >
-          <div style={{ position: 'relative' }}>
-            <IconChat size={22} color={activeTab === 'messages' ? '#ffffff' : 'currentColor'} />
-            <span className="mobile-badge-dot" />
-          </div>
-          <span className="mobile-nav-label">Messages</span>
-          {activeTab === 'messages' && <span className="mobile-nav-indicator" />}
-        </button>
+          <button
+            type="button"
+            className={`mobile-nav-item ${activeTab === 'messages' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('messages');
+            }}
+            title="Encrypted Messages"
+          >
+            <div style={{ position: 'relative' }}>
+              <IconChat size={22} color={activeTab === 'messages' ? '#ffffff' : 'currentColor'} />
+              <span className="mobile-badge-dot" />
+            </div>
+            <span className="mobile-nav-label">Messages</span>
+            {activeTab === 'messages' && <span className="mobile-nav-indicator" />}
+          </button>
 
-        <button
-          type="button"
-          className={`mobile-nav-item ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}
-          onClick={() => {
-            navigateToProfile('luciano');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
-          title="Your Profile"
-        >
-          <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}>
-            <img src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" />
-          </div>
-          <span className="mobile-nav-label">Profile</span>
-          {activeTab === 'profile' && viewedUserHandle === 'luciano' && <span className="mobile-nav-indicator" />}
-        </button>
-      </nav>
+          <button
+            type="button"
+            className={`mobile-nav-item ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}
+            onClick={() => {
+              navigateToProfile('luciano');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            title="Your Profile"
+          >
+            <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}>
+              <img src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" />
+            </div>
+            <span className="mobile-nav-label">Profile</span>
+            {activeTab === 'profile' && viewedUserHandle === 'luciano' && <span className="mobile-nav-indicator" />}
+          </button>
+        </nav>
+      )}
     </div>
   );
 }
