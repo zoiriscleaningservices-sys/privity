@@ -2312,14 +2312,13 @@ export function App() {
       {/* 1. LEFT SIDEBAR NAVIGATION (BESPOKE VECTOR ICONS)        */}
       {/* ======================================================== */}
       <aside className="nav-sidebar">
-        <div className="brand-anchor" onClick={() => setActiveTab('feed')}>
+        <div className="brand-anchor" onClick={() => setActiveTab('feed')} title="Privity Home">
           <div className="brand-emblem-box">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="#fff">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z" />
-            </svg>
+            <img src="./privity-emblem.png" alt="Privity Emblem" className="brand-emblem-img" />
           </div>
           <div className="brand-logo-text">
-            privity<span className="brand-pulsing-orbit"></span>
+            <img src="./privity-wordmark.png" alt="PRIVITY" className="brand-wordmark-img" />
+            <span className="brand-pulsing-orbit"></span>
           </div>
         </div>
 
@@ -6304,6 +6303,18 @@ export function App() {
               {/* TAB 5: TERMS & MANIFESTO */}
               {settingsSubTab === 'terms' && (
                 <div>
+                  <div style={{ textAlign: 'center', padding: '10px 0 20px' }}>
+                    <img
+                      src="./privity-logo.png"
+                      alt="Privity Official Logo"
+                      style={{
+                        maxHeight: '130px',
+                        maxWidth: '220px',
+                        objectFit: 'contain',
+                        filter: 'drop-shadow(0 0 25px rgba(99, 102, 241, 0.45))',
+                      }}
+                    />
+                  </div>
                   <div className="settings-card-group" style={{ padding: '18px 20px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                       <IconFileText size={18} color="var(--brand)" />
