@@ -1,8 +1,12 @@
-# Privity — Monorepo Architecture
+# Privity — Private-First Social Feed for Real Connections
 
-> **Private-first social feed for real connections**
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Privity%20Web%20App-0A84FF?style=for-the-badge&logo=safari&logoColor=white)](https://zoiriscleaningservices-sys.github.io/privity/)
+[![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Active-30D158?style=for-the-badge&logo=github)](https://zoiriscleaningservices-sys.github.io/privity/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
-Privity is designed around private-first sharing, relationship-driven feeds, and clear user-controlled visibility.
+> **Private-first social feed designed around real human connections, transparent visibility, cryptographic authenticity, and zero algorithmic manipulation.**
+
+🌐 **Live Web Application:** [https://zoiriscleaningservices-sys.github.io/privity/](https://zoiriscleaningservices-sys.github.io/privity/)
 
 ---
 
