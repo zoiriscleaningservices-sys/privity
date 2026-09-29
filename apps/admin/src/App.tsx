@@ -1263,6 +1263,19 @@ export function App() {
     return devId;
   }, []);
 
+  // Unique Tab / Session ID generated once per window/tab (enables instant multi-tab sync without self-collisions)
+  const myTabSessionId = useMemo(() => {
+    let sId = sessionStorage.getItem('privity_tab_id_v2');
+    if (!sId) {
+      sId = 'tab_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+      sessionStorage.setItem('privity_tab_id_v2', sId);
+    }
+    return sId;
+  }, []);
+
+  // Deduplication cache to prevent re-applying identical events across SSE, polling & broadcast channel
+  const processedEventIdsRef = React.useRef<Set<string>>(new Set());
+
   // BroadcastChannel for instant same-device / multi-tab synchronicity
   const localSyncBus = useMemo(() => {
     try {
@@ -1280,11 +1293,26 @@ export function App() {
     action: string;
     [key: string]: any;
   }) => {
+    const eventId =
+      'evt_' +
+      event.action +
+      '_' +
+      (event.postId || event.messageId || '') +
+      '_' +
+      Date.now() +
+      '_' +
+      Math.random().toString(36).substring(2, 7);
+
     const payload = {
       ...event,
+      eventId,
+      senderTabId: myTabSessionId,
       senderDeviceId: myDeviceId,
       timestamp: Date.now(),
     };
+
+    // Mark as processed so local instance does not re-apply
+    processedEventIdsRef.current.add(eventId);
 
     // 1. Local same-device broadcast
     try {
@@ -1306,252 +1334,505 @@ export function App() {
   };
 
   // Handler to apply incoming remote sync events
-  const applyRemoteSyncEvent = React.useCallback((event: any) => {
-    if (!event || event.senderDeviceId === myDeviceId) return;
+  const applyRemoteSyncEvent = React.useCallback(
+    (event: any) => {
+      if (!event || event.senderTabId === myTabSessionId) return;
 
-    switch (event.action) {
-      case 'LIKE_POST': {
-        const { postId, isLiked, likesCount, userHandle } = event;
-        setPosts((prev) =>
-          prev.map((p) => {
-            if (p.id === postId) {
-              const currentLikers = p.likersList || [];
-              const updatedLikers = isLiked
-                ? Array.from(new Set([...currentLikers, userHandle || 'luciano']))
-                : currentLikers.filter((h) => h !== (userHandle || 'luciano'));
+      if (event.eventId) {
+        if (processedEventIdsRef.current.has(event.eventId)) return;
+        processedEventIdsRef.current.add(event.eventId);
+      }
+
+      const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+
+      switch (event.action) {
+        case 'LIKE_POST': {
+          const { postId, isLiked, likesCount, userHandle } = event;
+          setPosts((prev) => {
+            const nextPosts = prev.map((p) => {
+              if (p.id === postId) {
+                const currentLikers = p.likersList || [];
+                const updatedLikers = isLiked
+                  ? Array.from(new Set([...currentLikers, userHandle || 'luciano']))
+                  : currentLikers.filter((h) => h !== (userHandle || 'luciano'));
+                return {
+                  ...p,
+                  isLiked: userHandle === cleanMyHandle ? isLiked : p.isLiked,
+                  likesCount:
+                    typeof likesCount === 'number'
+                      ? likesCount
+                      : isLiked
+                      ? p.likesCount + 1
+                      : Math.max(0, p.likesCount - 1),
+                  likersList: updatedLikers,
+                };
+              }
+              return p;
+            });
+            safeSaveStorage('privity_posts_v5', nextPosts);
+            return nextPosts;
+          });
+          break;
+        }
+
+        case 'LIKE_MEDIA': {
+          const { mediaId, isLiked, count } = event;
+          setPhotoLikesMap((prev) => {
+            const next = {
+              ...prev,
+              [mediaId]: { isLiked, count },
+            };
+            safeSaveStorage('privity_photo_likes_v5', next);
+            return next;
+          });
+          break;
+        }
+
+        case 'NEW_POST': {
+          const { post } = event;
+          if (!post || !post.id) return;
+          setPosts((prev) => {
+            if (prev.some((p) => p.id === post.id)) return prev;
+            const next = [post, ...prev];
+            safeSaveStorage('privity_posts_v5', next);
+            return next;
+          });
+          if (post.contentUrl) {
+            const author = (post.authorHandle || 'luciano').replace(/^@/, '');
+            setProfiles((prev) => {
+              const prof = prev[author] || getUserProfile(author);
+              const exists = (prof.mediaItems || []).some(
+                (m) => m.id === post.id || isSameMedia(m.url, post.contentUrl)
+              );
+              if (exists) return prev;
+              const newMedia: UserMediaItem = {
+                id: post.id,
+                url: post.contentUrl,
+                type: post.type === 'video' ? 'video' : 'image',
+                likes: 0,
+                comments: 0,
+                isLiked: false,
+              };
+              const nextProfs = {
+                ...prev,
+                [author]: {
+                  ...prof,
+                  mediaItems: [newMedia, ...(prof.mediaItems || [])],
+                },
+              };
+              safeSaveStorage('privity_profiles_v5', nextProfs);
+              return nextProfs;
+            });
+          }
+          break;
+        }
+
+        case 'DELETE_POST': {
+          const { postId } = event;
+          setPosts((prev) => {
+            const next = prev.filter((p) => p.id !== postId);
+            safeSaveStorage('privity_posts_v5', next);
+            return next;
+          });
+          setProfiles((prev) => {
+            let changed = false;
+            const nextProfs = { ...prev };
+            for (const [h, prof] of Object.entries(nextProfs)) {
+              if (prof.mediaItems?.some((m) => m.id === postId)) {
+                changed = true;
+                nextProfs[h] = {
+                  ...prof,
+                  mediaItems: prof.mediaItems.filter((m) => m.id !== postId),
+                };
+              }
+            }
+            if (changed) safeSaveStorage('privity_profiles_v5', nextProfs);
+            return nextProfs;
+          });
+          break;
+        }
+
+        case 'EDIT_POST_CAPTION': {
+          const { postId, caption } = event;
+          if (!postId || typeof caption !== 'string') return;
+          setPosts((prev) => {
+            const next = prev.map((p) => (p.id === postId ? { ...p, caption } : p));
+            safeSaveStorage('privity_posts_v5', next);
+            return next;
+          });
+          break;
+        }
+
+        case 'ADD_COMMENT': {
+          const { postId, comment, parentCommentId } = event;
+          if (!postId || !comment || !comment.id) return;
+          setPosts((prev) => {
+            const next = prev.map((p) => {
+              if (p.id !== postId) return p;
+              if (parentCommentId) {
+                const updatedComments = p.comments.map((c) => {
+                  if (c.id === parentCommentId) {
+                    if ((c.replies || []).some((r) => r.id === comment.id)) return c;
+                    return {
+                      ...c,
+                      replies: [...(c.replies || []), comment],
+                    };
+                  }
+                  return c;
+                });
+                return { ...p, commentsCount: p.commentsCount + 1, comments: updatedComments };
+              }
+              if (p.comments.some((c) => c.id === comment.id)) return p;
               return {
                 ...p,
-                isLiked,
-                likesCount: typeof likesCount === 'number' ? likesCount : (isLiked ? p.likesCount + 1 : Math.max(0, p.likesCount - 1)),
-                likersList: updatedLikers,
+                commentsCount: p.commentsCount + 1,
+                comments: [...p.comments, comment],
               };
-            }
-            return p;
-          })
-        );
-        break;
-      }
-
-      case 'LIKE_MEDIA': {
-        const { mediaId, isLiked, count } = event;
-        setPhotoLikesMap((prev) => ({
-          ...prev,
-          [mediaId]: { isLiked, count },
-        }));
-        break;
-      }
-
-      case 'NEW_POST': {
-        const { post } = event;
-        if (!post || !post.id) return;
-        setPosts((prev) => {
-          if (prev.some((p) => p.id === post.id)) return prev;
-          return [post, ...prev];
-        });
-        if (post.authorHandle === 'luciano' && post.contentUrl) {
-          setProfiles((prev) => {
-            const luc = prev['luciano'] || getUserProfile('luciano');
-            const exists = (luc.mediaItems || []).some((m) => m.id === post.id || isSameMedia(m.url, post.contentUrl));
-            if (exists) return prev;
-            const newMedia: UserMediaItem = {
-              id: post.id,
-              url: post.contentUrl,
-              type: post.type === 'video' ? 'video' : 'image',
-              likes: 0,
-              comments: 0,
-              isLiked: false,
-            };
-            return {
-              ...prev,
-              luciano: {
-                ...luc,
-                mediaItems: [newMedia, ...(luc.mediaItems || [])],
-              },
-            };
+            });
+            safeSaveStorage('privity_posts_v5', next);
+            return next;
           });
+          break;
         }
-        break;
-      }
 
-      case 'DELETE_POST': {
-        const { postId } = event;
-        setPosts((prev) => prev.filter((p) => p.id !== postId));
-        setProfiles((prev) => {
-          const luc = prev['luciano'];
-          if (!luc) return prev;
-          return {
-            ...prev,
-            luciano: {
-              ...luc,
-              mediaItems: (luc.mediaItems || []).filter((m) => m.id !== postId),
-            },
-          };
-        });
-        break;
-      }
+        case 'LIKE_COMMENT': {
+          const { postId, commentId, isLiked, likesCount } = event;
+          setPosts((prev) => {
+            const next = prev.map((p) => {
+              if (p.id !== postId) return p;
+              return {
+                ...p,
+                comments: p.comments.map((c) => {
+                  if (c.id === commentId) {
+                    return {
+                      ...c,
+                      isLiked,
+                      likesCount:
+                        typeof likesCount === 'number'
+                          ? likesCount
+                          : isLiked
+                          ? (c.likesCount || 0) + 1
+                          : Math.max(0, (c.likesCount || 0) - 1),
+                    };
+                  }
+                  return c;
+                }),
+              };
+            });
+            safeSaveStorage('privity_posts_v5', next);
+            return next;
+          });
+          break;
+        }
 
-      case 'ADD_COMMENT': {
-        const { postId, comment, parentCommentId } = event;
-        if (!postId || !comment) return;
-        setPosts((prev) =>
-          prev.map((p) => {
-            if (p.id !== postId) return p;
-            if (parentCommentId) {
-              const updatedComments = p.comments.map((c) => {
-                if (c.id === parentCommentId) {
-                  return {
-                    ...c,
-                    replies: [...(c.replies || []), comment],
-                  };
-                }
-                return c;
-              });
-              return { ...p, comments: updatedComments };
-            }
-            return {
-              ...p,
-              comments: [...p.comments, comment],
+        case 'DELETE_COMMENT': {
+          const { postId, commentId, replyId } = event;
+          if (!postId || !commentId) return;
+          setPosts((prev) => {
+            const next = prev.map((p) => {
+              if (p.id !== postId) return p;
+              if (replyId) {
+                return {
+                  ...p,
+                  commentsCount: Math.max(0, p.commentsCount - 1),
+                  comments: p.comments.map((c) =>
+                    c.id === commentId
+                      ? { ...c, replies: (c.replies || []).filter((r) => r.id !== replyId) }
+                      : c
+                  ),
+                };
+              }
+              const target = p.comments.find((c) => c.id === commentId);
+              const repliesCount = target?.replies?.length || 0;
+              return {
+                ...p,
+                commentsCount: Math.max(0, p.commentsCount - (1 + repliesCount)),
+                comments: p.comments.filter((c) => c.id !== commentId),
+              };
+            });
+            safeSaveStorage('privity_posts_v5', next);
+            return next;
+          });
+          break;
+        }
+
+        case 'SEND_DM': {
+          const { recipientHandle, senderHandle, message } = event;
+          if (!recipientHandle || !message || !message.id) return;
+          const targetKey =
+            recipientHandle === cleanMyHandle
+              ? (senderHandle || message.senderHandle || 'marcus_dev').replace(/^@/, '')
+              : recipientHandle.replace(/^@/, '');
+          setDirectMessages((prev) => {
+            const thread = prev[targetKey] || [];
+            if (thread.some((m) => m.id === message.id)) return prev;
+            const updated = {
+              ...prev,
+              [targetKey]: [...thread, message],
             };
-          })
-        );
-        break;
-      }
+            safeSaveStorage('privity_direct_messages_v5', updated);
+            return updated;
+          });
+          break;
+        }
 
-      case 'LIKE_COMMENT': {
-        const { postId, commentId, isLiked, likesCount } = event;
-        setPosts((prev) =>
-          prev.map((p) => {
-            if (p.id !== postId) return p;
-            return {
-              ...p,
-              comments: p.comments.map((c) => {
-                if (c.id === commentId) {
-                  return {
-                    ...c,
-                    isLiked,
-                    likesCount: typeof likesCount === 'number' ? likesCount : (isLiked ? c.likesCount + 1 : Math.max(0, c.likesCount - 1)),
-                  };
-                }
-                return c;
+        case 'REACT_DM': {
+          const { recipientHandle, messageId, emoji, userHandle } = event;
+          if (!recipientHandle || !messageId || !emoji) return;
+          const targetKey =
+            recipientHandle === cleanMyHandle
+              ? (userHandle || recipientHandle).replace(/^@/, '')
+              : recipientHandle.replace(/^@/, '');
+          setDirectMessages((prev) => {
+            const thread = prev[targetKey] || [];
+            const updated = {
+              ...prev,
+              [targetKey]: thread.map((m) => {
+                if (m.id !== messageId) return m;
+                const currentReactions = { ...(m.reactions || {}) };
+                currentReactions[emoji] = (currentReactions[emoji] || 0) + 1;
+                return { ...m, reactions: currentReactions };
               }),
             };
+            safeSaveStorage('privity_direct_messages_v5', updated);
+            return updated;
+          });
+          break;
+        }
+
+        case 'DELETE_DM': {
+          const { recipientHandle, messageId } = event;
+          const clean = (recipientHandle || '').replace(/^@/, '');
+          if (!clean || !messageId) return;
+          setDirectMessages((prev) => {
+            const thread = prev[clean] || [];
+            const updated = {
+              ...prev,
+              [clean]: thread.filter((m) => m.id !== messageId),
+            };
+            safeSaveStorage('privity_direct_messages_v5', updated);
+            return updated;
+          });
+          break;
+        }
+
+        case 'CLEAR_CHAT': {
+          const { recipientHandle } = event;
+          const clean = (recipientHandle || '').replace(/^@/, '');
+          if (!clean) return;
+          setDirectMessages((prev) => {
+            const updated = { ...prev, [clean]: [] };
+            safeSaveStorage('privity_direct_messages_v5', updated);
+            return updated;
+          });
+          break;
+        }
+
+        case 'TOGGLE_FOLLOW': {
+          const { targetHandle, targetId, isFollowing } = event;
+          if (!targetHandle) return;
+          const clean = targetHandle.replace(/^@/, '');
+          setFollowingMap((prev) => {
+            const next: Record<string, boolean> = {
+              ...prev,
+              [clean]: isFollowing,
+              [clean.toLowerCase()]: isFollowing,
+            };
+            if (targetId) next[targetId] = isFollowing;
+            safeSaveStorage('privity_following_v5', next);
+            return next;
+          });
+          break;
+        }
+
+        case 'TOGGLE_CLOSE_FRIENDS': {
+          const { handle, isCloseFriend } = event;
+          if (!handle) return;
+          const clean = handle.replace(/^@/, '');
+          setCloseFriendsList((prev) => {
+            const next = isCloseFriend
+              ? Array.from(new Set([...prev, clean]))
+              : prev.filter((h) => h !== clean);
+            safeSaveStorage('privity_close_friends_v5', next);
+            return next;
+          });
+          break;
+        }
+
+        case 'REMOVE_FOLLOWER': {
+          const { handle } = event;
+          if (!handle) return;
+          const clean = handle.replace(/^@/, '');
+          setProfiles((prev) => {
+            const myProf = prev['luciano'];
+            if (!myProf) return prev;
+            const nextProfs = {
+              ...prev,
+              luciano: {
+                ...myProf,
+                followersList: (myProf.followersList || []).filter(
+                  (h) => h.toLowerCase() !== clean.toLowerCase()
+                ),
+              },
+            };
+            safeSaveStorage('privity_profiles_v5', nextProfs);
+            return nextProfs;
+          });
+          break;
+        }
+
+        case 'DELETE_MEDIA': {
+          const { handle, mediaId, mediaUrl } = event;
+          const clean = (handle || '').replace(/^@/, '');
+          if (clean) {
+            setProfiles((prev) => {
+              const prof = prev[clean];
+              if (!prof) return prev;
+              const nextProfs = {
+                ...prev,
+                [clean]: {
+                  ...prof,
+                  mediaItems: (prof.mediaItems || []).filter(
+                    (m) => m.id !== mediaId && (!mediaUrl || !isSameMedia(m.url, mediaUrl))
+                  ),
+                },
+              };
+              safeSaveStorage('privity_profiles_v5', nextProfs);
+              return nextProfs;
+            });
+          }
+          if (mediaUrl) {
+            setPosts((prev) => {
+              const next = prev.filter(
+                (p) => !isSameMedia(p.contentUrl, mediaUrl) && !isSameMedia(p.thumbnailUrl, mediaUrl)
+              );
+              if (next.length !== prev.length) {
+                safeSaveStorage('privity_posts_v5', next);
+              }
+              return next;
+            });
+          }
+          break;
+        }
+
+        case 'UPDATE_PROFILE': {
+          const { profile } = event;
+          if (!profile || !profile.handle) return;
+          const clean = profile.handle.replace(/^@/, '');
+          setProfiles((prev) => {
+            const next = {
+              ...prev,
+              [clean]: { ...prev[clean], ...profile },
+            };
+            safeSaveStorage('privity_profiles_v5', next);
+            return next;
+          });
+          break;
+        }
+
+        default:
+          break;
+      }
+    },
+    [myTabSessionId, myProfile.handle]
+  );
+
+  // Safely parse and process any incoming raw item from ntfy (SSE or Polling)
+  const handleRawNtfyItem = React.useCallback(
+    (item: any) => {
+      if (!item) return;
+
+      // Handle file attachments created when payload was > 4KB
+      if (item.attachment && item.attachment.url) {
+        fetch(item.attachment.url)
+          .then((res) => res.json())
+          .then((evt) => {
+            applyRemoteSyncEvent(evt);
           })
-        );
-        break;
+          .catch((err) => console.warn('Failed to fetch sync attachment', err));
+        return;
       }
 
-      case 'SEND_DM': {
-        const { recipientHandle, message } = event;
-        if (!recipientHandle || !message) return;
-        setDirectMessages((prev) => {
-          const thread = prev[recipientHandle] || [];
-          if (thread.some((m) => m.id === message.id)) return prev;
-          return {
-            ...prev,
-            [recipientHandle]: [...thread, message],
-          };
-        });
-        break;
+      // Handle standard inline JSON messages
+      if (item.event === 'message' && item.message) {
+        try {
+          const evt = JSON.parse(item.message);
+          applyRemoteSyncEvent(evt);
+        } catch (e) {
+          // not valid JSON (e.g. text notification)
+        }
       }
+    },
+    [applyRemoteSyncEvent]
+  );
 
-      case 'REACT_DM': {
-        const { recipientHandle, messageId, emoji } = event;
-        if (!recipientHandle || !messageId || !emoji) return;
-        setDirectMessages((prev) => {
-          const thread = prev[recipientHandle] || [];
-          return {
-            ...prev,
-            [recipientHandle]: thread.map((m) => {
-              if (m.id !== messageId) return m;
-              const currentReactions = { ...(m.reactions || {}) };
-              const currentCount = currentReactions[emoji] || 0;
-              currentReactions[emoji] = currentCount + 1;
-              return { ...m, reactions: currentReactions };
-            }),
-          };
-        });
-        break;
-      }
-
-      case 'DELETE_DM': {
-        const { recipientHandle, messageId } = event;
-        if (!recipientHandle || !messageId) return;
-        setDirectMessages((prev) => {
-          const thread = prev[recipientHandle] || [];
-          return {
-            ...prev,
-            [recipientHandle]: thread.filter((m) => m.id !== messageId),
-          };
-        });
-        break;
-      }
-
-      case 'CLEAR_CHAT': {
-        const { recipientHandle } = event;
-        if (!recipientHandle) return;
-        setDirectMessages((prev) => ({
-          ...prev,
-          [recipientHandle]: [],
-        }));
-        break;
-      }
-
-      case 'UPDATE_PROFILE': {
-        const { profile } = event;
-        if (!profile || !profile.handle) return;
-        setProfiles((prev) => ({
-          ...prev,
-          [profile.handle]: { ...prev[profile.handle], ...profile },
-        }));
-        break;
-      }
-
-      default:
-        break;
-    }
-  }, [myDeviceId]);
-
-  // Setup Real-Time Listeners (SSE for sub-second cloud sync + BroadcastChannel for same device + Catch-up poll)
+  // Setup Real-Time Listeners (SSE for sub-second cloud sync + BroadcastChannel for same device + 3s Heartbeat Poll)
   useEffect(() => {
-    // 1. Initial catch-up from cloud for events in past 12 hours
-    const catchUp = () => {
-      fetch(`${SYNC_ENDPOINT}/json?poll=1&since=12h`)
+    // 1. Initial 24h catch-up to retrieve all recent community activity
+    const fullCatchUp = () => {
+      fetch(`${SYNC_ENDPOINT}/json?poll=1&since=24h`)
         .then((res) => res.text())
         .then((text) => {
           const lines = text.trim().split('\n').filter(Boolean);
           lines.forEach((line) => {
             try {
               const item = JSON.parse(line);
-              if (item.event === 'message' && item.message) {
-                const evt = JSON.parse(item.message);
-                applyRemoteSyncEvent(evt);
-              }
+              handleRawNtfyItem(item);
             } catch (e) {}
           });
         })
         .catch(() => {});
     };
 
-    catchUp();
+    // 2. Incremental 45s catch-up for continuous background heartbeat
+    const quickCatchUp = () => {
+      fetch(`${SYNC_ENDPOINT}/json?poll=1&since=45s`)
+        .then((res) => res.text())
+        .then((text) => {
+          const lines = text.trim().split('\n').filter(Boolean);
+          lines.forEach((line) => {
+            try {
+              const item = JSON.parse(line);
+              handleRawNtfyItem(item);
+            } catch (e) {}
+          });
+        })
+        .catch(() => {});
+    };
 
-    // 2. Server-Sent Events (SSE) stream for instant real-time delivery
+    fullCatchUp();
+
+    // 3. Persistent Server-Sent Events (SSE) stream for instant sub-second delivery
     let es: EventSource | null = null;
-    try {
-      es = new EventSource(`${SYNC_ENDPOINT}/sse`);
-      es.onmessage = (e) => {
-        try {
-          const item = JSON.parse(e.data);
-          if (item.event === 'message' && item.message) {
-            const evt = JSON.parse(item.message);
-            applyRemoteSyncEvent(evt);
-          }
-        } catch (err) {}
-      };
-    } catch (e) {
-      console.warn('SSE subscription failed', e);
-    }
+    let reconnectTimeout: any = null;
 
-    // 3. Same-device multi-tab listener
+    const connectSSE = () => {
+      try {
+        if (es) {
+          es.close();
+        }
+        es = new EventSource(`${SYNC_ENDPOINT}/sse`);
+        es.onmessage = (e) => {
+          try {
+            const item = JSON.parse(e.data);
+            handleRawNtfyItem(item);
+          } catch (err) {}
+        };
+        es.onerror = () => {
+          if (reconnectTimeout) clearTimeout(reconnectTimeout);
+          reconnectTimeout = setTimeout(() => {
+            connectSSE();
+            quickCatchUp();
+          }, 2500);
+        };
+      } catch (e) {
+        console.warn('SSE subscription failed', e);
+      }
+    };
+
+    connectSSE();
+
+    // 4. Same-device multi-tab BroadcastChannel listener
     if (localSyncBus) {
       localSyncBus.onmessage = (e) => {
         if (e.data) {
@@ -1560,21 +1841,37 @@ export function App() {
       };
     }
 
-    // 4. On window visibility / focus (e.g. user unlocks phone), refresh catchUp
-    const handleVisibility = () => {
+    // 5. 3-second heartbeat poll to ensure guaranteed sync even if mobile OS sleeps SSE
+    const pollInterval = setInterval(() => {
+      quickCatchUp();
+      if (!es || es.readyState === EventSource.CLOSED) {
+        connectSSE();
+      }
+    }, 3000);
+
+    // 6. On window visibility / focus (e.g. user unlocks phone or switches back to tab)
+    const handleWake = () => {
       if (document.visibilityState === 'visible') {
-        catchUp();
+        quickCatchUp();
+        if (!es || es.readyState === EventSource.CLOSED) {
+          connectSSE();
+        }
       }
     };
-    window.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('focus', catchUp);
+    window.addEventListener('visibilitychange', handleWake);
+    window.addEventListener('focus', handleWake);
+    window.addEventListener('online', fullCatchUp);
 
     return () => {
+      clearInterval(pollInterval);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
       es?.close();
-      window.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('focus', catchUp);
+      window.removeEventListener('visibilitychange', handleWake);
+      window.removeEventListener('focus', handleWake);
+      window.removeEventListener('online', fullCatchUp);
     };
-  }, [applyRemoteSyncEvent, localSyncBus]);
+  }, [handleRawNtfyItem, applyRemoteSyncEvent, localSyncBus]);
+
 
   // Edit Personal Profile Modal State
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
@@ -1867,6 +2164,13 @@ export function App() {
       setLightboxUrl(null);
     }
 
+    broadcastSyncEvent({
+      action: 'DELETE_MEDIA',
+      handle: clean,
+      mediaId,
+      mediaUrl,
+    });
+
     triggerToast('Visual deleted from Studio & Feed');
   };
 
@@ -1876,6 +2180,11 @@ export function App() {
     setPosts((prev) =>
       prev.map((p) => (p.id === editingPostCaption.id ? { ...p, caption: editingPostCaption.caption } : p))
     );
+    broadcastSyncEvent({
+      action: 'EDIT_POST_CAPTION',
+      postId: editingPostCaption.id,
+      caption: editingPostCaption.caption,
+    });
     setEditingPostCaption(null);
     setPostMenuModal(null);
     triggerToast('Dispatch caption updated');
@@ -2022,6 +2331,13 @@ export function App() {
       return nextProfiles;
     });
 
+    broadcastSyncEvent({
+      action: 'TOGGLE_FOLLOW',
+      targetHandle: resolvedHandle,
+      targetId: resolvedId,
+      isFollowing: next,
+    });
+
     triggerToast(next ? `Now following ${name || '@' + resolvedHandle}` : `Unfollowed ${name || '@' + resolvedHandle}`);
   };
 
@@ -2052,6 +2368,11 @@ export function App() {
       return nextProfiles;
     });
 
+    broadcastSyncEvent({
+      action: 'REMOVE_FOLLOWER',
+      handle: clean,
+    });
+
     triggerToast(`Removed @${clean} from your followers`);
   };
 
@@ -2073,6 +2394,12 @@ export function App() {
           trustCirclesList: nextList,
         },
       };
+    });
+
+    broadcastSyncEvent({
+      action: 'TOGGLE_CLOSE_FRIENDS',
+      handle: clean,
+      isCloseFriend: !exists,
     });
 
     triggerToast(exists ? `Removed @${clean} from your Close Friends circle` : `Added @${clean} to your Close Friends circle`);
@@ -2557,6 +2884,13 @@ export function App() {
       });
     }
 
+    broadcastSyncEvent({
+      action: 'DELETE_COMMENT',
+      postId,
+      commentId,
+      replyId,
+    });
+
     triggerToast('Comment deleted');
   };
 
@@ -2970,6 +3304,7 @@ export function App() {
     broadcastSyncEvent({
       action: 'SEND_DM',
       recipientHandle,
+      senderHandle: cleanMyHandle,
       message: newMsg,
     });
 
@@ -3002,7 +3337,8 @@ export function App() {
       });
       broadcastSyncEvent({
         action: 'SEND_DM',
-        recipientHandle,
+        recipientHandle: cleanMyHandle,
+        senderHandle: recipientHandle,
         message: replyMsg,
       });
       setIsRecipientTyping(false);
@@ -3708,7 +4044,7 @@ export function App() {
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            compressImageFile(file, 1400, 0.85, (dataUrl) => {
+                            compressImageFile(file, 960, 0.72, (dataUrl) => {
                               setComposerPhotoUrl(dataUrl);
                               triggerToast('Photo attached to dispatch');
                             });
@@ -4891,7 +5227,7 @@ export function App() {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              compressImageFile(file, 1200, 0.85, (dataUrl) => {
+                              compressImageFile(file, 800, 0.70, (dataUrl) => {
                                 setChatMediaAttachment(dataUrl);
                                 setChatMediaType('photo');
                                 triggerToast('Private photo staged · Never published publicly');
@@ -6861,7 +7197,7 @@ export function App() {
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          compressImageFile(file, 1400, 0.85, (dataUrl) => {
+                          compressImageFile(file, 960, 0.72, (dataUrl) => {
                             setModalPhoto(dataUrl);
                             triggerToast('Photo attached to dispatch!');
                           });
@@ -7059,7 +7395,7 @@ export function App() {
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            compressImageFile(file, 1400, 0.82, (dataUrl) => {
+                            compressImageFile(file, 960, 0.72, (dataUrl) => {
                               setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
                               triggerToast('Cover banner photo updated!');
                             });
@@ -7120,7 +7456,7 @@ export function App() {
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                compressImageFile(file, 400, 0.88, (dataUrl) => {
+                                compressImageFile(file, 320, 0.80, (dataUrl) => {
                                   setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
                                   triggerToast('Avatar photo updated!');
                                 });
