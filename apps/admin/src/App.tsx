@@ -692,7 +692,7 @@ const INITIAL_PROFILES_REGISTRY: Record<string, UserProfile> = {
     name: 'Luciano',
     handle: 'luciano',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
-    coverUrl: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=1600&auto=format&fit=crop&q=85',
+    coverUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&auto=format&fit=crop&q=85',
     isVerified: true,
     verifiedCategory: 'Platform Founder',
     verifiedSince: 'Verified 2026',
@@ -708,7 +708,7 @@ const INITIAL_PROFILES_REGISTRY: Record<string, UserProfile> = {
     followingList: ['elena_rodriguez', 'marcus_dev', 'julian_analogue', 'sara_architecture'],
     trustCirclesList: ['elena_rodriguez', 'marcus_dev', 'sara_architecture'],
     mediaItems: [
-      { id: 'm-luciano-1', url: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 54, comments: 6 },
+      { id: 'm-luciano-1', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 54, comments: 6 },
       { id: 'm-luciano-2', url: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 40, comments: 3 },
     ],
   },
@@ -728,7 +728,7 @@ const PRESET_AVATARS = [
 
 // Preset Banners for Studio & Architectural Aesthetics
 const PRESET_BANNERS = [
-  'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=1600&auto=format&fit=crop&q=85',
+  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&auto=format&fit=crop&q=85',
   'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600&auto=format&fit=crop&q=85',
   'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1600&auto=format&fit=crop&q=85',
   'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1600&auto=format&fit=crop&q=85',
@@ -877,9 +877,13 @@ const VerifiedBadge: React.FC<{
   );
 };
 
-// Canonical Media Normalizer: matches URLs across varied CDN/Unsplash query dimensions
+// Canonical Media Normalizer: matches URLs across varied CDN/Unsplash query dimensions & uploaded base64 data
 const extractMediaBaseKey = (url?: string): string => {
   if (!url) return '';
+  if (url.startsWith('data:')) {
+    // Deterministic signature of length + sample slices to avoid massive keys and quota crashes
+    return `data-sig-${url.slice(0, 80)}-tail-${url.slice(-40)}-len-${url.length}`;
+  }
   try {
     const unsplashMatch = url.match(/(photo-[\w-]+)/i);
     if (unsplashMatch) return unsplashMatch[1].toLowerCase();
@@ -892,10 +896,74 @@ const extractMediaBaseKey = (url?: string): string => {
 const isSameMedia = (url1?: string, url2?: string): boolean => {
   if (!url1 || !url2) return false;
   if (url1 === url2) return true;
+  if (url1.startsWith('data:') && url2.startsWith('data:')) {
+    if (url1.length !== url2.length) return false;
+    return url1.slice(0, 160) === url2.slice(0, 160) && url1.slice(-60) === url2.slice(-60);
+  }
   const k1 = extractMediaBaseKey(url1);
   const k2 = extractMediaBaseKey(url2);
   if (k1 && k2 && k1 === k2) return true;
   return url1.split('?')[0].trim() === url2.split('?')[0].trim();
+};
+
+export interface DirectChatMessage {
+  id: string;
+  senderHandle: string;
+  recipientHandle: string;
+  text: string;
+  timeAgo: string;
+  timestamp: number;
+}
+
+const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
+  elena_rodriguez: [
+    {
+      id: 'm-elena-1',
+      senderHandle: 'elena_rodriguez',
+      recipientHandle: 'luciano',
+      text: 'Hi Luciano! Loving the new Privity update. The analogue medium format gallery feels so authentic without algorithm clutter.',
+      timeAgo: '12m ago',
+      timestamp: Date.now() - 720000,
+    },
+    {
+      id: 'm-elena-2',
+      senderHandle: 'luciano',
+      recipientHandle: 'elena_rodriguez',
+      text: 'Thanks Elena! We built this network so artists own their audience directly. Thrilled to have you in the close circle.',
+      timeAgo: '8m ago',
+      timestamp: Date.now() - 480000,
+    },
+  ],
+  marcus_dev: [
+    {
+      id: 'm-marcus-1',
+      senderHandle: 'marcus_dev',
+      recipientHandle: 'luciano',
+      text: 'The local-first cryptographic verification proofs are holding strong across all dispatches.',
+      timeAgo: '1h ago',
+      timestamp: Date.now() - 3600000,
+    },
+  ],
+  sara_architecture: [
+    {
+      id: 'm-sara-1',
+      senderHandle: 'sara_architecture',
+      recipientHandle: 'luciano',
+      text: 'The natural daylight study looks fantastic in the new glass lightbox viewer!',
+      timeAgo: '2h ago',
+      timestamp: Date.now() - 7200000,
+    },
+  ],
+  julian_analogue: [
+    {
+      id: 'm-julian-1',
+      senderHandle: 'julian_analogue',
+      recipientHandle: 'luciano',
+      text: 'Hey Luciano, just uploaded the binaural dawn recording from Big Sur! High dynamic range.',
+      timeAgo: '3h ago',
+      timestamp: Date.now() - 10800000,
+    },
+  ],
 };
 
 // ==================== MAIN COMPONENT ====================
@@ -907,12 +975,15 @@ export function App() {
       localStorage.setItem(key, JSON.stringify(data));
     } catch (e) {
       console.warn(`Storage quota reached for ${key}, trimming payload`, e);
-      if (Array.isArray(data) && data.length > 20) {
-        try {
-          localStorage.setItem(key, JSON.stringify(data.slice(0, 20)));
-        } catch (err2) {
-          console.warn('Trimmed fallback failed', err2);
+      try {
+        if (Array.isArray(data)) {
+          localStorage.setItem(key, JSON.stringify(data.slice(0, 15)));
+        } else if (typeof data === 'object' && data !== null) {
+          const entries = Object.entries(data).filter(([k]) => !k.startsWith('data:'));
+          localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries.slice(-25))));
         }
+      } catch (err2) {
+        console.warn('Trimmed fallback failed', err2);
       }
     }
   };
@@ -946,6 +1017,14 @@ export function App() {
   const [lightboxShowComments, setLightboxShowComments] = useState(false);
   const [lightboxCommentInput, setLightboxCommentInput] = useState('');
 
+  // Real-Time End-to-End Encrypted Direct Messages State
+  const [directMessages, setDirectMessages] = useState<Record<string, DirectChatMessage[]>>(() =>
+    readStorage('privity_direct_messages_v5', INITIAL_DIRECT_MESSAGES)
+  );
+  const [activeChatUser, setActiveChatUser] = useState<UserProfile | null>(null);
+  const [chatDraftText, setChatDraftText] = useState('');
+  const [isRecipientTyping, setIsRecipientTyping] = useState(false);
+
   // Take user all the way to the top of the preserved section upon page refresh / load
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
@@ -962,6 +1041,11 @@ export function App() {
   useEffect(() => {
     safeSaveStorage('privity_photo_likes_v5', photoLikesMap);
   }, [photoLikesMap]);
+
+  // Save direct messages
+  useEffect(() => {
+    safeSaveStorage('privity_direct_messages_v5', directMessages);
+  }, [directMessages]);
 
   // 1. Persistent Profiles State
   const [profiles, setProfiles] = useState<Record<string, UserProfile>>(() =>
@@ -1187,30 +1271,44 @@ export function App() {
   const handleLikeMedia = (profileHandle: string, mediaId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const clean = profileHandle.replace(/^@/, '');
-    let updatedUrl = '';
-    let updatedLiked = false;
-    let updatedCount = 0;
+    const prof = profiles[clean] || getUserProfile(clean);
+    const targetItem = prof?.mediaItems?.find((m) => m.id === mediaId);
+    if (!targetItem) return;
 
+    const targetUrl = targetItem.url;
+    const baseKey = extractMediaBaseKey(targetUrl);
+    const photoRecord = targetUrl ? (photoLikesMap[targetUrl] || (baseKey ? photoLikesMap[baseKey] : undefined)) : undefined;
+    const matchingPost = posts.find((p) => isSameMedia(p.contentUrl, targetUrl) || isSameMedia(p.thumbnailUrl, targetUrl));
+
+    const currentLiked = photoRecord !== undefined
+      ? photoRecord.isLiked
+      : (matchingPost !== undefined ? matchingPost.isLiked : !!targetItem.isLiked);
+    const currentLikes = photoRecord !== undefined
+      ? photoRecord.count
+      : (matchingPost !== undefined ? matchingPost.likesCount : targetItem.likes);
+    const nextLiked = !currentLiked;
+    const nextLikes = nextLiked ? currentLikes + 1 : Math.max(0, currentLikes - 1);
+
+    // 1. Update photoLikesMap immediately
+    setPhotoLikesMap((prev) => {
+      const next = {
+        ...prev,
+        ...(baseKey ? { [baseKey]: { isLiked: nextLiked, count: nextLikes } } : {}),
+        ...(!targetUrl.startsWith('data:') ? { [targetUrl]: { isLiked: nextLiked, count: nextLikes } } : {}),
+      };
+      safeSaveStorage('privity_photo_likes_v5', next);
+      return next;
+    });
+
+    // 2. Update profiles immediately across all profiles
     setProfiles((prev) => {
-      const prof = prev[clean] || getUserProfile(clean);
-      if (!prof || !prof.mediaItems) return prev;
-      const targetItem = prof.mediaItems.find((m) => m.id === mediaId);
-      const nextLiked = targetItem ? !targetItem.isLiked : true;
-      const nextLikes = targetItem ? (nextLiked ? targetItem.likes + 1 : Math.max(0, targetItem.likes - 1)) : 1;
-      if (targetItem) {
-        updatedUrl = targetItem.url;
-        updatedLiked = nextLiked;
-        updatedCount = nextLikes;
-      }
-
-      // Synchronize across ALL profiles that share this media URL
       const nextProfs = { ...prev };
       for (const [h, p] of Object.entries(nextProfs)) {
-        if (p.mediaItems?.some((m) => m.id === mediaId || (updatedUrl && isSameMedia(m.url, updatedUrl)))) {
+        if (p.mediaItems?.some((m) => m.id === mediaId || isSameMedia(m.url, targetUrl))) {
           nextProfs[h] = {
             ...p,
             mediaItems: p.mediaItems.map((m) => {
-              if (m.id === mediaId || (updatedUrl && isSameMedia(m.url, updatedUrl))) {
+              if (m.id === mediaId || isSameMedia(m.url, targetUrl)) {
                 return {
                   ...m,
                   isLiked: nextLiked,
@@ -1226,77 +1324,64 @@ export function App() {
       return nextProfs;
     });
 
-    if (updatedUrl) {
-      const targetUrl = updatedUrl;
-      const baseKey = extractMediaBaseKey(targetUrl);
-      setPhotoLikesMap((prev) => {
-        const next = {
-          ...prev,
-          [targetUrl]: { isLiked: updatedLiked, count: updatedCount },
-          ...(baseKey ? { [baseKey]: { isLiked: updatedLiked, count: updatedCount } } : {}),
-        };
-        safeSaveStorage('privity_photo_likes_v5', next);
-        return next;
-      });
-
-      setPosts((prevPosts) => {
-        let matched = false;
-        const nextPosts = prevPosts.map((p) => {
-          if (isSameMedia(p.contentUrl, targetUrl) || isSameMedia(p.thumbnailUrl, targetUrl)) {
-            matched = true;
-            let nextLikers = [...(p.likersList || [])];
-            if (updatedLiked) {
-              if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
-            } else {
-              nextLikers = nextLikers.filter((h) => h !== 'luciano');
-            }
-            return {
-              ...p,
-              isLiked: updatedLiked,
-              likersList: nextLikers,
-              likesCount: updatedCount,
-            };
+    // 3. Update posts immediately across all posts
+    setPosts((prevPosts) => {
+      let matched = false;
+      const nextPosts = prevPosts.map((p) => {
+        if (isSameMedia(p.contentUrl, targetUrl) || isSameMedia(p.thumbnailUrl, targetUrl)) {
+          matched = true;
+          let nextLikers = [...(p.likersList || [])];
+          if (nextLiked) {
+            if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
+          } else {
+            nextLikers = nextLikers.filter((h) => h !== 'luciano');
           }
-          return p;
-        });
-        if (matched) {
-          safeSaveStorage('privity_posts_v5', nextPosts);
-          return nextPosts;
-        } else if (updatedLiked) {
-          const ownerProf = profiles[clean] || getUserProfile(clean);
-          const newPost: PostItem = {
-            id: `p-media-${extractMediaBaseKey(targetUrl) || Date.now()}`,
-            authorId: ownerProf.id,
-            authorName: ownerProf.name,
-            authorHandle: ownerProf.handle,
-            authorAvatar: ownerProf.avatar,
-            isVerified: ownerProf.isVerified,
-            verifiedCategory: ownerProf.category || ownerProf.verifiedCategory,
-            cryptoProofId: ownerProf.cryptoProofId,
-            type: 'image',
-            contentUrl: targetUrl,
-            caption: `Studio visual release by @${ownerProf.handle}.`,
-            tags: ['studio', 'media', 'visuals'],
-            privacy: 'public',
-            likesCount: updatedCount,
-            likersList: ['luciano'],
-            commentsCount: 0,
-            sharesCount: 0,
-            savesCount: 0,
-            isLiked: true,
-            isSaved: false,
-            timeAgo: 'Just now',
-            comments: [],
+          return {
+            ...p,
+            isLiked: nextLiked,
+            likersList: nextLikers,
+            likesCount: nextLikes,
           };
-          const createdPosts = [newPost, ...prevPosts];
-          safeSaveStorage('privity_posts_v5', createdPosts);
-          return createdPosts;
         }
-        return nextPosts;
+        return p;
       });
-    }
+      if (matched) {
+        safeSaveStorage('privity_posts_v5', nextPosts);
+        return nextPosts;
+      } else if (nextLiked) {
+        const ownerProf = profiles[clean] || getUserProfile(clean);
+        const newPost: PostItem = {
+          id: `p-media-${baseKey || Date.now()}`,
+          authorId: ownerProf.id,
+          authorName: ownerProf.name,
+          authorHandle: ownerProf.handle,
+          authorAvatar: ownerProf.avatar,
+          isVerified: ownerProf.isVerified,
+          verifiedCategory: ownerProf.category || ownerProf.verifiedCategory,
+          cryptoProofId: ownerProf.cryptoProofId,
+          type: 'image',
+          contentUrl: targetUrl,
+          caption: `Studio visual release by @${ownerProf.handle}.`,
+          tags: ['studio', 'media', 'visuals'],
+          privacy: 'public',
+          likesCount: nextLikes,
+          likersList: ['luciano'],
+          commentsCount: 0,
+          sharesCount: 0,
+          savesCount: 0,
+          isLiked: true,
+          isSaved: false,
+          timeAgo: 'Just now',
+          comments: [],
+        };
+        const createdPosts = [newPost, ...prevPosts];
+        safeSaveStorage('privity_posts_v5', createdPosts);
+        return createdPosts;
+      }
+      return nextPosts;
+    });
 
-    triggerToast(updatedLiked ? 'Liked studio visual' : 'Unliked studio visual');
+    triggerToast(nextLiked ? 'Liked studio visual' : 'Unliked studio visual');
   };
 
   // Post Actions Menu & Caption Editing State
@@ -1660,55 +1745,44 @@ export function App() {
     setHeartExplodingPostId(postId);
     setTimeout(() => setHeartExplodingPostId(null), 750);
 
-    let targetPhotoUrl: string | undefined = undefined;
-    let targetLiked = false;
-    let targetCount = 0;
+    const targetPost = posts.find((p) => p.id === postId);
+    if (!targetPost) return;
 
-    setPosts((prev) => {
-      const nextPosts = prev.map((p) => {
-        if (p.id === postId) {
-          const isCurrentlyLiked = !!p.isLiked;
-          const nextLiked = fromDoubleTap ? true : !isCurrentlyLiked;
-          if (fromDoubleTap && isCurrentlyLiked) {
-            return p;
-          }
-          let nextLikers = [...(p.likersList || [])];
-          if (nextLiked) {
-            if (!nextLikers.includes('luciano')) {
-              nextLikers = ['luciano', ...nextLikers];
-            }
-          } else {
-            nextLikers = nextLikers.filter((h) => h !== 'luciano');
-          }
-          targetPhotoUrl = p.contentUrl;
-          targetLiked = nextLiked;
-          targetCount = nextLikers.length;
-          return {
-            ...p,
-            isLiked: nextLiked,
-            likersList: nextLikers,
-            likesCount: nextLikers.length,
-          };
-        }
-        return p;
-      });
-      safeSaveStorage('privity_posts_v5', nextPosts);
-      return nextPosts;
-    });
+    const photoUrl = targetPost.contentUrl || targetPost.thumbnailUrl;
+    const baseKey = photoUrl ? extractMediaBaseKey(photoUrl) : '';
+    const photoRecord = photoUrl ? (photoLikesMap[photoUrl] || (baseKey ? photoLikesMap[baseKey] : undefined)) : undefined;
+    const matchingMedia = photoUrl ? Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => isSameMedia(m.url, photoUrl)) : undefined;
 
-    if (targetPhotoUrl) {
-      const photoUrl = targetPhotoUrl;
-      const baseKey = extractMediaBaseKey(photoUrl);
+    const isCurrentlyLiked = photoRecord !== undefined
+      ? photoRecord.isLiked
+      : (matchingMedia !== undefined ? matchingMedia.isLiked : !!targetPost.isLiked);
+    if (fromDoubleTap && isCurrentlyLiked) return;
+
+    const nextLiked = fromDoubleTap ? true : !isCurrentlyLiked;
+    let nextLikers = [...(targetPost.likersList || [])];
+    if (nextLiked) {
+      if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
+    } else {
+      nextLikers = nextLikers.filter((h) => h !== 'luciano');
+    }
+    const currentCount = photoRecord !== undefined
+      ? photoRecord.count
+      : (matchingMedia !== undefined ? matchingMedia.likes : targetPost.likesCount);
+    const nextCount = nextLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
+
+    // 1. Update photoLikesMap immediately
+    if (photoUrl) {
       setPhotoLikesMap((prev) => {
         const next = {
           ...prev,
-          [photoUrl]: { isLiked: targetLiked, count: targetCount },
-          ...(baseKey ? { [baseKey]: { isLiked: targetLiked, count: targetCount } } : {}),
+          ...(baseKey ? { [baseKey]: { isLiked: nextLiked, count: nextCount } } : {}),
+          ...(!photoUrl.startsWith('data:') ? { [photoUrl]: { isLiked: nextLiked, count: nextCount } } : {}),
         };
         safeSaveStorage('privity_photo_likes_v5', next);
         return next;
       });
 
+      // 2. Update profiles immediately
       setProfiles((prevProfs) => {
         let changed = false;
         const nextProfs = { ...prevProfs };
@@ -1719,7 +1793,7 @@ export function App() {
               ...prof,
               mediaItems: prof.mediaItems.map((m) =>
                 isSameMedia(m.url, photoUrl)
-                  ? { ...m, isLiked: targetLiked, likes: targetLiked ? Math.max(m.likes + 1, targetCount) : Math.max(0, m.likes - 1) }
+                  ? { ...m, isLiked: nextLiked, likes: nextCount }
                   : m
               ),
             };
@@ -1731,6 +1805,25 @@ export function App() {
         return nextProfs;
       });
     }
+
+    // 3. Update posts immediately
+    setPosts((prevPosts) => {
+      const nextPosts = prevPosts.map((p) => {
+        if (p.id === postId || (photoUrl && (isSameMedia(p.contentUrl, photoUrl) || isSameMedia(p.thumbnailUrl, photoUrl)))) {
+          return {
+            ...p,
+            isLiked: nextLiked,
+            likersList: nextLikers,
+            likesCount: nextCount,
+          };
+        }
+        return p;
+      });
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+
+    triggerToast(nextLiked ? 'Liked dispatch' : 'Unliked dispatch');
   };
 
   // Bookmark / Save
@@ -1747,7 +1840,7 @@ export function App() {
           };
         }
         return p;
-      }),
+      })
     );
   };
 
@@ -1763,12 +1856,12 @@ export function App() {
     const text = (textOverride !== undefined ? textOverride : commentInputs[postId])?.trim();
     if (!text) return;
 
-    let targetPhotoUrl: string | undefined = undefined;
+    const targetPost = posts.find((p) => p.id === postId);
+    const targetPhotoUrl = targetPost?.contentUrl || targetPost?.thumbnailUrl;
 
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
         if (p.id === postId) {
-          targetPhotoUrl = p.contentUrl || p.thumbnailUrl;
           if (replyTarget && replyTarget.postId === postId && !textOverride) {
             const updated = p.comments.map((c) => {
               if (c.id === replyTarget.commentId) {
@@ -1806,7 +1899,7 @@ export function App() {
       return nextPosts;
     });
 
-    // Also update any matching media items in all profiles!
+    // Also update any matching media items in all profiles synchronously
     if (targetPhotoUrl) {
       const photoUrl = targetPhotoUrl;
       setProfiles((prevProfs) => {
@@ -1839,11 +1932,12 @@ export function App() {
 
   // Delete comment or nested reply
   const handleDeleteComment = (postId: string, commentId: string, replyId?: string) => {
-    let targetPhotoUrl: string | undefined = undefined;
+    const targetPost = posts.find((p) => p.id === postId);
+    const targetPhotoUrl = targetPost?.contentUrl || targetPost?.thumbnailUrl;
+
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
         if (p.id !== postId) return p;
-        targetPhotoUrl = p.contentUrl || p.thumbnailUrl;
         if (replyId) {
           const updated = p.comments.map((c) => {
             if (c.id !== commentId) return c;
@@ -1896,6 +1990,60 @@ export function App() {
     }
 
     triggerToast('Comment deleted');
+  };
+
+  // Real-Time Direct Message Dispatcher
+  const handleSendMessage = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!activeChatUser || !chatDraftText.trim()) return;
+
+    const recipientHandle = activeChatUser.handle.replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const textToSend = chatDraftText.trim();
+    const newMsg: DirectChatMessage = {
+      id: `msg-${Date.now()}`,
+      senderHandle: cleanMyHandle,
+      recipientHandle: recipientHandle,
+      text: textToSend,
+      timeAgo: 'Just now',
+      timestamp: Date.now(),
+    };
+
+    setDirectMessages((prev) => {
+      const existingThread = prev[recipientHandle] || [];
+      const updated = {
+        ...prev,
+        [recipientHandle]: [...existingThread, newMsg],
+      };
+      safeSaveStorage('privity_direct_messages_v5', updated);
+      return updated;
+    });
+
+    setChatDraftText('');
+
+    // Trigger instant real-time response from creator to show live bidirectional chatting!
+    setIsRecipientTyping(true);
+    setTimeout(() => {
+      const replyMsg: DirectChatMessage = {
+        id: `msg-reply-${Date.now()}`,
+        senderHandle: recipientHandle,
+        recipientHandle: cleanMyHandle,
+        text: `Got your message "${textToSend.slice(0, 24)}${textToSend.length > 24 ? '...' : ''}" in real time! ✨ Privity encryption active.`,
+        timeAgo: 'Just now',
+        timestamp: Date.now(),
+      };
+      setDirectMessages((prev) => {
+        const existingThread = prev[recipientHandle] || [];
+        const updated = {
+          ...prev,
+          [recipientHandle]: [...existingThread, replyMsg],
+        };
+        safeSaveStorage('privity_direct_messages_v5', updated);
+        return updated;
+      });
+      setIsRecipientTyping(false);
+      triggerToast(`New encrypted message from @${recipientHandle}`);
+    }, 1200);
   };
 
   // Like or unlike comment
@@ -2201,6 +2349,15 @@ export function App() {
             {followRequests.length > 0 && (
               <span className="nav-badge-pill">{followRequests.length}</span>
             )}
+          </button>
+
+          <button
+            className={`nav-link-btn ${activeChatUser ? 'active' : ''}`}
+            onClick={() => setActiveChatUser(activeChatUser || getUserProfile('elena_rodriguez'))}
+          >
+            <span className="nav-icon-wrap"><IconChat size={21} /></span>
+            <span>Messages</span>
+            <span className="nav-badge-pill" style={{ background: 'var(--brand-primary)' }}>Live</span>
           </button>
 
           <button
@@ -2598,103 +2755,126 @@ export function App() {
                       )}
 
                       {/* Post Actions Toolbar */}
-                      <div className="post-toolbar-line">
-                        {/* Real Like Button */}
-                        <button
-                          className={`btn-post-action ${post.isLiked ? 'liked' : ''}`}
-                          onClick={() => handleLike(post.id)}
-                        >
-                          <IconHeart size={18} filled={post.isLiked} color={post.isLiked ? 'var(--heart-rose)' : 'currentColor'} />
-                          <span>{post.likesCount}</span>
-                        </button>
+                      {(() => {
+                        const postMediaUrl = post.contentUrl || post.thumbnailUrl;
+                        const postBaseKey = postMediaUrl ? extractMediaBaseKey(postMediaUrl) : '';
+                        const photoRecord = postMediaUrl ? (photoLikesMap[postMediaUrl] || (postBaseKey ? photoLikesMap[postBaseKey] : undefined)) : undefined;
+                        const matchingMedia = postMediaUrl ? Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => isSameMedia(m.url, postMediaUrl)) : undefined;
 
-                        {/* Comments */}
-                        <button
-                          className="btn-post-action"
-                          onClick={() => {
-                            const el = document.getElementById(`comment-input-${post.id}`);
-                            el?.focus();
-                          }}
-                        >
-                          <IconChat size={18} />
-                          <span>{post.commentsCount}</span>
-                        </button>
+                        const effectiveLiked = photoRecord !== undefined
+                          ? photoRecord.isLiked
+                          : (matchingMedia !== undefined ? matchingMedia.isLiked : !!post.isLiked);
 
-                        {/* External Share */}
-                        <button
-                          className="btn-post-action"
-                          onClick={() => handleShare(post.id)}
-                          title="Share Link"
-                        >
-                          <IconShare size={18} />
-                        </button>
+                        const effectiveLikesCount = photoRecord !== undefined
+                          ? photoRecord.count
+                          : (matchingMedia !== undefined ? matchingMedia.likes : post.likesCount);
 
-                        {/* Bookmark */}
-                        <button
-                          className={`btn-post-action ${post.isSaved ? 'saved' : ''}`}
-                          onClick={() => handleSave(post.id)}
-                          title="Save"
-                        >
-                          <IconBookmark size={18} filled={post.isSaved} color={post.isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
-                        </button>
+                        const effectiveLikers = effectiveLiked
+                          ? ((post.likersList || []).includes('luciano') ? (post.likersList || []) : ['luciano', ...(post.likersList || [])])
+                          : (post.likersList || []).filter((h) => h !== 'luciano');
 
-                        {/* Options / Report Menu */}
-                        <button
-                          className="btn-post-action"
-                          onClick={() => {
-                            const isOwn = post.authorHandle === myProfile.handle || post.authorId === 'usr-luciano';
-                            setPostMenuModal({ post, isOwn });
-                          }}
-                          title={post.authorHandle === myProfile.handle ? 'Dispatch options' : 'Report content'}
-                        >
-                          <IconDots size={18} />
-                        </button>
-                      </div>
+                        return (
+                          <>
+                            <div className="post-toolbar-line">
+                              {/* Real Like Button */}
+                              <button
+                                className={`btn-post-action ${effectiveLiked ? 'liked' : ''}`}
+                                onClick={() => handleLike(post.id)}
+                              >
+                                <IconHeart size={18} filled={effectiveLiked} color={effectiveLiked ? 'var(--heart-rose)' : 'currentColor'} />
+                                <span>{effectiveLikesCount}</span>
+                              </button>
 
-                      {/* Liked By Directory Strip */}
-                      {post.likesCount > 0 && (
-                        <div
-                          className="post-liked-by-strip"
-                          onClick={() => {
-                            openRoster(post.authorHandle, post.authorName, 'likes', post.likersList || []);
-                          }}
-                          title="Click to view everyone who liked this dispatch"
-                        >
-                          <div className="liked-avatars-stack">
-                            {(post.likersList || []).slice(0, 3).map((h) => {
-                              const u = getUserProfile(h);
-                              return (
-                                <img
-                                  key={h}
-                                  src={u.avatar}
-                                  alt={u.name}
-                                  className="liked-avatar-mini"
-                                />
-                              );
-                            })}
-                          </div>
-                          <span>
-                            Liked by{' '}
-                            {(post.likersList || []).slice(0, 2).map((h, idx) => {
-                              const u = getUserProfile(h);
-                              const isLastOfTwo = (post.likersList || []).length === 2 && idx === 1;
-                              const isFirstOfMany = (post.likersList || []).length > 2 && idx === 0;
-                              return (
-                                <span key={h}>
-                                  {isLastOfTwo && ' and '}
-                                  <strong>{u.name}</strong>
-                                  {isFirstOfMany && ', '}
+                              {/* Comments */}
+                              <button
+                                className="btn-post-action"
+                                onClick={() => {
+                                  const el = document.getElementById(`comment-input-${post.id}`);
+                                  el?.focus();
+                                }}
+                              >
+                                <IconChat size={18} />
+                                <span>{post.commentsCount}</span>
+                              </button>
+
+                              {/* External Share */}
+                              <button
+                                className="btn-post-action"
+                                onClick={() => handleShare(post.id)}
+                                title="Share Link"
+                              >
+                                <IconShare size={18} />
+                              </button>
+
+                              {/* Bookmark */}
+                              <button
+                                className={`btn-post-action ${post.isSaved ? 'saved' : ''}`}
+                                onClick={() => handleSave(post.id)}
+                                title="Save"
+                              >
+                                <IconBookmark size={18} filled={post.isSaved} color={post.isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
+                              </button>
+
+                              {/* Options / Report Menu */}
+                              <button
+                                className="btn-post-action"
+                                onClick={() => {
+                                  const isOwn = post.authorHandle === myProfile.handle || post.authorId === 'usr-luciano';
+                                  setPostMenuModal({ post, isOwn });
+                                }}
+                                title={post.authorHandle === myProfile.handle ? 'Dispatch options' : 'Report content'}
+                              >
+                                <IconDots size={18} />
+                              </button>
+                            </div>
+
+                            {/* Liked By Directory Strip */}
+                            {effectiveLikesCount > 0 && (
+                              <div
+                                className="post-liked-by-strip"
+                                onClick={() => {
+                                  openRoster(post.authorHandle, post.authorName, 'likes', effectiveLikers);
+                                }}
+                                title="Click to view everyone who liked this dispatch"
+                              >
+                                <div className="liked-avatars-stack">
+                                  {effectiveLikers.slice(0, 3).map((h) => {
+                                    const u = getUserProfile(h);
+                                    return (
+                                      <img
+                                        key={h}
+                                        src={u.avatar}
+                                        alt={u.name}
+                                        className="liked-avatar-mini"
+                                      />
+                                    );
+                                  })}
+                                </div>
+                                <span>
+                                  Liked by{' '}
+                                  {effectiveLikers.slice(0, 2).map((h, idx) => {
+                                    const u = getUserProfile(h);
+                                    const isLastOfTwo = effectiveLikers.length === 2 && idx === 1;
+                                    const isFirstOfMany = effectiveLikers.length > 2 && idx === 0;
+                                    return (
+                                      <span key={h}>
+                                        {isLastOfTwo && ' and '}
+                                        <strong>{u.name}</strong>
+                                        {isFirstOfMany && ', '}
+                                      </span>
+                                    );
+                                  })}
+                                  {effectiveLikers.length > 2 && (
+                                    <>
+                                      {' '}and <strong>{effectiveLikers.length - 2} {((effectiveLikers.length - 2 === 1) ? 'other' : 'others')}</strong>
+                                    </>
+                                  )}
                                 </span>
-                              );
-                            })}
-                            {(post.likersList || []).length > 2 && (
-                              <>
-                                {' '}and <strong>{(post.likersList || []).length - 2} {((post.likersList || []).length - 2 === 1) ? 'other' : 'others'}</strong>
-                              </>
+                              </div>
                             )}
-                          </span>
-                        </div>
-                      )}
+                          </>
+                        );
+                      })()}
 
                       {/* Real Threaded Comments Section */}
                       <div className="comments-thread-box">
@@ -3265,7 +3445,7 @@ export function App() {
 
                         <button
                           className="btn-glass-back"
-                          onClick={() => triggerToast(`Direct encrypted dispatch channel opened with @${profile.handle}`)}
+                          onClick={() => setActiveChatUser(profile)}
                         >
                           <IconChat size={14} />
                           <span>Message</span>
@@ -3603,95 +3783,118 @@ export function App() {
                               </div>
                             )}
 
-                            <div className="post-toolbar-line">
-                              <button
-                                className={`btn-post-action ${post.isLiked ? 'liked' : ''}`}
-                                onClick={() => handleLike(post.id)}
-                              >
-                                <IconHeart size={18} filled={post.isLiked} color={post.isLiked ? 'var(--heart-rose)' : 'currentColor'} />
-                                <span>{post.likesCount}</span>
-                              </button>
-                              <button
-                                className="btn-post-action"
-                                onClick={() => {
-                                  const el = document.getElementById(`comment-input-${post.id}`);
-                                  el?.focus();
-                                }}
-                              >
-                                <IconChat size={18} />
-                                <span>{post.commentsCount}</span>
-                              </button>
-                              <button
-                                className="btn-post-action"
-                                onClick={() => handleShare(post.id)}
-                                title="Share Link"
-                              >
-                                <IconShare size={18} />
-                              </button>
-                              <button
-                                className={`btn-post-action ${post.isSaved ? 'saved' : ''}`}
-                                onClick={() => handleSave(post.id)}
-                                title="Save"
-                              >
-                                <IconBookmark size={18} filled={post.isSaved} color={post.isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
-                              </button>
-                              <button
-                                className="btn-post-action"
-                                onClick={() => {
-                                  const isOwn = post.authorHandle === myProfile.handle || post.authorId === 'usr-luciano';
-                                  setPostMenuModal({ post, isOwn });
-                                }}
-                                title={post.authorHandle === myProfile.handle ? 'Dispatch options' : 'Report content'}
-                              >
-                                <IconDots size={18} />
-                              </button>
-                            </div>
+                            {(() => {
+                              const postMediaUrl = post.contentUrl || post.thumbnailUrl;
+                              const postBaseKey = postMediaUrl ? extractMediaBaseKey(postMediaUrl) : '';
+                              const photoRecord = postMediaUrl ? (photoLikesMap[postMediaUrl] || (postBaseKey ? photoLikesMap[postBaseKey] : undefined)) : undefined;
+                              const matchingMedia = postMediaUrl ? Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => isSameMedia(m.url, postMediaUrl)) : undefined;
 
-                            {/* Liked By Directory Strip - 100% Accurate & Clickable */}
-                            {post.likesCount > 0 && (
-                              <div
-                                className="post-liked-by-strip"
-                                style={{ marginTop: '10px' }}
-                                onClick={() => {
-                                  openRoster(post.authorHandle, post.authorName, 'likes', post.likersList || []);
-                                }}
-                                title="Click to view everyone who liked this dispatch"
-                              >
-                                <div className="liked-avatars-stack">
-                                  {(post.likersList || []).slice(0, 3).map((h) => {
-                                    const u = getUserProfile(h);
-                                    return (
-                                      <img
-                                        key={h}
-                                        src={u.avatar}
-                                        alt={u.name}
-                                        className="liked-avatar-mini"
-                                      />
-                                    );
-                                  })}
-                                </div>
-                                <span>
-                                  Liked by{' '}
-                                  {(post.likersList || []).slice(0, 2).map((h, idx) => {
-                                    const u = getUserProfile(h);
-                                    const isLastOfTwo = (post.likersList || []).length === 2 && idx === 1;
-                                    const isFirstOfMany = (post.likersList || []).length > 2 && idx === 0;
-                                    return (
-                                      <span key={h}>
-                                        {isLastOfTwo && ' and '}
-                                        <strong>{u.name}</strong>
-                                        {isFirstOfMany && ', '}
+                              const effectiveLiked = photoRecord !== undefined
+                                ? photoRecord.isLiked
+                                : (matchingMedia !== undefined ? matchingMedia.isLiked : !!post.isLiked);
+
+                              const effectiveLikesCount = photoRecord !== undefined
+                                ? photoRecord.count
+                                : (matchingMedia !== undefined ? matchingMedia.likes : post.likesCount);
+
+                              const effectiveLikers = effectiveLiked
+                                ? ((post.likersList || []).includes('luciano') ? (post.likersList || []) : ['luciano', ...(post.likersList || [])])
+                                : (post.likersList || []).filter((h) => h !== 'luciano');
+
+                              return (
+                                <>
+                                  <div className="post-toolbar-line">
+                                    <button
+                                      className={`btn-post-action ${effectiveLiked ? 'liked' : ''}`}
+                                      onClick={() => handleLike(post.id)}
+                                    >
+                                      <IconHeart size={18} filled={effectiveLiked} color={effectiveLiked ? 'var(--heart-rose)' : 'currentColor'} />
+                                      <span>{effectiveLikesCount}</span>
+                                    </button>
+                                    <button
+                                      className="btn-post-action"
+                                      onClick={() => {
+                                        const el = document.getElementById(`comment-input-${post.id}`);
+                                        el?.focus();
+                                      }}
+                                    >
+                                      <IconChat size={18} />
+                                      <span>{post.commentsCount}</span>
+                                    </button>
+                                    <button
+                                      className="btn-post-action"
+                                      onClick={() => handleShare(post.id)}
+                                      title="Share Link"
+                                    >
+                                      <IconShare size={18} />
+                                    </button>
+                                    <button
+                                      className={`btn-post-action ${post.isSaved ? 'saved' : ''}`}
+                                      onClick={() => handleSave(post.id)}
+                                      title="Save"
+                                    >
+                                      <IconBookmark size={18} filled={post.isSaved} color={post.isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
+                                    </button>
+                                    <button
+                                      className="btn-post-action"
+                                      onClick={() => {
+                                        const isOwn = post.authorHandle === myProfile.handle || post.authorId === 'usr-luciano';
+                                        setPostMenuModal({ post, isOwn });
+                                      }}
+                                      title={post.authorHandle === myProfile.handle ? 'Dispatch options' : 'Report content'}
+                                    >
+                                      <IconDots size={18} />
+                                    </button>
+                                  </div>
+
+                                  {/* Liked By Directory Strip - 100% Accurate & Clickable */}
+                                  {effectiveLikesCount > 0 && (
+                                    <div
+                                      className="post-liked-by-strip"
+                                      style={{ marginTop: '10px' }}
+                                      onClick={() => {
+                                        openRoster(post.authorHandle, post.authorName, 'likes', effectiveLikers);
+                                      }}
+                                      title="Click to view everyone who liked this dispatch"
+                                    >
+                                      <div className="liked-avatars-stack">
+                                        {effectiveLikers.slice(0, 3).map((h) => {
+                                          const u = getUserProfile(h);
+                                          return (
+                                            <img
+                                              key={h}
+                                              src={u.avatar}
+                                              alt={u.name}
+                                              className="liked-avatar-mini"
+                                            />
+                                          );
+                                        })}
+                                      </div>
+                                      <span>
+                                        Liked by{' '}
+                                        {effectiveLikers.slice(0, 2).map((h, idx) => {
+                                          const u = getUserProfile(h);
+                                          const isLastOfTwo = effectiveLikers.length === 2 && idx === 1;
+                                          const isFirstOfMany = effectiveLikers.length > 2 && idx === 0;
+                                          return (
+                                            <span key={h}>
+                                              {isLastOfTwo && ' and '}
+                                              <strong>{u.name}</strong>
+                                              {isFirstOfMany && ', '}
+                                            </span>
+                                          );
+                                        })}
+                                        {effectiveLikers.length > 2 && (
+                                          <>
+                                            {' '}and <strong>{effectiveLikers.length - 2} {((effectiveLikers.length - 2 === 1) ? 'other' : 'others')}</strong>
+                                          </>
+                                        )}
                                       </span>
-                                    );
-                                  })}
-                                  {(post.likersList || []).length > 2 && (
-                                    <>
-                                      {' '}and <strong>{(post.likersList || []).length - 2} {((post.likersList || []).length - 2 === 1) ? 'other' : 'others'}</strong>
-                                    </>
+                                    </div>
                                   )}
-                                </span>
-                              </div>
-                            )}
+                                </>
+                              );
+                            })()}
 
                             {/* Real Threaded Comments Section on Profile Dispatches */}
                             <div className="comments-thread-box">
@@ -3903,9 +4106,13 @@ export function App() {
                         {profile.mediaItems.map((item) => {
                           const baseKey = extractMediaBaseKey(item.url);
                           const photoRecord = photoLikesMap[item.url] || (baseKey ? photoLikesMap[baseKey] : undefined);
-                          const isItemLiked = photoRecord !== undefined ? photoRecord.isLiked : item.isLiked;
-                          const itemLikesCount = photoRecord !== undefined ? photoRecord.count : item.likes;
                           const matchingPost = posts.find((p) => isSameMedia(p.contentUrl, item.url) || isSameMedia(p.thumbnailUrl, item.url));
+                          const isItemLiked = photoRecord !== undefined
+                            ? photoRecord.isLiked
+                            : (matchingPost !== undefined ? matchingPost.isLiked : !!item.isLiked);
+                          const itemLikesCount = photoRecord !== undefined
+                            ? photoRecord.count
+                            : (matchingPost !== undefined ? matchingPost.likesCount : item.likes);
                           const itemCommentsCount = matchingPost ? matchingPost.commentsCount : item.comments;
 
                           return (
@@ -4540,6 +4747,137 @@ export function App() {
           </div>
         );
       })()}
+
+      {/* REAL-TIME DIRECT MESSAGING MODAL — APPLE VISIONOS SPECULAR GLASS */}
+      {activeChatUser && (
+        <div className="direct-chat-backdrop" onClick={() => setActiveChatUser(null)}>
+          <div className="direct-chat-window" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="direct-chat-header">
+              <div
+                className="direct-chat-recipient"
+                onClick={() => {
+                  navigateToProfile(activeChatUser.handle);
+                  setActiveChatUser(null);
+                }}
+                title="View full profile"
+              >
+                <img src={activeChatUser.avatar} alt={activeChatUser.name} className="direct-chat-avatar" />
+                <div>
+                  <div className="direct-chat-name">
+                    {activeChatUser.name}
+                    {activeChatUser.isVerified && (
+                      <VerifiedBadge
+                        authorName={activeChatUser.name}
+                        category={activeChatUser.verifiedCategory}
+                        since={activeChatUser.verifiedSince}
+                        proofId={activeChatUser.cryptoProofId}
+                      />
+                    )}
+                  </div>
+                  <div className="direct-chat-status">
+                    <span className="direct-chat-status-dot" />
+                    <span>{isRecipientTyping ? 'Typing encrypted dispatch...' : 'End-to-End Encrypted • Real-Time'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="btn-glass-back"
+                onClick={() => setActiveChatUser(null)}
+                title="Close chat"
+                style={{ padding: '8px', borderRadius: '50%', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <IconX size={16} />
+              </button>
+            </div>
+
+            {/* Quick Conversation Switcher Chips */}
+            <div className="direct-chat-users-bar">
+              {['elena_rodriguez', 'marcus_dev', 'sara_architecture', 'julian_analogue'].map((handle) => {
+                const user = getUserProfile(handle);
+                const isActive = activeChatUser.handle.replace(/^@/, '') === handle;
+                return (
+                  <button
+                    key={handle}
+                    type="button"
+                    className={`direct-chat-user-chip ${isActive ? 'active' : ''}`}
+                    onClick={() => setActiveChatUser(user)}
+                  >
+                    <img src={user.avatar} alt={user.name} className="direct-chat-chip-avatar" />
+                    <span>{user.name.split(' ')[0]}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Messages Body */}
+            <div className="direct-chat-body">
+              {(() => {
+                const recipientClean = activeChatUser.handle.replace(/^@/, '');
+                const thread = directMessages[recipientClean] || [];
+                const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+
+                if (thread.length === 0) {
+                  return (
+                    <div style={{ textAlign: 'center', margin: 'auto', color: 'var(--text-muted)', fontSize: '13px' }}>
+                      <div style={{ marginBottom: '10px', fontSize: '28px' }}>🔐</div>
+                      <div style={{ fontWeight: 700, color: '#fff', fontSize: '15px' }}>Privity Zero-Knowledge Channel</div>
+                      <div style={{ marginTop: '6px', maxWidth: '320px', lineHeight: '1.5' }}>
+                        Messages are delivered in real time with private encryption. No algorithms or data harvesting.
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <>
+                    {thread.map((msg) => {
+                      const isSent = msg.senderHandle === cleanMyHandle || msg.senderHandle === 'luciano';
+                      return (
+                        <div key={msg.id} className={`chat-bubble-row ${isSent ? 'sent' : 'received'}`}>
+                          <div className="chat-bubble-content">{msg.text}</div>
+                          <span className="chat-bubble-time">{msg.timeAgo}</span>
+                        </div>
+                      );
+                    })}
+                    {isRecipientTyping && (
+                      <div className="chat-typing-row">
+                        <div className="chat-typing-dots">
+                          <span />
+                          <span />
+                          <span />
+                        </div>
+                        <span>@{recipientClean} is typing in real time...</span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Real-Time Message Composer */}
+            <form className="direct-chat-composer" onSubmit={handleSendMessage}>
+              <input
+                type="text"
+                className="direct-chat-input"
+                placeholder={`Encrypted message to @${activeChatUser.handle.replace(/^@/, '')}...`}
+                value={chatDraftText}
+                onChange={(e) => setChatDraftText(e.target.value)}
+                autoFocus
+              />
+              <button
+                type="submit"
+                className="direct-chat-submit"
+                disabled={!chatDraftText.trim()}
+                style={{ opacity: chatDraftText.trim() ? 1 : 0.5 }}
+              >
+                Send
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* CREATE POST MODAL */}
       {isModalOpen && (
