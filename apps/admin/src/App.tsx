@@ -1640,11 +1640,73 @@ export function App() {
     });
   };
 
-  // Notifications
-  const [followRequests, setFollowRequests] = useState([
-    { id: 'fr-1', name: 'Sam Archer', handle: 'sam_arch', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120' },
-    { id: 'fr-2', name: 'Jessica Vance', handle: 'jess_film', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120' },
-  ]);
+  // Notifications & Follow Requests (Real-Time & LocalStorage Persistent)
+  const [followRequests, setFollowRequests] = useState<Array<{ id: string; name: string; handle: string; avatar: string }>>(() =>
+    readStorage('privity_follow_requests_v5', [
+      { id: 'fr-1', name: 'Sam Archer', handle: 'sam_arch', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120' },
+      { id: 'fr-2', name: 'Jessica Vance', handle: 'jess_film', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120' },
+    ])
+  );
+
+  useEffect(() => {
+    safeSaveStorage('privity_follow_requests_v5', followRequests);
+  }, [followRequests]);
+
+  // Real-Time Request Approval
+  const handleApproveRequest = (requestId: string, targetHandle: string, targetName: string) => {
+    const cleanHandle = targetHandle.replace(/^@/, '');
+    const myHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+
+    // 1. Remove from pending follow requests immediately
+    setFollowRequests((prev) => {
+      const next = prev.filter((x) => x.id !== requestId && x.handle !== cleanHandle);
+      safeSaveStorage('privity_follow_requests_v5', next);
+      return next;
+    });
+
+    // 2. Add target to my followers list & add me to target's following list in real time
+    setProfiles((prev) => {
+      const nextProfs = { ...prev };
+
+      // Update my profile followers
+      const myProf = nextProfs[myHandle] || nextProfs['luciano'] || getUserProfile(myHandle);
+      const myFollowers = Array.from(new Set([...(myProf.followersList || []), cleanHandle]));
+      nextProfs[myHandle] = {
+        ...myProf,
+        followersList: myFollowers,
+      };
+      if (myHandle !== 'luciano') {
+        nextProfs['luciano'] = {
+          ...myProf,
+          followersList: myFollowers,
+        };
+      }
+
+      // Update target profile following
+      const targetProf = nextProfs[cleanHandle] || getUserProfile(cleanHandle);
+      const targetFollowing = Array.from(new Set([...(targetProf.followingList || []), myHandle, 'luciano']));
+      nextProfs[cleanHandle] = {
+        ...targetProf,
+        followingList: targetFollowing,
+      };
+
+      safeSaveStorage('privity_profiles_v5', nextProfs);
+      return nextProfs;
+    });
+
+    triggerToast(`Approved @${cleanHandle}${targetName ? ` (${targetName})` : ''}! Added to your private circle.`);
+  };
+
+  // Real-Time Request Decline
+  const handleDeclineRequest = (requestId: string, targetHandle: string) => {
+    const cleanHandle = targetHandle.replace(/^@/, '');
+    setFollowRequests((prev) => {
+      const next = prev.filter((x) => x.id !== requestId && x.handle !== cleanHandle);
+      safeSaveStorage('privity_follow_requests_v5', next);
+      return next;
+    });
+    triggerToast(`Declined follow request from @${cleanHandle}`);
+  };
 
 
   // Toast
@@ -1729,6 +1791,11 @@ export function App() {
       localStorage.removeItem('privity_close_friends_v5');
       localStorage.removeItem('privity_private_account_v5');
       localStorage.removeItem('privity_user_settings_v5');
+      localStorage.removeItem('privity_follow_requests_v5');
+      localStorage.removeItem('privity_photo_likes_v5');
+      localStorage.removeItem('privity_direct_messages_v5');
+      localStorage.removeItem('privity_active_tab_v5');
+      localStorage.removeItem('privity_viewed_handle_v5');
       window.location.reload();
     }
   };
@@ -3196,13 +3263,14 @@ export function App() {
               Activity & Circle Requests
             </h2>
 
-            {followRequests.length > 0 && (
+            {followRequests.length > 0 ? (
               <div
                 className="glass-panel-card"
                 style={{ marginBottom: '24px', borderColor: 'var(--followers-border)' }}
               >
-                <div className="panel-title-text" style={{ color: 'var(--followers-iris)' }}>
-                  Pending Follow Requests (Private Account)
+                <div className="panel-title-text" style={{ color: 'var(--followers-iris)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Pending Follow Requests (Private Account)</span>
+                  <span className="nav-badge-pill" style={{ background: 'var(--followers-iris)' }}>{followRequests.length}</span>
                 </div>
                 {followRequests.map((r) => (
                   <div
@@ -3236,22 +3304,34 @@ export function App() {
                       <button
                         className="btn-post-dispatch"
                         style={{ padding: '6px 16px', fontSize: '12px' }}
-                        onClick={() => {
-                          setFollowRequests(followRequests.filter((x) => x.id !== r.id));
-                          triggerToast(`Follow request from @${r.handle} approved!`);
-                        }}
+                        onClick={() => handleApproveRequest(r.id, r.handle, r.name)}
                       >
                         Approve
                       </button>
                       <button
                         className="btn-follow-toggle following"
-                        onClick={() => setFollowRequests(followRequests.filter((x) => x.id !== r.id))}
+                        onClick={() => handleDeclineRequest(r.id, r.handle)}
                       >
                         Decline
                       </button>
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : (
+              <div
+                className="glass-panel-card"
+                style={{ marginBottom: '24px', padding: '18px 22px', display: 'flex', alignItems: 'center', gap: '14px', border: '1px solid rgba(16, 185, 129, 0.25)' }}
+              >
+                <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <IconUserCheck size={18} color="var(--cf-emerald)" />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: '14px', color: '#fff' }}>All Circle Requests Reviewed</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    No pending requests. All approved creators now have real-time access to your private circle.
+                  </div>
+                </div>
               </div>
             )}
 
