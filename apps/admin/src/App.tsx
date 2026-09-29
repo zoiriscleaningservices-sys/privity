@@ -3315,31 +3315,53 @@ export function App() {
 
                         {/* Inline Comment Input Box */}
                         <div className="inline-comment-row">
-                          <input
-                            id={`comment-input-${post.id}`}
-                            type="text"
-                            className="inline-comment-field"
-                            placeholder={
-                              replyTarget && replyTarget.postId === post.id
-                                ? `Replying to @${replyTarget.handle}...`
-                                : 'Add a thoughtful reply...'
-                            }
-                            value={commentInputs[post.id] || ''}
-                            onChange={(e) =>
-                              setCommentInputs({ ...commentInputs, [post.id]: e.target.value })
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleAddComment(post.id);
-                              }
-                            }}
+                          {replyTarget && replyTarget.postId === post.id && (
+                            <div className="reply-banner-pill">
+                              <span>Replying to @{replyTarget.handle}</span>
+                              <button
+                                type="button"
+                                onClick={() => setReplyTarget(null)}
+                                style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: 0 }}
+                                title="Cancel reply"
+                              >
+                                <IconX size={12} />
+                              </button>
+                            </div>
+                          )}
+                          <img
+                            src={myProfile.avatar}
+                            alt={myProfile.name}
+                            className="comment-user-avatar"
                           />
-                          <button
-                            className="btn-comment-post"
-                            onClick={() => handleAddComment(post.id)}
-                          >
-                            Send
-                          </button>
+                          <div className="comment-input-wrap">
+                            <input
+                              id={`comment-input-${post.id}`}
+                              type="text"
+                              className="inline-comment-field"
+                              placeholder={
+                                replyTarget && replyTarget.postId === post.id
+                                  ? `Replying to @${replyTarget.handle}...`
+                                  : 'Add a thoughtful reply...'
+                              }
+                              value={commentInputs[post.id] || ''}
+                              onChange={(e) =>
+                                setCommentInputs({ ...commentInputs, [post.id]: e.target.value })
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleAddComment(post.id);
+                                }
+                              }}
+                            />
+                            <button
+                              className="btn-comment-post"
+                              onClick={() => handleAddComment(post.id)}
+                              title="Send Comment"
+                            >
+                              <IconSend size={13} color="#fff" />
+                              <span>Send</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -4556,7 +4578,7 @@ export function App() {
                   <div style={{ marginTop: '14px' }}>
                     {userDispatches.length > 0 ? (
                       userDispatches.map((post) => (
-                        <article key={post.id} className={`feed-post-card ${highlightPostId === post.id ? 'post-just-published-shimmer' : ''}`} style={{ paddingLeft: '8px', paddingRight: '8px' }}>
+                        <article key={post.id} className={`feed-post-card ${highlightPostId === post.id ? 'post-just-published-shimmer' : ''}`}>
                           <img
                             src={post.authorAvatar}
                             alt={post.authorName}
@@ -4939,8 +4961,10 @@ export function App() {
                                   <button
                                     className="btn-comment-post"
                                     onClick={() => handleAddComment(post.id)}
+                                    title="Send Comment"
                                   >
-                                    Send
+                                    <IconSend size={13} color="#fff" />
+                                    <span>Send</span>
                                   </button>
                                 </div>
                               </div>
