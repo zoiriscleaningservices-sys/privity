@@ -35,7 +35,56 @@ import {
   IconGrid,
   IconList,
   IconUserCheck,
+  IconKey,
+  IconDownload,
+  IconTrash,
+  IconSmartphone,
+  IconMail,
+  IconFileText,
+  IconCopy,
 } from './components/Icons';
+
+// ==================== SETTINGS DATA MODEL ====================
+
+export interface UserSettings {
+  email: string;
+  phone: string;
+  membershipTier: 'Visionary Genesis' | 'Founding Member' | 'Sovereign Pass';
+  handlePrivacyBadge: boolean;
+  isPrivateAccount: boolean;
+  showOnlineStatus: boolean;
+  allowDirectMessages: 'everyone' | 'following' | 'close_friends';
+  readReceipts: boolean;
+  searchDiscoverable: boolean;
+  notifyCloseFriendsDispatches: boolean;
+  notifyMentionsAndReplies: boolean;
+  notifyNewFollowers: boolean;
+  notifyCryptoProofValidations: boolean;
+  twoFactorEnabled: boolean;
+  cryptoKeyFingerprint: string;
+  hardwareKeyLinked: boolean;
+  sessionDevice: string;
+}
+
+export const DEFAULT_USER_SETTINGS: UserSettings = {
+  email: 'luciano@privity.app',
+  phone: '+1 (415) 890-2100',
+  membershipTier: 'Founding Member',
+  handlePrivacyBadge: true,
+  isPrivateAccount: false,
+  showOnlineStatus: true,
+  allowDirectMessages: 'close_friends',
+  readReceipts: false,
+  searchDiscoverable: true,
+  notifyCloseFriendsDispatches: true,
+  notifyMentionsAndReplies: true,
+  notifyNewFollowers: true,
+  notifyCryptoProofValidations: true,
+  twoFactorEnabled: true,
+  cryptoKeyFingerprint: 'ed25519:7a9f:88c2:e410:33bc:99d1:a102:fe55',
+  hardwareKeyLinked: true,
+  sessionDevice: 'Apple Vision Pro · visionOS 2.2 · Active Now',
+};
 
 // ==================== REAL DATA MODELS & ASSETS ====================
 
@@ -925,6 +974,22 @@ export function App() {
     }
   }, [isPrivateAccount]);
 
+  // 6. Persistent VisionOS User Settings
+  const [userSettings, setUserSettings] = useState<UserSettings>(() =>
+    readStorage('privity_user_settings_v5', DEFAULT_USER_SETTINGS)
+  );
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsSubTab, setSettingsSubTab] = useState<'account' | 'privacy' | 'notifications' | 'security' | 'terms'>('account');
+  const [copiedFingerprint, setCopiedFingerprint] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('privity_user_settings_v5', JSON.stringify(userSettings));
+    } catch (e) {
+      console.warn('Failed to save userSettings to localStorage', e);
+    }
+  }, [userSettings]);
+
   // Synchronized Profile Fetcher
   const getUserProfile = (handle: string, defaultName?: string, defaultAvatar?: string): UserProfile => {
     const clean = handle.replace(/^@/, '');
@@ -1311,6 +1376,63 @@ export function App() {
     setTimeout(() => setToastMsg(null), 3000);
   };
 
+  const handleTogglePrivateAccount = (val: boolean) => {
+    setIsPrivateAccount(val);
+    setUserSettings((prev) => ({ ...prev, isPrivateAccount: val }));
+    setProfiles((prev) => {
+      const me = prev['luciano'] || getUserProfile('luciano');
+      return {
+        ...prev,
+        luciano: { ...me, isPrivate: val },
+        ...(me.handle !== 'luciano' ? { [me.handle]: { ...me, isPrivate: val } } : {}),
+      };
+    });
+    triggerToast(
+      val
+        ? 'Private Account Enabled: Only approved followers can view your feed'
+        : 'Account is now Public: Your dispatches are visible to the entire network'
+    );
+  };
+
+  const handleExportData = () => {
+    const data = {
+      exportVersion: 'Privity Archive v5.0',
+      exportedAt: new Date().toISOString(),
+      userProfile: myProfile,
+      settings: userSettings,
+      closeFriends: closeFriendsList,
+      following: Object.keys(followingMap).filter((k) => followingMap[k]),
+      dispatches: posts.filter((p) => p.authorHandle === myProfile.handle || p.authorId === 'usr-luciano'),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `privity_data_export_${myProfile.handle}_${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    triggerToast('All account data exported to JSON archive');
+  };
+
+  const handleResetData = () => {
+    if (window.confirm('Reset all demo data and profile modifications to factory defaults?')) {
+      localStorage.removeItem('privity_profiles_v5');
+      localStorage.removeItem('privity_posts_v5');
+      localStorage.removeItem('privity_following_v5');
+      localStorage.removeItem('privity_close_friends_v5');
+      localStorage.removeItem('privity_private_account_v5');
+      localStorage.removeItem('privity_user_settings_v5');
+      window.location.reload();
+    }
+  };
+
+  const handleCopyCryptoFingerprint = () => {
+    navigator.clipboard?.writeText(userSettings.cryptoKeyFingerprint);
+    setCopiedFingerprint(true);
+    triggerToast('Ed25519 Cryptographic Fingerprint copied to clipboard');
+    setTimeout(() => setCopiedFingerprint(false), 2000);
+  };
+
   // Real Like with Spring Physics & Likers Synchronization
   const handleLike = (postId: string, fromDoubleTap = false) => {
     setHeartExplodingPostId(postId);
@@ -1628,7 +1750,12 @@ export function App() {
           <span>New Dispatch</span>
         </button>
 
-        <div className="user-identity-card" onClick={handleOpenEditProfile} title="Click to customize profile">
+        <div
+          className="user-identity-card"
+          onClick={() => navigateToProfile('luciano')}
+          title="Click to view profile"
+          style={{ cursor: 'pointer' }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <img
               src={myProfile.avatar}
@@ -1643,7 +1770,17 @@ export function App() {
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{myProfile.handle}</div>
             </div>
           </div>
-          <IconSettings size={16} color="var(--text-muted)" />
+          <button
+            type="button"
+            className="settings-gear-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsSettingsOpen(true);
+            }}
+            title="Settings & System"
+          >
+            <IconSettings size={18} />
+          </button>
         </div>
       </aside>
 
@@ -2520,8 +2657,16 @@ export function App() {
                           className="btn-glass-back"
                           onClick={handleOpenEditProfile}
                         >
-                          <IconSettings size={15} />
+                          <IconPhoto size={14} />
                           <span>Edit Profile</span>
+                        </button>
+                        <button
+                          className="btn-glass-back"
+                          onClick={() => setIsSettingsOpen(true)}
+                          title="Account & Privacy Settings"
+                        >
+                          <IconSettings size={15} />
+                          <span>Settings</span>
                         </button>
                         <button
                           className="btn-post-dispatch"
@@ -4159,6 +4304,607 @@ export function App() {
                 }}
               >
                 Request Access
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== APPLE VISIONOS SETTINGS MODAL ==================== */}
+      {isSettingsOpen && (
+        <div className="frosted-modal-backdrop" onClick={() => setIsSettingsOpen(false)}>
+          <div
+            className="frosted-modal-window"
+            style={{ maxWidth: '660px', padding: 0, overflow: 'hidden' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              className="modal-header-line"
+              style={{
+                padding: '18px 24px',
+                margin: 0,
+                borderBottom: '1px solid var(--glass-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid var(--glass-border)',
+                  }}
+                >
+                  <IconSettings size={19} color="#fff" />
+                </div>
+                <div>
+                  <h3 className="modal-title-bold" style={{ fontSize: '18px', margin: 0 }}>
+                    Settings & System
+                  </h3>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Apple VisionOS frosted controls · Instant persistence
+                  </div>
+                </div>
+              </div>
+              <button
+                className="btn-glass-back"
+                style={{ padding: '6px' }}
+                onClick={() => setIsSettingsOpen(false)}
+                title="Close Settings"
+              >
+                <IconX size={16} />
+              </button>
+            </div>
+
+            {/* Navigation Pills */}
+            <div className="settings-nav-pill-row">
+              <button
+                type="button"
+                className={`settings-nav-tab ${settingsSubTab === 'account' ? 'active' : ''}`}
+                onClick={() => setSettingsSubTab('account')}
+              >
+                Account Information
+              </button>
+              <button
+                type="button"
+                className={`settings-nav-tab ${settingsSubTab === 'privacy' ? 'active' : ''}`}
+                onClick={() => setSettingsSubTab('privacy')}
+              >
+                Privacy & Circles
+              </button>
+              <button
+                type="button"
+                className={`settings-nav-tab ${settingsSubTab === 'notifications' ? 'active' : ''}`}
+                onClick={() => setSettingsSubTab('notifications')}
+              >
+                Notifications
+              </button>
+              <button
+                type="button"
+                className={`settings-nav-tab ${settingsSubTab === 'security' ? 'active' : ''}`}
+                onClick={() => setSettingsSubTab('security')}
+              >
+                Security & Keys
+              </button>
+              <button
+                type="button"
+                className={`settings-nav-tab ${settingsSubTab === 'terms' ? 'active' : ''}`}
+                onClick={() => setSettingsSubTab('terms')}
+              >
+                Terms & Manifesto
+              </button>
+            </div>
+
+            {/* Settings Content Pane */}
+            <div className="settings-content-pane">
+              {/* TAB 1: ACCOUNT INFORMATION */}
+              {settingsSubTab === 'account' && (
+                <div>
+                  {/* Profile Spotlight Card */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: 'var(--radius-lg)',
+                      padding: '16px 20px',
+                      marginBottom: '20px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                      <img
+                        src={myProfile.avatar}
+                        alt={myProfile.name}
+                        style={{
+                          width: '52px',
+                          height: '52px',
+                          borderRadius: '50%',
+                          objectFit: 'cover',
+                          border: '2px solid rgba(255,255,255,0.2)',
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontSize: '16px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {myProfile.name}
+                          <VerifiedBadge
+                            authorName={myProfile.name}
+                            category={myProfile.verifiedCategory}
+                            since={myProfile.verifiedSince}
+                            proofId={myProfile.cryptoProofId}
+                          />
+                        </div>
+                        <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>@{myProfile.handle}</div>
+                        <div style={{ fontSize: '11.5px', color: 'var(--brand-cyan)', marginTop: '2px' }}>
+                          {userSettings.membershipTier} · Verified Identity
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-glass-back"
+                      style={{ padding: '8px 14px', fontSize: '12.5px' }}
+                      onClick={() => {
+                        setIsSettingsOpen(false);
+                        handleOpenEditProfile();
+                      }}
+                      title="Edit Profile"
+                    >
+                      <span>Edit Profile</span>
+                    </button>
+                  </div>
+
+                  <div className="settings-card-group">
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title" style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                          <IconMail size={15} color="var(--brand)" />
+                          <span>Account Holder Email</span>
+                        </div>
+                        <div className="settings-item-desc">Primary encrypted channel for ledger alerts and key recovery.</div>
+                      </div>
+                      <input
+                        type="email"
+                        className="settings-input"
+                        value={userSettings.email}
+                        onChange={(e) => setUserSettings((prev) => ({ ...prev, email: e.target.value }))}
+                        placeholder="yourname@domain.com"
+                      />
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Encrypted Phone Number</div>
+                        <div className="settings-item-desc">Used exclusively for hardware 2FA and offline cryptographic verification.</div>
+                      </div>
+                      <input
+                        type="tel"
+                        className="settings-input"
+                        value={userSettings.phone}
+                        onChange={(e) => setUserSettings((prev) => ({ ...prev, phone: e.target.value }))}
+                        placeholder="+1 (555) 000-0000"
+                      />
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Membership Tier</div>
+                        <div className="settings-item-desc">Your platform governance tier on the decentralized trust ledger.</div>
+                      </div>
+                      <select
+                        className="settings-select"
+                        value={userSettings.membershipTier}
+                        onChange={(e) => setUserSettings((prev) => ({ ...prev, membershipTier: e.target.value as any }))}
+                      >
+                        <option value="Founding Member">Founding Member</option>
+                        <option value="Visionary Genesis">Visionary Genesis</option>
+                        <option value="Sovereign Pass">Sovereign Pass</option>
+                      </select>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Show Verification Badge in Feeds</div>
+                        <div className="settings-item-desc">Display the cryptographic verified star emblem next to your handle.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.handlePrivacyBadge}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, handlePrivacyBadge: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Data Portability */}
+                  <div className="settings-card-group">
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Full Account Data Export (JSON)</div>
+                        <div className="settings-item-desc">Download an offline JSON bundle of your profile, all dispatches, media, circles, and cryptographic configuration.</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-glass-back"
+                        onClick={handleExportData}
+                        style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <IconDownload size={15} />
+                        <span>Export Data</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: PRIVACY & TRUST CIRCLES */}
+              {settingsSubTab === 'privacy' && (
+                <div>
+                  <div className="settings-card-group">
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Private Account</div>
+                        <div className="settings-item-desc">
+                          When enabled, your dispatches, media gallery, and followers directory are restricted strictly to approved followers.
+                        </div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={isPrivateAccount}
+                          onChange={(e) => handleTogglePrivateAccount(e.target.checked)}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Live Online Presence</div>
+                        <div className="settings-item-desc">Display a green live pulse indicator to mutual friends and Close Friends when active.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.showOnlineStatus}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, showOnlineStatus: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Search & Discover Ingestion</div>
+                        <div className="settings-item-desc">Allow public dispatches to appear in the community Discover feed and search tags.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.searchDiscoverable}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, searchDiscoverable: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="settings-card-group">
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Direct Message Permissions</div>
+                        <div className="settings-item-desc">Control who can initiate encrypted private chats with your account.</div>
+                      </div>
+                      <select
+                        className="settings-select"
+                        value={userSettings.allowDirectMessages}
+                        onChange={(e) => setUserSettings((prev) => ({ ...prev, allowDirectMessages: e.target.value as any }))}
+                      >
+                        <option value="close_friends">Close Friends Circle Only</option>
+                        <option value="following">Accounts You Follow</option>
+                        <option value="everyone">Everyone (Public Network)</option>
+                      </select>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Read Receipts</div>
+                        <div className="settings-item-desc">Allow mutual connections to observe when you have opened their direct messages or stories.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.readReceipts}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, readReceipts: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Close Friends Inner Circle</div>
+                        <div className="settings-item-desc">
+                          Manage your {closeFriendsList.length} trusted connections who can view your exclusive emerald-badged dispatches.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-glass-back"
+                        onClick={() => {
+                          setIsSettingsOpen(false);
+                          openRoster('luciano', myProfile.name, 'circle');
+                        }}
+                        style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <IconStarCloseFriends size={14} color="var(--cf-emerald)" />
+                        <span>Manage Circle ({closeFriendsList.length})</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: NOTIFICATIONS */}
+              {settingsSubTab === 'notifications' && (
+                <div>
+                  <div className="settings-card-group">
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Close Friends Dispatches</div>
+                        <div className="settings-item-desc">High-priority instant notification when an inner circle member shares private dispatches.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.notifyCloseFriendsDispatches}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, notifyCloseFriendsDispatches: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Mentions & Thread Replies</div>
+                        <div className="settings-item-desc">Notify when another creator tags @{myProfile.handle} or replies to your conversation.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.notifyMentionsAndReplies}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, notifyMentionsAndReplies: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">New Follow Requests & Followers</div>
+                        <div className="settings-item-desc">Alerts when someone follows your account or requests access to your private circle.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.notifyNewFollowers}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, notifyNewFollowers: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Cryptographic Attestation Confirmations</div>
+                        <div className="settings-item-desc">Alert when peer nodes validate cryptographic zero-knowledge proofs on your media.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.notifyCryptoProofValidations}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, notifyCryptoProofValidations: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: SECURITY & CRYPTOGRAPHY */}
+              {settingsSubTab === 'security' && (
+                <div>
+                  <div className="settings-card-group">
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title" style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                          <IconKey size={15} color="var(--cf-emerald)" />
+                          <span>Ed25519 Cryptographic Fingerprint</span>
+                        </div>
+                        <div className="settings-item-desc">
+                          Client-side elliptic curve key pair used to sign each of your dispatches, ensuring tamper-proof cryptographic authenticity.
+                        </div>
+                        <div style={{ marginTop: '8px' }}>
+                          <code
+                            style={{
+                              display: 'inline-block',
+                              fontSize: '11px',
+                              fontFamily: 'var(--font-mono)',
+                              background: 'rgba(0, 0, 0, 0.45)',
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              color: 'var(--brand-cyan)',
+                              border: '1px solid rgba(56, 189, 248, 0.25)',
+                            }}
+                          >
+                            {userSettings.cryptoKeyFingerprint}
+                          </code>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-glass-back"
+                        onClick={handleCopyCryptoFingerprint}
+                        style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <IconCopy size={14} />
+                        <span>{copiedFingerprint ? 'Copied!' : 'Copy Key'}</span>
+                      </button>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Two-Factor Passkey (WebAuthn)</div>
+                        <div className="settings-item-desc">Hardware-backed biometric authentication (Touch ID, Optic ID, or FIDO2 key).</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.twoFactorEnabled}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, twoFactorEnabled: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title">Hardware Security Key Enrolled</div>
+                        <div className="settings-item-desc">Physical YubiKey cryptographic recovery token linked to ledger identity.</div>
+                      </div>
+                      <label className="apple-switch">
+                        <input
+                          type="checkbox"
+                          checked={userSettings.hardwareKeyLinked}
+                          onChange={(e) => setUserSettings((prev) => ({ ...prev, hardwareKeyLinked: e.target.checked }))}
+                        />
+                        <span className="apple-slider"></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="settings-card-group">
+                    <div className="settings-row-item">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div
+                          style={{
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '10px',
+                            background: 'rgba(16, 185, 129, 0.15)',
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <IconSmartphone size={20} color="var(--cf-emerald)" />
+                        </div>
+                        <div>
+                          <div className="settings-item-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>{userSettings.sessionDevice}</span>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--cf-emerald)' }}></span>
+                          </div>
+                          <div className="settings-item-desc">San Francisco, CA · Local End-to-End Encrypted Tunnel · Current Session</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 5: TERMS & MANIFESTO */}
+              {settingsSubTab === 'terms' && (
+                <div>
+                  <div className="settings-card-group" style={{ padding: '18px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                      <IconFileText size={18} color="var(--brand)" />
+                      <div style={{ fontSize: '15px', fontWeight: 800, color: '#fff' }}>
+                        The Privity Social Covenant
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '13px', lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+                      <p style={{ marginBottom: '10px' }}>
+                        <strong>1. Zero Algorithmic Manipulation:</strong> Privity guarantees that no engagement-maximizing algorithm, rage-bait multiplier, or artificial ranking system will ever curate your feed. Every feed is purely reverse-chronological and guided solely by your chosen circles.
+                      </p>
+                      <p style={{ marginBottom: '10px' }}>
+                        <strong>2. Sovereign Data Ownership:</strong> Your dispatches, photographs, and circle rosters belong entirely to you. You can export your data at any time in standardized JSON archives or delete your presence without retention remnants.
+                      </p>
+                      <p style={{ marginBottom: '10px' }}>
+                        <strong>3. Cryptographic Provenance:</strong> Content is cryptographically signed using Ed25519 signatures, verifying authentic authorship without centralized middlemen or intrusive surveillance tracking.
+                      </p>
+                      <p style={{ margin: 0 }}>
+                        <strong>4. Community Trust:</strong> Mutual respect, zero harassment, and authenticity define Privity. Bot networks and spam syndicates are cryptographically quarantined.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="settings-card-group">
+                    <div className="settings-row-item">
+                      <div className="settings-row-label-group">
+                        <div className="settings-item-title" style={{ color: '#f87171' }}>Reset Local Demo Data</div>
+                        <div className="settings-item-desc">
+                          Erase all local modifications, custom profile edits, uploaded photos, and return the application to pristine factory demo state.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-glass-back"
+                        style={{
+                          borderColor: 'rgba(239, 68, 68, 0.4)',
+                          color: '#f87171',
+                          padding: '8px 16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                        onClick={handleResetData}
+                      >
+                        <IconTrash size={15} />
+                        <span>Reset Data</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: '14px 24px',
+                borderTop: '1px solid var(--glass-border)',
+                background: 'rgba(0, 0, 0, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                All changes save automatically to local storage
+              </div>
+              <button
+                type="button"
+                className="btn-post-dispatch"
+                style={{ padding: '8px 22px', fontSize: '13px' }}
+                onClick={() => {
+                  setIsSettingsOpen(false);
+                  triggerToast('All settings saved instantly!');
+                }}
+              >
+                Done
               </button>
             </div>
           </div>
