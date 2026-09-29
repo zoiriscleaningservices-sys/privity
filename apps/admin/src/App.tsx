@@ -42,6 +42,10 @@ import {
   IconMail,
   IconFileText,
   IconCopy,
+  IconMic,
+  IconPlay,
+  IconPause,
+  IconSend,
 } from './components/Icons';
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -913,6 +917,10 @@ export interface DirectChatMessage {
   text: string;
   timeAgo: string;
   timestamp: number;
+  reactions?: Record<string, number>;
+  mediaUrl?: string;
+  isVoiceMemo?: boolean;
+  voiceDuration?: string;
 }
 
 const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
@@ -924,6 +932,7 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       text: 'Hi Luciano! Loving the new Privity update. The analogue medium format gallery feels so authentic without algorithm clutter.',
       timeAgo: '12m ago',
       timestamp: Date.now() - 720000,
+      reactions: { '❤️': 2, '✨': 1 },
     },
     {
       id: 'm-elena-2',
@@ -932,6 +941,17 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       text: 'Thanks Elena! We built this network so artists own their audience directly. Thrilled to have you in the close circle.',
       timeAgo: '8m ago',
       timestamp: Date.now() - 480000,
+      reactions: { '🔥': 1 },
+    },
+    {
+      id: 'm-elena-3',
+      senderHandle: 'elena_rodriguez',
+      recipientHandle: 'luciano',
+      text: 'Here is a preview of the morning light study from my Kyoto studio:',
+      mediaUrl: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=1000',
+      timeAgo: '3m ago',
+      timestamp: Date.now() - 180000,
+      reactions: { '❤️': 3, '🔒': 1 },
     },
   ],
   marcus_dev: [
@@ -942,6 +962,18 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       text: 'The local-first cryptographic verification proofs are holding strong across all dispatches.',
       timeAgo: '1h ago',
       timestamp: Date.now() - 3600000,
+      reactions: { '⚡': 2 },
+    },
+    {
+      id: 'm-marcus-2',
+      senderHandle: 'marcus_dev',
+      recipientHandle: 'luciano',
+      text: 'Quick audio briefing on the zero-knowledge validation benchmark:',
+      isVoiceMemo: true,
+      voiceDuration: '0:24',
+      timeAgo: '42m ago',
+      timestamp: Date.now() - 2520000,
+      reactions: { '👏': 1 },
     },
   ],
   sara_architecture: [
@@ -952,6 +984,7 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       text: 'The natural daylight study looks fantastic in the new glass lightbox viewer!',
       timeAgo: '2h ago',
       timestamp: Date.now() - 7200000,
+      reactions: { '✨': 2 },
     },
   ],
   julian_analogue: [
@@ -962,6 +995,7 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       text: 'Hey Luciano, just uploaded the binaural dawn recording from Big Sur! High dynamic range.',
       timeAgo: '3h ago',
       timestamp: Date.now() - 10800000,
+      reactions: { '🔥': 1 },
     },
   ],
 };
@@ -1000,7 +1034,7 @@ export function App() {
   };
 
   // 0. Persistent Active Section / Tab (stays on current section upon refresh)
-  const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'activity' | 'profile' | 'safety'>(() =>
+  const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'messages' | 'activity' | 'profile' | 'safety'>(() =>
     readStorage('privity_active_tab_v5', 'feed')
   );
   const [feedFilter, setFeedFilter] = useState<'all' | PostPrivacy>('all');
@@ -1024,6 +1058,10 @@ export function App() {
   const [activeChatUser, setActiveChatUser] = useState<UserProfile | null>(null);
   const [chatDraftText, setChatDraftText] = useState('');
   const [isRecipientTyping, setIsRecipientTyping] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [chatChannelFilter, setChatChannelFilter] = useState<'all' | 'close_friends' | 'unread'>('all');
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const [chatMediaAttachment, setChatMediaAttachment] = useState<string | null>(null);
 
   // Take user all the way to the top of the preserved section upon page refresh / load
   useEffect(() => {
@@ -2059,19 +2097,181 @@ export function App() {
     triggerToast('Comment deleted');
   };
 
+  // Real-Time Direct Message Deletion (Unsend / Delete)
+  const handleDeleteMessage = (recipientHandle: string, messageId: string) => {
+    const cleanRecipient = recipientHandle.replace(/^@/, '');
+    setDirectMessages((prev) => {
+      const thread = prev[cleanRecipient] || [];
+      const updatedThread = thread.filter((m) => m.id !== messageId);
+      const updated = {
+        ...prev,
+        [cleanRecipient]: updatedThread,
+      };
+      safeSaveStorage('privity_direct_messages_v5', updated);
+      return updated;
+    });
+    triggerToast('Message permanently removed from channel');
+  };
+
+  // Real-Time Clear Channel Conversation
+  const handleClearConversation = (recipientHandle: string) => {
+    const cleanRecipient = recipientHandle.replace(/^@/, '');
+    setDirectMessages((prev) => {
+      const updated = {
+        ...prev,
+        [cleanRecipient]: [],
+      };
+      safeSaveStorage('privity_direct_messages_v5', updated);
+      return updated;
+    });
+    triggerToast(`Encrypted channel with @${cleanRecipient} cleared`);
+  };
+
+  // Real-Time Emoji Reaction Toggle on Messages
+  const handleReactToMessage = (recipientHandle: string, messageId: string, emoji: string) => {
+    const cleanRecipient = recipientHandle.replace(/^@/, '');
+    setDirectMessages((prev) => {
+      const thread = prev[cleanRecipient] || [];
+      const updatedThread = thread.map((m) => {
+        if (m.id !== messageId) return m;
+        const currentReactions = m.reactions || {};
+        const currentCount = currentReactions[emoji] || 0;
+        return {
+          ...m,
+          reactions: {
+            ...currentReactions,
+            [emoji]: currentCount + 1,
+          },
+        };
+      });
+      const updated = {
+        ...prev,
+        [cleanRecipient]: updatedThread,
+      };
+      safeSaveStorage('privity_direct_messages_v5', updated);
+      return updated;
+    });
+  };
+
+  // Dispatch simulated high-fidelity binaural audio voice memo
+  const handleSendVoiceMemo = (recipientHandle: string) => {
+    const cleanRecipient = recipientHandle.replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const newMsg: DirectChatMessage = {
+      id: `msg-voice-${Date.now()}`,
+      senderHandle: cleanMyHandle,
+      recipientHandle: cleanRecipient,
+      text: 'Voice Memo (Spatial Binaural Recording)',
+      isVoiceMemo: true,
+      voiceDuration: '0:18',
+      timeAgo: 'Just now',
+      timestamp: Date.now(),
+    };
+
+    setDirectMessages((prev) => {
+      const thread = prev[cleanRecipient] || [];
+      const updated = {
+        ...prev,
+        [cleanRecipient]: [...thread, newMsg],
+      };
+      safeSaveStorage('privity_direct_messages_v5', updated);
+      return updated;
+    });
+
+    triggerToast('Binaural voice memo dispatched with zero-knowledge encryption');
+
+    setIsRecipientTyping(true);
+    setTimeout(() => {
+      const replyMsg: DirectChatMessage = {
+        id: `msg-reply-${Date.now()}`,
+        senderHandle: cleanRecipient,
+        recipientHandle: cleanMyHandle,
+        text: 'Listening to your voice memo now! The spatial acoustics sound incredible on visionOS. 🎙️✨',
+        timeAgo: 'Just now',
+        timestamp: Date.now(),
+        reactions: { '🔥': 1 },
+      };
+      setDirectMessages((prev) => {
+        const thread = prev[cleanRecipient] || [];
+        const updated = {
+          ...prev,
+          [cleanRecipient]: [...thread, replyMsg],
+        };
+        safeSaveStorage('privity_direct_messages_v5', updated);
+        return updated;
+      });
+      setIsRecipientTyping(false);
+      triggerToast(`New encrypted reply from @${cleanRecipient}`);
+    }, 1400);
+  };
+
+  // Dispatch visual photo message
+  const handleSendDirectPhoto = (recipientHandle: string, photoDataUrl: string) => {
+    const cleanRecipient = recipientHandle.replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const newMsg: DirectChatMessage = {
+      id: `msg-photo-${Date.now()}`,
+      senderHandle: cleanMyHandle,
+      recipientHandle: cleanRecipient,
+      text: 'Visual Studio Attachment',
+      mediaUrl: photoDataUrl,
+      timeAgo: 'Just now',
+      timestamp: Date.now(),
+    };
+
+    setDirectMessages((prev) => {
+      const thread = prev[cleanRecipient] || [];
+      const updated = {
+        ...prev,
+        [cleanRecipient]: [...thread, newMsg],
+      };
+      safeSaveStorage('privity_direct_messages_v5', updated);
+      return updated;
+    });
+
+    setChatMediaAttachment(null);
+    triggerToast('Visual attachment transmitted');
+
+    setIsRecipientTyping(true);
+    setTimeout(() => {
+      const replyMsg: DirectChatMessage = {
+        id: `msg-reply-${Date.now()}`,
+        senderHandle: cleanRecipient,
+        recipientHandle: cleanMyHandle,
+        text: 'Received your visual dispatch! Beautiful composition and clarity. 📸✨',
+        timeAgo: 'Just now',
+        timestamp: Date.now(),
+        reactions: { '❤️': 1 },
+      };
+      setDirectMessages((prev) => {
+        const thread = prev[cleanRecipient] || [];
+        const updated = {
+          ...prev,
+          [cleanRecipient]: [...thread, replyMsg],
+        };
+        safeSaveStorage('privity_direct_messages_v5', updated);
+        return updated;
+      });
+      setIsRecipientTyping(false);
+      triggerToast(`New encrypted reply from @${cleanRecipient}`);
+    }, 1400);
+  };
+
   // Real-Time Direct Message Dispatcher
   const handleSendMessage = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!activeChatUser || !chatDraftText.trim()) return;
+    if (!activeChatUser) return;
+    if (!chatDraftText.trim() && !chatMediaAttachment) return;
 
     const recipientHandle = activeChatUser.handle.replace(/^@/, '');
     const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
-    const textToSend = chatDraftText.trim();
+    const textToSend = chatDraftText.trim() || 'Visual Studio Attachment';
     const newMsg: DirectChatMessage = {
       id: `msg-${Date.now()}`,
       senderHandle: cleanMyHandle,
       recipientHandle: recipientHandle,
       text: textToSend,
+      mediaUrl: chatMediaAttachment || undefined,
       timeAgo: 'Just now',
       timestamp: Date.now(),
     };
@@ -2087,6 +2287,7 @@ export function App() {
     });
 
     setChatDraftText('');
+    setChatMediaAttachment(null);
 
     // Trigger instant real-time response from creator to show live bidirectional chatting!
     setIsRecipientTyping(true);
@@ -2098,6 +2299,7 @@ export function App() {
         text: `Got your message "${textToSend.slice(0, 24)}${textToSend.length > 24 ? '...' : ''}" in real time! ✨ Privity encryption active.`,
         timeAgo: 'Just now',
         timestamp: Date.now(),
+        reactions: { '❤️': 1 },
       };
       setDirectMessages((prev) => {
         const existingThread = prev[recipientHandle] || [];
@@ -2418,8 +2620,13 @@ export function App() {
           </button>
 
           <button
-            className={`nav-link-btn ${activeChatUser ? 'active' : ''}`}
-            onClick={() => setActiveChatUser(activeChatUser || getUserProfile('elena_rodriguez'))}
+            className={`nav-link-btn ${activeTab === 'messages' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('messages');
+              if (!activeChatUser) {
+                setActiveChatUser(getUserProfile('elena_rodriguez'));
+              }
+            }}
           >
             <span className="nav-icon-wrap"><IconChat size={21} /></span>
             <span>Messages</span>
@@ -2485,7 +2692,7 @@ export function App() {
       {/* ======================================================== */}
       {/* 2. CENTER FEED COLUMN                                    */}
       {/* ======================================================== */}
-      <main className="feed-column">
+      <main className={`feed-column ${activeTab === 'messages' ? 'messages-expanded-view' : ''}`}>
         {/* --- VIEW 1: HOME FEED --- */}
         {activeTab === 'feed' && (
           <div>
@@ -3256,6 +3463,575 @@ export function App() {
           </div>
         )}
 
+        {/* --- VIEW 3: SPATIAL DIRECT MESSAGING SUITE (VISIONOS SUITE) --- */}
+        {activeTab === 'messages' && (() => {
+          // 1. Gather all conversation partner handles
+          const allPartnerHandles = Array.from(
+            new Set([
+              ...Object.keys(directMessages),
+              'elena_rodriguez',
+              'marcus_dev',
+              'sara_architecture',
+              'julian_analogue',
+            ])
+          );
+
+          // 2. Filter channels based on search and active channel filter
+          const filteredChannels = allPartnerHandles.filter((handle) => {
+            const user = getUserProfile(handle);
+            const thread = directMessages[handle] || [];
+            const lastMsg = thread[thread.length - 1];
+
+            // Tab filter
+            if (chatChannelFilter === 'close_friends' && !closeFriendsList.includes(handle)) {
+              return false;
+            }
+            if (chatChannelFilter === 'unread' && thread.length === 0) {
+              return false;
+            }
+
+            // Search query
+            if (!chatSearchQuery.trim()) return true;
+            const q = chatSearchQuery.toLowerCase();
+            const matchesName = user.name.toLowerCase().includes(q);
+            const matchesHandle = user.handle.toLowerCase().includes(q);
+            const matchesLastMsg = lastMsg && lastMsg.text.toLowerCase().includes(q);
+            return matchesName || matchesHandle || matchesLastMsg;
+          });
+
+          // Active chat partner resolution
+          const currentRecipient = activeChatUser || getUserProfile(filteredChannels[0] || 'elena_rodriguez');
+          const cleanRecipientHandle = currentRecipient.handle.replace(/^@/, '');
+          const currentThread = directMessages[cleanRecipientHandle] || [];
+          const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+          const isPartnerInCloseFriends = closeFriendsList.includes(cleanRecipientHandle);
+
+          return (
+            <div className="spatial-messages-container">
+              {/* LEFT PANE: CONVERSATION CHANNELS ROSTER */}
+              <div className="messages-roster-pane">
+                <div className="messages-roster-header">
+                  <div className="messages-roster-title-row">
+                    <div className="messages-roster-title">
+                      <IconChat size={20} color="var(--brand-cyan)" />
+                      <span>Direct Channels</span>
+                    </div>
+                    <span className="messages-secure-badge">
+                      <span className="live-green-orb" style={{ width: '6px', height: '6px' }} />
+                      P2P Synced
+                    </span>
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="messages-search-bar">
+                    <IconSearch size={14} color="var(--text-muted)" />
+                    <input
+                      type="text"
+                      placeholder="Filter conversations..."
+                      value={chatSearchQuery}
+                      onChange={(e) => setChatSearchQuery(e.target.value)}
+                    />
+                    {chatSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setChatSearchQuery('')}
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
+                      >
+                        <IconX size={13} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div className="messages-filter-pills">
+                    <button
+                      type="button"
+                      className={`messages-filter-pill ${chatChannelFilter === 'all' ? 'active' : ''}`}
+                      onClick={() => setChatChannelFilter('all')}
+                    >
+                      All Channels ({allPartnerHandles.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`messages-filter-pill ${chatChannelFilter === 'close_friends' ? 'active' : ''}`}
+                      onClick={() => setChatChannelFilter('close_friends')}
+                    >
+                      ★ Close Friends ({allPartnerHandles.filter((h) => closeFriendsList.includes(h)).length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`messages-filter-pill ${chatChannelFilter === 'unread' ? 'active' : ''}`}
+                      onClick={() => setChatChannelFilter('unread')}
+                    >
+                      Active Now
+                    </button>
+                  </div>
+                </div>
+
+                {/* Roster Channels List */}
+                <div className="messages-roster-list">
+                  {filteredChannels.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '32px 14px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                      No conversations found matching "{chatSearchQuery}"
+                    </div>
+                  ) : (
+                    filteredChannels.map((handle) => {
+                      const user = getUserProfile(handle);
+                      const isSelected = cleanRecipientHandle === handle;
+                      const thread = directMessages[handle] || [];
+                      const lastMsg = thread[thread.length - 1];
+                      const isCF = closeFriendsList.includes(handle);
+
+                      let snippet = 'Encrypted peer channel ready';
+                      if (lastMsg) {
+                        const isMine = lastMsg.senderHandle === cleanMyHandle || lastMsg.senderHandle === 'luciano';
+                        const prefix = isMine ? 'You: ' : '';
+                        if (lastMsg.isVoiceMemo) {
+                          snippet = `${prefix}🎙️ Voice memo (${lastMsg.voiceDuration || '0:18'})`;
+                        } else if (lastMsg.mediaUrl) {
+                          snippet = `${prefix}📸 Visual dispatch`;
+                        } else {
+                          snippet = `${prefix}${lastMsg.text}`;
+                        }
+                      }
+
+                      return (
+                        <div
+                          key={handle}
+                          className={`channel-card-item ${isSelected ? 'active' : ''}`}
+                          onClick={() => {
+                            setActiveChatUser(user);
+                            setChatMediaAttachment(null);
+                          }}
+                        >
+                          <div className="channel-avatar-wrapper">
+                            <img
+                              src={user.avatar}
+                              alt={user.name}
+                              className="channel-avatar-img"
+                              style={{ borderColor: isCF ? 'var(--cf-emerald)' : undefined }}
+                            />
+                            <span className="online-presence-dot" />
+                          </div>
+                          <div className="channel-info-col">
+                            <div className="channel-name-row">
+                              <span className="channel-creator-name">
+                                {user.name}
+                                {user.isVerified && <VerifiedBadge authorName={user.name} category={user.verifiedCategory} />}
+                              </span>
+                              <span className="channel-timestamp">
+                                {lastMsg ? lastMsg.timeAgo : 'Active'}
+                              </span>
+                            </div>
+                            <div className="channel-snippet-row">
+                              <span className="channel-last-text">{snippet}</span>
+                              {isCF && (
+                                <span title="Close Friends Circle">
+                                  <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT PANE: ACTIVE THREAD WORKSPACE */}
+              <div className="messages-active-thread-pane">
+                {/* Thread Workspace Header */}
+                <div className="messages-thread-header">
+                  <div
+                    className="messages-thread-user-meta"
+                    onClick={() => navigateToProfile(currentRecipient.handle)}
+                    title={`View @${currentRecipient.handle}'s profile`}
+                  >
+                    <div className="messages-thread-avatar-wrap">
+                      <img
+                        src={currentRecipient.avatar}
+                        alt={currentRecipient.name}
+                        className="messages-thread-avatar"
+                        style={{ borderColor: isPartnerInCloseFriends ? 'var(--cf-emerald)' : undefined }}
+                      />
+                      <span className="online-presence-dot" />
+                    </div>
+                    <div>
+                      <div className="messages-thread-name">
+                        <span>{currentRecipient.name}</span>
+                        {currentRecipient.isVerified && (
+                          <VerifiedBadge
+                            authorName={currentRecipient.name}
+                            category={currentRecipient.verifiedCategory}
+                            since={currentRecipient.verifiedSince}
+                            proofId={currentRecipient.cryptoProofId}
+                          />
+                        )}
+                        {isPartnerInCloseFriends && (
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              background: 'var(--cf-glass)',
+                              border: '1px solid var(--cf-border)',
+                              color: 'var(--cf-emerald)',
+                              padding: '2px 8px',
+                              borderRadius: 'var(--radius-pill)',
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
+                            Circle Member
+                          </span>
+                        )}
+                      </div>
+                      <div className="messages-thread-status">
+                        <span className="status-indicator-dot" />
+                        <span>
+                          {isRecipientTyping
+                            ? `@${cleanRecipientHandle} is typing in real time...`
+                            : `End-to-End Encrypted · Ed25519 Verified · Real-Time`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="messages-thread-tools">
+                    <button
+                      type="button"
+                      className="btn-glass-back"
+                      style={{ padding: '7px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      onClick={() => navigateToProfile(currentRecipient.handle)}
+                      title="Inspect full creator portfolio"
+                    >
+                      <IconUser size={13} />
+                      <span>Profile</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-glass-back"
+                      style={{
+                        padding: '7px 12px',
+                        fontSize: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        color: 'rgba(248, 113, 113, 0.9)',
+                        borderColor: 'rgba(239, 68, 68, 0.3)',
+                      }}
+                      onClick={() => handleClearConversation(cleanRecipientHandle)}
+                      title="Clear messages in this channel"
+                    >
+                      <IconTrash size={13} />
+                      <span>Clear Chat</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Messages Stream */}
+                <div className="messages-thread-stream">
+                  {/* Session banner */}
+                  <div className="messages-session-banner">
+                    <IconLock size={12} color="var(--cf-emerald)" />
+                    <span>Privity Zero-Knowledge Chamber · Sovereign Local Encrypted Channel</span>
+                  </div>
+
+                  {currentThread.length === 0 ? (
+                    <div className="messages-empty-selection">
+                      <div style={{ fontSize: '38px', marginBottom: '14px' }}>🔐</div>
+                      <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff', marginBottom: '6px' }}>
+                        Start a Private Dispatch with @{cleanRecipientHandle}
+                      </div>
+                      <p style={{ maxWidth: '380px', fontSize: '13px', lineHeight: 1.6, color: 'var(--text-muted)' }}>
+                        All messages are signed with your client-side cryptographic keys and delivered directly in real time. Send a thought, photo, or binaural audio note below!
+                      </p>
+                    </div>
+                  ) : (
+                    currentThread.map((msg) => {
+                      const isSent = msg.senderHandle === cleanMyHandle || msg.senderHandle === 'luciano';
+
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`spatial-bubble-wrapper ${isSent ? 'sent' : 'received'}`}
+                        >
+                          {/* Floating Hover Action Pill (Delete, React, Copy) */}
+                          <div className="message-hover-actions">
+                            {/* Quick Emoji Reactions */}
+                            {['❤️', '🔥', '👏', '⚡', '🔒'].map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                className="msg-action-btn"
+                                onClick={() => handleReactToMessage(cleanRecipientHandle, msg.id, emoji)}
+                                title={`React with ${emoji}`}
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                            <div style={{ width: '1px', height: '14px', background: 'rgba(255,255,255,0.2)' }} />
+                            {/* Copy Message */}
+                            <button
+                              type="button"
+                              className="msg-action-btn"
+                              onClick={() => {
+                                navigator.clipboard?.writeText(msg.text);
+                                triggerToast('Message copied to clipboard');
+                              }}
+                              title="Copy text"
+                            >
+                              <IconCopy size={13} />
+                            </button>
+                            {/* Delete Message Button */}
+                            <button
+                              type="button"
+                              className="msg-action-btn delete"
+                              onClick={() => handleDeleteMessage(cleanRecipientHandle, msg.id)}
+                              title="Delete message"
+                            >
+                              <IconTrash size={13} />
+                            </button>
+                          </div>
+
+                          {/* Bubble Content Card */}
+                          <div className="spatial-bubble-content-card">
+                            {/* Voice Memo Audio Waveform Component */}
+                            {msg.isVoiceMemo ? (
+                              <div className="voice-memo-player">
+                                <button
+                                  type="button"
+                                  className="voice-play-btn"
+                                  onClick={() => {
+                                    setPlayingVoiceId(playingVoiceId === msg.id ? null : msg.id);
+                                    if (playingVoiceId !== msg.id) {
+                                      triggerToast('Playing spatial audio memo...');
+                                    }
+                                  }}
+                                  title={playingVoiceId === msg.id ? 'Pause memo' : 'Play memo'}
+                                >
+                                  {playingVoiceId === msg.id ? (
+                                    <IconPause size={14} color="#fff" />
+                                  ) : (
+                                    <IconPlay size={14} color="#fff" />
+                                  )}
+                                </button>
+                                <div>
+                                  <div className="voice-waveform-bars">
+                                    {[16, 24, 10, 20, 14, 22, 18, 12, 26, 16, 20, 14, 24, 10].map((h, i) => (
+                                      <span
+                                        key={i}
+                                        className="voice-bar"
+                                        style={{
+                                          height: `${playingVoiceId === msg.id ? Math.max(6, (h + (i % 3) * 6) % 28) : h}px`,
+                                          opacity: playingVoiceId === msg.id ? 1 : 0.7,
+                                        }}
+                                      />
+                                    ))}
+                                  </div>
+                                  <div style={{ fontSize: '10.5px', marginTop: '3px', opacity: 0.85 }}>
+                                    {playingVoiceId === msg.id ? 'Playing Spatial Audio...' : `Binaural Audio · ${msg.voiceDuration || '0:18'}`}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <span>{msg.text}</span>
+                            )}
+
+                            {/* Media Attachment if present */}
+                            {msg.mediaUrl && (
+                              <div>
+                                <img
+                                  src={msg.mediaUrl}
+                                  alt="Attached visual"
+                                  className="spatial-bubble-image"
+                                  onClick={() => setLightboxUrl(msg.mediaUrl || null)}
+                                  title="Click to view in high-res lightbox"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Message Reactions Row */}
+                          {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                            <div className="message-reactions-row">
+                              {Object.entries(msg.reactions).map(([emoji, count]) =>
+                                count > 0 ? (
+                                  <div
+                                    key={emoji}
+                                    className="message-reaction-chip"
+                                    onClick={() => handleReactToMessage(cleanRecipientHandle, msg.id, emoji)}
+                                    title={`Add ${emoji}`}
+                                  >
+                                    <span>{emoji}</span>
+                                    <span>{count}</span>
+                                  </div>
+                                ) : null
+                              )}
+                            </div>
+                          )}
+
+                          {/* Bubble Metadata */}
+                          <div className="spatial-bubble-meta">
+                            <span>{msg.timeAgo}</span>
+                            {isSent && <span style={{ color: 'var(--brand-cyan)' }}>✓✓</span>}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {/* Real-time Recipient Typing Indicator */}
+                  {isRecipientTyping && (
+                    <div className="chat-typing-row" style={{ alignSelf: 'flex-start' }}>
+                      <div className="chat-typing-dots">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                      <span>@{cleanRecipientHandle} is typing in real time...</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Composer Dock */}
+                <form className="messages-composer-dock" onSubmit={handleSendMessage}>
+                  {/* Photo Attachment Preview in Composer */}
+                  {chatMediaAttachment && (
+                    <div style={{ position: 'relative', display: 'inline-block', maxWidth: '140px' }}>
+                      <img
+                        src={chatMediaAttachment}
+                        alt="Attachment preview"
+                        style={{
+                          width: '120px',
+                          height: '80px',
+                          borderRadius: '8px',
+                          objectFit: 'cover',
+                          border: '1px solid var(--brand)',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setChatMediaAttachment(null)}
+                        style={{
+                          position: 'absolute',
+                          top: '-6px',
+                          right: '6px',
+                          background: 'rgba(0,0,0,0.8)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '50%',
+                          width: '20px',
+                          height: '20px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <IconX size={12} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Quick Action Tools Bar */}
+                  <div className="composer-quick-bar">
+                    <div className="composer-attachments-group">
+                      <label className="composer-tool-btn">
+                        <IconPhoto size={14} color="var(--brand-cyan)" />
+                        <span>Visual Attachment</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              compressImageFile(file, 1200, 0.82, (dataUrl) => {
+                                setChatMediaAttachment(dataUrl);
+                                triggerToast('Photo staged for encrypted transmission');
+                              });
+                            }
+                          }}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        className="composer-tool-btn"
+                        onClick={() => handleSendVoiceMemo(cleanRecipientHandle)}
+                        title="Record & dispatch spatial binaural voice memo"
+                      >
+                        <IconMic size={14} color="var(--cf-emerald)" />
+                        <span>Voice Memo</span>
+                      </button>
+
+                      {/* Photo Presets dropdown or quick link */}
+                      <button
+                        type="button"
+                        className="composer-tool-btn"
+                        onClick={() => {
+                          const presets = [
+                            'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=1000',
+                            'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1000',
+                            'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1000',
+                          ];
+                          const randomPreset = presets[Math.floor(Math.random() * presets.length)];
+                          handleSendDirectPhoto(cleanRecipientHandle, randomPreset);
+                        }}
+                        title="Send studio photography visual"
+                      >
+                        <span>📸 Send Studio Visual</span>
+                      </button>
+                    </div>
+
+                    {/* Quick Emojis */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {['✨', '🔥', '❤️', '👏', '🌿', '🔒'].map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          className="composer-tool-btn"
+                          style={{ padding: '4px 8px', fontSize: '13px' }}
+                          onClick={() => setChatDraftText((prev) => prev + emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Text Input Row */}
+                  <div className="composer-input-row">
+                    <input
+                      type="text"
+                      className="composer-text-input"
+                      placeholder={`Type encrypted dispatch to @${cleanRecipientHandle}... (Press Enter to Send)`}
+                      value={chatDraftText}
+                      onChange={(e) => setChatDraftText(e.target.value)}
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      className="composer-send-btn"
+                      disabled={!chatDraftText.trim() && !chatMediaAttachment}
+                      style={{ opacity: chatDraftText.trim() || chatMediaAttachment ? 1 : 0.5 }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <IconSend size={15} />
+                        <span>Send</span>
+                      </span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          );
+        })()}
+
+
         {/* --- VIEW 3: ACTIVITY / NOTIFICATIONS --- */}
         {activeTab === 'activity' && (
           <div style={{ padding: '28px' }}>
@@ -3524,7 +4300,10 @@ export function App() {
 
                         <button
                           className="btn-glass-back"
-                          onClick={() => setActiveChatUser(profile)}
+                          onClick={() => {
+                            setActiveChatUser(profile);
+                            setActiveTab('messages');
+                          }}
                         >
                           <IconChat size={14} />
                           <span>Message</span>
@@ -4354,7 +5133,8 @@ export function App() {
       {/* ======================================================== */}
       {/* 3. RIGHT SIDEBAR (SEARCH & SUGGESTED)                    */}
       {/* ======================================================== */}
-      <aside className="side-intel-column">
+      {activeTab !== 'messages' && (
+        <aside className="side-intel-column">
         <div className="search-input-shell">
           <span className="search-lens-icon"><IconSearch size={18} /></span>
           <input
@@ -4431,7 +5211,8 @@ export function App() {
             Privity has no opaque recommendation black-box. Every post is delivered chronologically to the exact audience you specified.
           </p>
         </div>
-      </aside>
+        </aside>
+      )}
 
       {/* ======================================================== */}
       {/* 4. MODALS & LIGHTBOXES                                   */}
@@ -4828,7 +5609,7 @@ export function App() {
       })()}
 
       {/* REAL-TIME DIRECT MESSAGING MODAL — APPLE VISIONOS SPECULAR GLASS */}
-      {activeChatUser && (
+      {activeChatUser && activeTab !== 'messages' && (
         <div className="direct-chat-backdrop" onClick={() => setActiveChatUser(null)}>
           <div className="direct-chat-window" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
@@ -4861,14 +5642,25 @@ export function App() {
                 </div>
               </div>
 
-              <button
-                className="btn-glass-back"
-                onClick={() => setActiveChatUser(null)}
-                title="Close chat"
-                style={{ padding: '8px', borderRadius: '50%', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              >
-                <IconX size={16} />
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn-glass-back"
+                  onClick={() => setActiveTab('messages')}
+                  title="Expand to Full Spatial Suite"
+                  style={{ padding: '6px 12px', fontSize: '11.5px' }}
+                >
+                  <span>Full Suite ↗</span>
+                </button>
+                <button
+                  className="btn-glass-back"
+                  onClick={() => setActiveChatUser(null)}
+                  title="Close chat"
+                  style={{ padding: '8px', borderRadius: '50%', width: '34px', height: '34px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <IconX size={16} />
+                </button>
+              </div>
             </div>
 
             {/* Quick Conversation Switcher Chips */}
