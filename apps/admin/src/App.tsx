@@ -918,9 +918,11 @@ export interface DirectChatMessage {
   timeAgo: string;
   timestamp: number;
   reactions?: Record<string, number>;
+  userReactions?: Record<string, string[]>;
   mediaUrl?: string;
   isVoiceMemo?: boolean;
   voiceDuration?: string;
+  audioUrl?: string;
 }
 
 const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
@@ -932,7 +934,8 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       text: 'Hi Luciano! Loving the new Privity update. The analogue medium format gallery feels so authentic without algorithm clutter.',
       timeAgo: '12m ago',
       timestamp: Date.now() - 720000,
-      reactions: { '❤️': 2, '✨': 1 },
+      reactions: { '❤️': 1, '✨': 1 },
+      userReactions: { '❤️': ['elena_rodriguez'], '✨': ['elena_rodriguez'] },
     },
     {
       id: 'm-elena-2',
@@ -942,6 +945,7 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       timeAgo: '8m ago',
       timestamp: Date.now() - 480000,
       reactions: { '🔥': 1 },
+      userReactions: { '🔥': ['elena_rodriguez'] },
     },
     {
       id: 'm-elena-3',
@@ -951,7 +955,8 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       mediaUrl: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=1000',
       timeAgo: '3m ago',
       timestamp: Date.now() - 180000,
-      reactions: { '❤️': 3, '🔒': 1 },
+      reactions: { '❤️': 1, '🔒': 1 },
+      userReactions: { '❤️': ['elena_rodriguez'], '🔒': ['elena_rodriguez'] },
     },
   ],
   marcus_dev: [
@@ -962,7 +967,8 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       text: 'The local-first cryptographic verification proofs are holding strong across all dispatches.',
       timeAgo: '1h ago',
       timestamp: Date.now() - 3600000,
-      reactions: { '⚡': 2 },
+      reactions: { '⚡': 1 },
+      userReactions: { '⚡': ['marcus_dev'] },
     },
     {
       id: 'm-marcus-2',
@@ -974,6 +980,7 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       timeAgo: '42m ago',
       timestamp: Date.now() - 2520000,
       reactions: { '👏': 1 },
+      userReactions: { '👏': ['marcus_dev'] },
     },
   ],
   sara_architecture: [
@@ -984,7 +991,8 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       text: 'The natural daylight study looks fantastic in the new glass lightbox viewer!',
       timeAgo: '2h ago',
       timestamp: Date.now() - 7200000,
-      reactions: { '✨': 2 },
+      reactions: { '✨': 1 },
+      userReactions: { '✨': ['sara_architecture'] },
     },
   ],
   julian_analogue: [
@@ -996,8 +1004,49 @@ const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
       timeAgo: '3h ago',
       timestamp: Date.now() - 10800000,
       reactions: { '🔥': 1 },
+      userReactions: { '🔥': ['julian_analogue'] },
     },
   ],
+};
+
+// Helper to sanitize stored direct messages so legacy glitch counters (e.g. 25, 24) are cleanly normalized
+const sanitizeStoredDirectMessages = (raw: Record<string, DirectChatMessage[]>): Record<string, DirectChatMessage[]> => {
+  if (!raw || typeof raw !== 'object') return raw;
+  const cleanMyHandle = 'luciano';
+  const sanitized: Record<string, DirectChatMessage[]> = {};
+
+  for (const [handle, thread] of Object.entries(raw)) {
+    if (!Array.isArray(thread)) {
+      sanitized[handle] = [];
+      continue;
+    }
+    sanitized[handle] = thread.map((m) => {
+      if (!m.reactions || Object.keys(m.reactions).length === 0) return m;
+
+      const nextReactions: Record<string, number> = {};
+      const nextUserReactions: Record<string, string[]> = { ...(m.userReactions || {}) };
+
+      for (const [emoji, rawCount] of Object.entries(m.reactions)) {
+        if (typeof rawCount !== 'number' || rawCount <= 0) continue;
+        const users = [...(nextUserReactions[emoji] || [])];
+
+        // If legacy glitch had incremented it (e.g. 25, 24) without user tracking, attribute 1 to the active user
+        if (users.length === 0) {
+          nextUserReactions[emoji] = [cleanMyHandle];
+          nextReactions[emoji] = 1;
+        } else {
+          nextReactions[emoji] = users.length;
+        }
+      }
+
+      return {
+        ...m,
+        reactions: nextReactions,
+        userReactions: nextUserReactions,
+      };
+    });
+  }
+  return sanitized;
 };
 
 // ==================== MAIN COMPONENT ====================
@@ -1052,9 +1101,10 @@ export function App() {
   const [lightboxCommentInput, setLightboxCommentInput] = useState('');
 
   // Real-Time End-to-End Encrypted Direct Messages State
-  const [directMessages, setDirectMessages] = useState<Record<string, DirectChatMessage[]>>(() =>
-    readStorage('privity_direct_messages_v5', INITIAL_DIRECT_MESSAGES)
-  );
+  const [directMessages, setDirectMessages] = useState<Record<string, DirectChatMessage[]>>(() => {
+    const loaded = readStorage('privity_direct_messages_v5', INITIAL_DIRECT_MESSAGES);
+    return sanitizeStoredDirectMessages(loaded);
+  });
   const [activeChatUser, setActiveChatUser] = useState<UserProfile | null>(null);
   const [chatDraftText, setChatDraftText] = useState('');
   const [isRecipientTyping, setIsRecipientTyping] = useState(false);
@@ -1062,6 +1112,12 @@ export function App() {
   const [chatChannelFilter, setChatChannelFilter] = useState<'all' | 'close_friends' | 'unread'>('all');
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [chatMediaAttachment, setChatMediaAttachment] = useState<string | null>(null);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const audioChunksRef = React.useRef<Blob[]>([]);
+  const recordingTimerRef = React.useRef<any>(null);
+  const activeAudioElementRef = React.useRef<HTMLAudioElement | null>(null);
 
   // Take user all the way to the top of the preserved section upon page refresh / load
   useEffect(() => {
@@ -2127,23 +2183,106 @@ export function App() {
     triggerToast(`Encrypted channel with @${cleanRecipient} cleared`);
   };
 
-  // Real-Time Emoji Reaction Toggle on Messages
+  // Organic Conversational Response Generator (Eliminates robotic repetitive replies)
+  const getOrganicContactReply = (senderName: string, text: string, isMedia?: boolean, isVoice?: boolean): { text: string; reactionEmoji?: string } => {
+    const trimmed = text.trim();
+
+    if (isVoice) {
+      const voiceReplies = [
+        { text: 'Just listened to your voice memo through my studio monitors — the spatial room tone and acoustic presence are incredible! 🎙️✨', reactionEmoji: '🔥' },
+        { text: 'Such a great update! Love hearing your voice in real time without compression loss. Totally agree with you.', reactionEmoji: '❤️' },
+        { text: 'Acoustics sound crystal clear on visionOS. I am taking notes on what you mentioned and sketching ideas now!', reactionEmoji: '✨' },
+      ];
+      return voiceReplies[Math.floor(Math.random() * voiceReplies.length)];
+    }
+
+    if (isMedia) {
+      const mediaReplies = [
+        { text: 'The tonal range and natural light diffusion here are sublime! Did you capture this with medium format? 📸', reactionEmoji: '❤️' },
+        { text: 'Incredible visual composition. The atmosphere feels so serene and authentic without synthetic filters.', reactionEmoji: '✨' },
+        { text: 'Love this perspective! Reminds me of our Kyoto light studies. Saving this to my private inspiration board.', reactionEmoji: '🔥' },
+      ];
+      return mediaReplies[Math.floor(Math.random() * mediaReplies.length)];
+    }
+
+    // Pure emoji detection
+    const emojiOnlyRegex = /^(\p{Emoji}|\s)+$/u;
+    if (emojiOnlyRegex.test(trimmed) && trimmed.length <= 8) {
+      if (trimmed.includes('👏')) {
+        return { text: `Appreciate the applause and support, ${senderName}! Let's keep building this sacred creative space. 🤝✨`, reactionEmoji: '👏' };
+      }
+      if (trimmed.includes('❤️')) {
+        return { text: 'Much love! Always grateful to have you in this close circle. Hope your day is flowing beautifully. 💫', reactionEmoji: '❤️' };
+      }
+      if (trimmed.includes('🔥')) {
+        return { text: 'Match that energy! We are really pushing boundaries with this direct network architecture. ⚡', reactionEmoji: '🔥' };
+      }
+      return { text: 'Loving the vibe! Sending good energy back from the northern studio. 🌿✨', reactionEmoji: '✨' };
+    }
+
+    // Contextual text-based organic responses
+    const lower = trimmed.toLowerCase();
+    if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
+      return { text: `Hey ${senderName}! Great to see you online. I am working on the new analogue light study right now. How is everything flowing on your end?`, reactionEmoji: '✨' };
+    }
+    if (lower.includes('photo') || lower.includes('gallery') || lower.includes('art') || lower.includes('camera')) {
+      return { text: 'Photography without algorithmic interference feels so liberating. You can actually breathe and appreciate the craft again.', reactionEmoji: '❤️' };
+    }
+    if (lower.includes('privity') || lower.includes('privacy') || lower.includes('encrypt') || lower.includes('security')) {
+      return { text: 'The zero-knowledge cryptographic signature gives so much peace of mind. Knowing no surveillance bots are scanning our conversation is priceless. 🔒', reactionEmoji: '🔒' };
+    }
+
+    const organicPool = [
+      { text: 'Totally agree. When technology stays out of the way and serves real humans, the connection feels completely genuine.', reactionEmoji: '❤️' },
+      { text: 'That resonates deeply. I was just discussing this exact thought in the studio earlier. Let us make sure we preserve this vision.', reactionEmoji: '✨' },
+      { text: 'Spot on! Privity feels like the early days of authentic creative community, but with next-generation spatial elegance.', reactionEmoji: '🔥' },
+      { text: `Thanks for sharing that thought, ${senderName}! Always look forward to your dispatches in this circle.`, reactionEmoji: '👏' },
+    ];
+    return organicPool[Math.floor(Math.random() * organicPool.length)];
+  };
+
+  // Real-Time Emoji Reaction Toggle (1 reaction per emoji per user, clicking again deletes it)
   const handleReactToMessage = (recipientHandle: string, messageId: string, emoji: string) => {
     const cleanRecipient = recipientHandle.replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+
     setDirectMessages((prev) => {
       const thread = prev[cleanRecipient] || [];
       const updatedThread = thread.map((m) => {
         if (m.id !== messageId) return m;
-        const currentReactions = m.reactions || {};
-        const currentCount = currentReactions[emoji] || 0;
+
+        const currentReactions: Record<string, number> = { ...(m.reactions || {}) };
+        const currentUserReactions: Record<string, string[]> = { ...(m.userReactions || {}) };
+        const usersForEmoji = [...(currentUserReactions[emoji] || [])];
+
+        // Has current user reacted to this emoji?
+        const hasMyReaction = usersForEmoji.includes(cleanMyHandle) ||
+          (!currentUserReactions[emoji] && (currentReactions[emoji] || 0) > 0);
+
+        if (hasMyReaction) {
+          // TOGGLE OFF: User already reacted, so clicking again REMOVES & DELETES it!
+          const nextUsers = usersForEmoji.filter((h) => h !== cleanMyHandle);
+          if (nextUsers.length > 0) {
+            currentUserReactions[emoji] = nextUsers;
+            currentReactions[emoji] = nextUsers.length;
+          } else {
+            delete currentUserReactions[emoji];
+            delete currentReactions[emoji];
+          }
+        } else {
+          // TOGGLE ON: Strictly 1 reaction per user
+          const nextUsers = [...usersForEmoji.filter((h) => h !== cleanMyHandle), cleanMyHandle];
+          currentUserReactions[emoji] = nextUsers;
+          currentReactions[emoji] = nextUsers.length;
+        }
+
         return {
           ...m,
-          reactions: {
-            ...currentReactions,
-            [emoji]: currentCount + 1,
-          },
+          reactions: currentReactions,
+          userReactions: currentUserReactions,
         };
       });
+
       const updated = {
         ...prev,
         [cleanRecipient]: updatedThread,
@@ -2153,56 +2292,206 @@ export function App() {
     });
   };
 
-  // Dispatch simulated high-fidelity binaural audio voice memo
-  const handleSendVoiceMemo = (recipientHandle: string) => {
+  // Real Audio Playback (HTML5 Audio or Web Audio Synthesized Chimes)
+  const handleTogglePlayVoice = (msg: DirectChatMessage) => {
+    if (playingVoiceId === msg.id) {
+      if (activeAudioElementRef.current) {
+        activeAudioElementRef.current.pause();
+        activeAudioElementRef.current = null;
+      }
+      setPlayingVoiceId(null);
+      return;
+    }
+
+    if (activeAudioElementRef.current) {
+      activeAudioElementRef.current.pause();
+      activeAudioElementRef.current = null;
+    }
+
+    setPlayingVoiceId(msg.id);
+    triggerToast('Playing spatial audio memo...');
+
+    if (msg.audioUrl) {
+      const audio = new Audio(msg.audioUrl);
+      activeAudioElementRef.current = audio;
+      audio.play().catch(() => {});
+      audio.onended = () => {
+        setPlayingVoiceId(null);
+        activeAudioElementRef.current = null;
+      };
+    } else {
+      // High-Fidelity Web Audio Synthesizer: plays soothing binaural acoustic chimes
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const now = ctx.currentTime;
+          const frequencies = [261.63, 392.00, 523.25, 659.25, 783.99, 587.33, 523.25];
+          const step = 0.38;
+
+          frequencies.forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + i * step);
+
+            gain.gain.setValueAtTime(0.001, now + i * step);
+            gain.gain.linearRampToValueAtTime(0.18, now + i * step + 0.04);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + i * step + 0.45);
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            osc.start(now + i * step);
+            osc.stop(now + i * step + 0.46);
+          });
+
+          const totalMs = (frequencies.length * step + 0.5) * 1000;
+          setTimeout(() => {
+            setPlayingVoiceId((curr) => (curr === msg.id ? null : curr));
+          }, totalMs);
+        } else {
+          setTimeout(() => setPlayingVoiceId(null), 3000);
+        }
+      } catch (e) {
+        setTimeout(() => setPlayingVoiceId(null), 3000);
+      }
+    }
+  };
+
+  // Start Real Voice Studio Recording
+  const handleStartVoiceRecording = async () => {
+    setIsRecordingVoice(true);
+    setRecordingSeconds(0);
+    audioChunksRef.current = [];
+
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1);
+    }, 1000);
+
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            audioChunksRef.current.push(e.data);
+          }
+        };
+
+        recorder.start(100);
+        triggerToast('Voice Studio active · Recording from microphone');
+      } else {
+        triggerToast('Spatial Voice Studio active · Recording high-fidelity acoustic memo');
+      }
+    } catch (err) {
+      triggerToast('Spatial Voice Studio active · Recording high-fidelity acoustic memo');
+    }
+  };
+
+  // Cancel & Discard Voice Recording
+  const handleCancelVoiceRecording = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream?.getTracks().forEach((t) => t.stop());
+    }
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
+    setIsRecordingVoice(false);
+    setRecordingSeconds(0);
+    triggerToast('Voice memo discarded');
+  };
+
+  // Finish & Send Voice Recording
+  const handleFinishAndSendVoiceRecording = (recipientHandle: string) => {
     const cleanRecipient = recipientHandle.replace(/^@/, '');
     const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
-    const newMsg: DirectChatMessage = {
-      id: `msg-voice-${Date.now()}`,
-      senderHandle: cleanMyHandle,
-      recipientHandle: cleanRecipient,
-      text: 'Voice Memo (Spatial Binaural Recording)',
-      isVoiceMemo: true,
-      voiceDuration: '0:18',
-      timeAgo: 'Just now',
-      timestamp: Date.now(),
-    };
+    const durationSec = Math.max(1, recordingSeconds);
+    const formattedDuration = `${Math.floor(durationSec / 60)}:${(durationSec % 60).toString().padStart(2, '0')}`;
 
-    setDirectMessages((prev) => {
-      const thread = prev[cleanRecipient] || [];
-      const updated = {
-        ...prev,
-        [cleanRecipient]: [...thread, newMsg],
-      };
-      safeSaveStorage('privity_direct_messages_v5', updated);
-      return updated;
-    });
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
 
-    triggerToast('Binaural voice memo dispatched with zero-knowledge encryption');
-
-    setIsRecipientTyping(true);
-    setTimeout(() => {
-      const replyMsg: DirectChatMessage = {
-        id: `msg-reply-${Date.now()}`,
-        senderHandle: cleanRecipient,
-        recipientHandle: cleanMyHandle,
-        text: 'Listening to your voice memo now! The spatial acoustics sound incredible on visionOS. 🎙️✨',
+    const dispatchMemo = (audioBlobUrl?: string) => {
+      const newMsg: DirectChatMessage = {
+        id: `msg-voice-${Date.now()}`,
+        senderHandle: cleanMyHandle,
+        recipientHandle: cleanRecipient,
+        text: 'Voice Memo (Spatial Binaural Recording)',
+        isVoiceMemo: true,
+        voiceDuration: formattedDuration,
+        audioUrl: audioBlobUrl,
         timeAgo: 'Just now',
         timestamp: Date.now(),
-        reactions: { '🔥': 1 },
+        reactions: {},
+        userReactions: {},
       };
+
       setDirectMessages((prev) => {
         const thread = prev[cleanRecipient] || [];
         const updated = {
           ...prev,
-          [cleanRecipient]: [...thread, replyMsg],
+          [cleanRecipient]: [...thread, newMsg],
         };
         safeSaveStorage('privity_direct_messages_v5', updated);
         return updated;
       });
-      setIsRecipientTyping(false);
-      triggerToast(`New encrypted reply from @${cleanRecipient}`);
-    }, 1400);
+
+      setIsRecordingVoice(false);
+      setRecordingSeconds(0);
+      triggerToast('Binaural voice memo dispatched with zero-knowledge encryption');
+
+      setIsRecipientTyping(true);
+      setTimeout(() => {
+        const organicReply = getOrganicContactReply('Luciano', '', false, true);
+        const replyMsg: DirectChatMessage = {
+          id: `msg-reply-${Date.now()}`,
+          senderHandle: cleanRecipient,
+          recipientHandle: cleanMyHandle,
+          text: organicReply.text,
+          timeAgo: 'Just now',
+          timestamp: Date.now(),
+          reactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: 1 } : { '🔥': 1 },
+          userReactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: [cleanRecipient] } : { '🔥': [cleanRecipient] },
+        };
+        setDirectMessages((prev) => {
+          const thread = prev[cleanRecipient] || [];
+          const updated = {
+            ...prev,
+            [cleanRecipient]: [...thread, replyMsg],
+          };
+          safeSaveStorage('privity_direct_messages_v5', updated);
+          return updated;
+        });
+        setIsRecipientTyping(false);
+        triggerToast(`New encrypted reply from @${cleanRecipient}`);
+      }, 1500);
+    };
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.onstop = () => {
+        let audioBlobUrl: string | undefined;
+        if (audioChunksRef.current.length > 0) {
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          audioBlobUrl = URL.createObjectURL(blob);
+        }
+        mediaRecorderRef.current?.stream?.getTracks().forEach((t) => t.stop());
+        mediaRecorderRef.current = null;
+        audioChunksRef.current = [];
+        dispatchMemo(audioBlobUrl);
+      };
+      mediaRecorderRef.current.stop();
+    } else {
+      dispatchMemo();
+    }
   };
 
   // Dispatch visual photo message
@@ -2217,6 +2506,8 @@ export function App() {
       mediaUrl: photoDataUrl,
       timeAgo: 'Just now',
       timestamp: Date.now(),
+      reactions: {},
+      userReactions: {},
     };
 
     setDirectMessages((prev) => {
@@ -2234,14 +2525,16 @@ export function App() {
 
     setIsRecipientTyping(true);
     setTimeout(() => {
+      const organicReply = getOrganicContactReply('Luciano', 'photo', true, false);
       const replyMsg: DirectChatMessage = {
         id: `msg-reply-${Date.now()}`,
         senderHandle: cleanRecipient,
         recipientHandle: cleanMyHandle,
-        text: 'Received your visual dispatch! Beautiful composition and clarity. 📸✨',
+        text: organicReply.text,
         timeAgo: 'Just now',
         timestamp: Date.now(),
-        reactions: { '❤️': 1 },
+        reactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: 1 } : { '❤️': 1 },
+        userReactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: [cleanRecipient] } : { '❤️': [cleanRecipient] },
       };
       setDirectMessages((prev) => {
         const thread = prev[cleanRecipient] || [];
@@ -2266,6 +2559,8 @@ export function App() {
     const recipientHandle = activeChatUser.handle.replace(/^@/, '');
     const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
     const textToSend = chatDraftText.trim() || 'Visual Studio Attachment';
+    const isMedia = !!chatMediaAttachment;
+
     const newMsg: DirectChatMessage = {
       id: `msg-${Date.now()}`,
       senderHandle: cleanMyHandle,
@@ -2274,6 +2569,8 @@ export function App() {
       mediaUrl: chatMediaAttachment || undefined,
       timeAgo: 'Just now',
       timestamp: Date.now(),
+      reactions: {},
+      userReactions: {},
     };
 
     setDirectMessages((prev) => {
@@ -2289,17 +2586,19 @@ export function App() {
     setChatDraftText('');
     setChatMediaAttachment(null);
 
-    // Trigger instant real-time response from creator to show live bidirectional chatting!
+    // Trigger organic, conversational response from recipient in real time
     setIsRecipientTyping(true);
     setTimeout(() => {
+      const organicReply = getOrganicContactReply(activeChatUser.name, textToSend, isMedia, false);
       const replyMsg: DirectChatMessage = {
         id: `msg-reply-${Date.now()}`,
         senderHandle: recipientHandle,
         recipientHandle: cleanMyHandle,
-        text: `Got your message "${textToSend.slice(0, 24)}${textToSend.length > 24 ? '...' : ''}" in real time! ✨ Privity encryption active.`,
+        text: organicReply.text,
         timeAgo: 'Just now',
         timestamp: Date.now(),
-        reactions: { '❤️': 1 },
+        reactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: 1 } : { '❤️': 1 },
+        userReactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: [recipientHandle] } : { '❤️': [recipientHandle] },
       };
       setDirectMessages((prev) => {
         const existingThread = prev[recipientHandle] || [];
@@ -2312,7 +2611,7 @@ export function App() {
       });
       setIsRecipientTyping(false);
       triggerToast(`New encrypted message from @${recipientHandle}`);
-    }, 1200);
+    }, 1300);
   };
 
   // Like or unlike comment
@@ -3783,17 +4082,21 @@ export function App() {
                           {/* Floating Hover Action Pill (Delete, React, Copy) */}
                           <div className="message-hover-actions">
                             {/* Quick Emoji Reactions */}
-                            {['❤️', '🔥', '👏', '⚡', '🔒'].map((emoji) => (
-                              <button
-                                key={emoji}
-                                type="button"
-                                className="msg-action-btn"
-                                onClick={() => handleReactToMessage(cleanRecipientHandle, msg.id, emoji)}
-                                title={`React with ${emoji}`}
-                              >
-                                {emoji}
-                              </button>
-                            ))}
+                            {['❤️', '🔥', '👏', '⚡', '🔒'].map((emoji) => {
+                              const hasMyReaction = (msg.userReactions?.[emoji] || []).includes(cleanMyHandle) ||
+                                (!msg.userReactions?.[emoji] && (msg.reactions?.[emoji] || 0) > 0);
+                              return (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  className={`msg-action-btn ${hasMyReaction ? 'reacted' : ''}`}
+                                  onClick={() => handleReactToMessage(cleanRecipientHandle, msg.id, emoji)}
+                                  title={hasMyReaction ? `Remove your ${emoji} reaction` : `React with ${emoji}`}
+                                >
+                                  {emoji}
+                                </button>
+                              );
+                            })}
                             <div style={{ width: '1px', height: '14px', background: 'rgba(255,255,255,0.2)' }} />
                             {/* Copy Message */}
                             <button
@@ -3825,13 +4128,8 @@ export function App() {
                               <div className="voice-memo-player">
                                 <button
                                   type="button"
-                                  className="voice-play-btn"
-                                  onClick={() => {
-                                    setPlayingVoiceId(playingVoiceId === msg.id ? null : msg.id);
-                                    if (playingVoiceId !== msg.id) {
-                                      triggerToast('Playing spatial audio memo...');
-                                    }
-                                  }}
+                                  className={`voice-play-btn ${playingVoiceId === msg.id ? 'playing' : ''}`}
+                                  onClick={() => handleTogglePlayVoice(msg)}
                                   title={playingVoiceId === msg.id ? 'Pause memo' : 'Play memo'}
                                 >
                                   {playingVoiceId === msg.id ? (
@@ -3840,21 +4138,26 @@ export function App() {
                                     <IconPlay size={14} color="#fff" />
                                   )}
                                 </button>
-                                <div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
                                   <div className="voice-waveform-bars">
-                                    {[16, 24, 10, 20, 14, 22, 18, 12, 26, 16, 20, 14, 24, 10].map((h, i) => (
+                                    {[16, 24, 10, 20, 14, 22, 18, 12, 26, 16, 20, 14, 24, 10, 18, 22, 14].map((h, i) => (
                                       <span
                                         key={i}
-                                        className="voice-bar"
+                                        className={`voice-bar ${playingVoiceId === msg.id ? 'active' : ''}`}
                                         style={{
-                                          height: `${playingVoiceId === msg.id ? Math.max(6, (h + (i % 3) * 6) % 28) : h}px`,
+                                          height: `${playingVoiceId === msg.id ? Math.max(6, (h + (i % 4) * 6) % 28) : h}px`,
                                           opacity: playingVoiceId === msg.id ? 1 : 0.7,
                                         }}
                                       />
                                     ))}
                                   </div>
-                                  <div style={{ fontSize: '10.5px', marginTop: '3px', opacity: 0.85 }}>
-                                    {playingVoiceId === msg.id ? 'Playing Spatial Audio...' : `Binaural Audio · ${msg.voiceDuration || '0:18'}`}
+                                  <div style={{ fontSize: '10.5px', marginTop: '3px', opacity: 0.85, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span>{playingVoiceId === msg.id ? '▶ Playing Audio...' : `Binaural Audio · ${msg.voiceDuration || '0:18'}`}</span>
+                                    {msg.audioUrl && (
+                                      <span style={{ fontSize: '9px', background: 'rgba(16, 185, 129, 0.25)', color: '#34d399', padding: '1px 5px', borderRadius: '4px' }}>
+                                        Recorded Mic
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -3879,19 +4182,24 @@ export function App() {
                           {/* Message Reactions Row */}
                           {msg.reactions && Object.keys(msg.reactions).length > 0 && (
                             <div className="message-reactions-row">
-                              {Object.entries(msg.reactions).map(([emoji, count]) =>
-                                count > 0 ? (
-                                  <div
+                              {Object.entries(msg.reactions).map(([emoji, count]) => {
+                                if (count <= 0) return null;
+                                const hasMyReaction = (msg.userReactions?.[emoji] || []).includes(cleanMyHandle) ||
+                                  (!msg.userReactions?.[emoji] && count > 0);
+
+                                return (
+                                  <button
                                     key={emoji}
-                                    className="message-reaction-chip"
+                                    type="button"
+                                    className={`message-reaction-chip ${hasMyReaction ? 'active' : ''}`}
                                     onClick={() => handleReactToMessage(cleanRecipientHandle, msg.id, emoji)}
-                                    title={`Add ${emoji}`}
+                                    title={hasMyReaction ? `Remove your ${emoji} reaction` : `React with ${emoji}`}
                                   >
-                                    <span>{emoji}</span>
-                                    <span>{count}</span>
-                                  </div>
-                                ) : null
-                              )}
+                                    <span className="reaction-emoji">{emoji}</span>
+                                    <span className="reaction-count">{count}</span>
+                                  </button>
+                                );
+                              })}
                             </div>
                           )}
 
@@ -3982,12 +4290,12 @@ export function App() {
 
                       <button
                         type="button"
-                        className="composer-tool-btn"
-                        onClick={() => handleSendVoiceMemo(cleanRecipientHandle)}
-                        title="Record & dispatch spatial binaural voice memo"
+                        className={`composer-tool-btn ${isRecordingVoice ? 'recording-active' : ''}`}
+                        onClick={isRecordingVoice ? handleCancelVoiceRecording : handleStartVoiceRecording}
+                        title={isRecordingVoice ? 'Cancel recording' : 'Record spatial voice memo with microphone'}
                       >
-                        <IconMic size={14} color="var(--cf-emerald)" />
-                        <span>Voice Memo</span>
+                        <IconMic size={14} color={isRecordingVoice ? '#ef4444' : 'var(--cf-emerald)'} />
+                        <span>{isRecordingVoice ? 'Cancel Mic' : 'Voice Memo'}</span>
                       </button>
 
                       {/* Photo Presets dropdown or quick link */}
@@ -4025,28 +4333,74 @@ export function App() {
                     </div>
                   </div>
 
-                  {/* Text Input Row */}
-                  <div className="composer-input-row">
-                    <input
-                      type="text"
-                      className="composer-text-input"
-                      placeholder={`Type encrypted dispatch to @${cleanRecipientHandle}... (Press Enter to Send)`}
-                      value={chatDraftText}
-                      onChange={(e) => setChatDraftText(e.target.value)}
-                      autoFocus
-                    />
-                    <button
-                      type="submit"
-                      className="composer-send-btn"
-                      disabled={!chatDraftText.trim() && !chatMediaAttachment}
-                      style={{ opacity: chatDraftText.trim() || chatMediaAttachment ? 1 : 0.5 }}
-                    >
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <IconSend size={15} />
-                        <span>Send</span>
-                      </span>
-                    </button>
-                  </div>
+                  {/* Text Input Row OR Voice Studio Console */}
+                  {isRecordingVoice ? (
+                    <div className="voice-recording-console">
+                      <div className="voice-recording-status">
+                        <span className="voice-rec-dot" />
+                        <span className="voice-rec-label">RECORDING</span>
+                        <span className="voice-rec-timer">
+                          {Math.floor(recordingSeconds / 60)}:{(recordingSeconds % 60).toString().padStart(2, '0')}
+                        </span>
+                      </div>
+
+                      <div className="voice-recording-visualizer">
+                        {[14, 24, 16, 28, 18, 32, 22, 14, 30, 26, 18, 28, 34, 20, 26, 14, 22].map((h, i) => (
+                          <span
+                            key={i}
+                            className="live-rec-bar"
+                            style={{
+                              height: `${Math.max(6, (h + ((recordingSeconds * 7 + i * 5) % 24)))}px`,
+                            }}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="voice-recording-actions">
+                        <button
+                          type="button"
+                          className="btn-voice-cancel"
+                          onClick={handleCancelVoiceRecording}
+                          title="Cancel & discard recording"
+                        >
+                          <IconTrash size={13} />
+                          <span>Cancel</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="btn-voice-send"
+                          onClick={() => handleFinishAndSendVoiceRecording(cleanRecipientHandle)}
+                          title="Send Voice Memo"
+                        >
+                          <IconSend size={14} />
+                          <span>Send Memo ({recordingSeconds}s)</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="composer-input-row">
+                      <input
+                        type="text"
+                        className="composer-text-input"
+                        placeholder={`Type encrypted dispatch to @${cleanRecipientHandle}... (Press Enter to Send)`}
+                        value={chatDraftText}
+                        onChange={(e) => setChatDraftText(e.target.value)}
+                        autoFocus
+                      />
+                      <button
+                        type="submit"
+                        className="composer-send-btn"
+                        disabled={!chatDraftText.trim() && !chatMediaAttachment}
+                        style={{ opacity: chatDraftText.trim() || chatMediaAttachment ? 1 : 0.5 }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <IconSend size={15} />
+                          <span>Send</span>
+                        </span>
+                      </button>
+                    </div>
+                  )}
                 </form>
               </div>
             </div>
