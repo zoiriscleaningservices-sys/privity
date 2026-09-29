@@ -27,6 +27,7 @@ import {
   IconCheck,
   IconX,
   IconSettings,
+  IconEdit,
   IconArrowLeft,
   IconMapPin,
   IconLink,
@@ -3648,61 +3649,8 @@ export function App() {
         ];
   }, [posts]);
 
-  // Mobile Touch Swipe Navigation (Slide left/right like native mobile app)
-  const touchStartXRef = React.useRef<number | null>(null);
-  const touchStartYRef = React.useRef<number | null>(null);
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
-      touchStartXRef.current = e.touches[0].clientX;
-      touchStartYRef.current = e.touches[0].clientY;
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
-    if (isModalOpen || isSettingsOpen || isEditProfileOpen || lightboxUrl || rosterModal || postMenuModal) return;
-
-    const touchEndX = e.changedTouches[0].clientX;
-    const touchEndY = e.changedTouches[0].clientY;
-    const deltaX = touchEndX - touchStartXRef.current;
-    const deltaY = touchEndY - touchStartYRef.current;
-
-    touchStartXRef.current = null;
-    touchStartYRef.current = null;
-
-    if (Math.abs(deltaX) > 60 && Math.abs(deltaY) < 40) {
-      const tabs: Array<'feed' | 'discover' | 'messages' | 'profile'> = ['feed', 'discover', 'messages', 'profile'];
-      const currentIndex = tabs.indexOf(activeTab as any);
-
-      if (deltaX > 0) {
-        if (activeTab === 'messages' && activeChatUser) {
-          setActiveChatUser(null);
-        } else if (currentIndex > 0) {
-          const prevTab = tabs[currentIndex - 1];
-          if (prevTab === 'profile') {
-            navigateToProfile('luciano');
-          } else {
-            setActiveTab(prevTab);
-          }
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      } else if (deltaX < 0) {
-        if (currentIndex >= 0 && currentIndex < tabs.length - 1) {
-          const nextTab = tabs[currentIndex + 1];
-          if (nextTab === 'profile') {
-            navigateToProfile('luciano');
-          } else {
-            setActiveTab(nextTab);
-          }
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-      }
-    }
-  };
-
   return (
-    <div className="app-container" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+    <div className="app-container">
       {/* Apple visionOS Mirror Glass Toast Notification */}
       {toastMsg && (
         <div className="apple-glass-toast">
@@ -5639,21 +5587,11 @@ export function App() {
               </div>
 
               {/* Cover Stage Banner */}
+              {/* Cover Stage Banner */}
               <div
                 className="profile-cover-stage"
                 style={{ backgroundImage: `url(${profile.coverUrl})`, position: 'relative' }}
-              >
-                {isOwnProfile && (
-                  <button
-                    className="btn-glass-banner-edit"
-                    onClick={handleOpenEditProfile}
-                    title="Change Cover Banner"
-                  >
-                    <IconPhoto size={14} />
-                    <span>Edit Cover</span>
-                  </button>
-                )}
-              </div>
+              />
 
               {/* Profile Card Info */}
               <div className="profile-header-card">
@@ -5672,75 +5610,6 @@ export function App() {
                       >
                         <IconPhoto size={13} />
                       </button>
-                    )}
-                  </div>
-
-                  <div className="profile-action-dock">
-                    {isOwnProfile ? (
-                      <>
-                        <button
-                          className="btn-glass-back"
-                          onClick={handleOpenEditProfile}
-                        >
-                          <IconPhoto size={14} />
-                          <span>Edit Profile</span>
-                        </button>
-                        <button
-                          className="btn-glass-back"
-                          onClick={() => setIsSettingsOpen(true)}
-                          title="Account & Privacy Settings"
-                        >
-                          <IconSettings size={15} />
-                          <span>Settings</span>
-                        </button>
-                        <button
-                          className="btn-post-dispatch"
-                          style={{ padding: '8px 18px', fontSize: '13px' }}
-                          onClick={() => setIsModalOpen(true)}
-                        >
-                          <IconPlus size={16} />
-                          <span>Dispatch</span>
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          className={`btn-follow-toggle ${isFollowingThisUser ? 'following' : ''}`}
-                          onClick={() => toggleFollow(profile.handle, profile.name)}
-                        >
-                          {isFollowingThisUser ? (
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                              <IconUserCheck size={14} /> Following
-                            </span>
-                          ) : (
-                            'Follow'
-                          )}
-                        </button>
-
-                        <button
-                          className="btn-glass-back"
-                          style={{
-                            color: isInCloseFriends ? 'var(--cf-emerald)' : 'var(--text-secondary)',
-                            borderColor: isInCloseFriends ? 'var(--cf-border)' : 'var(--glass-border)',
-                            background: isInCloseFriends ? 'var(--cf-glass)' : 'var(--glass-input)',
-                          }}
-                          onClick={() => toggleCloseFriends(profile.handle)}
-                        >
-                          <IconStarCloseFriends size={14} color={isInCloseFriends ? 'var(--cf-emerald)' : 'currentColor'} />
-                          <span>{isInCloseFriends ? 'Close Friend' : 'Add to Circle'}</span>
-                        </button>
-
-                        <button
-                          className="btn-glass-back"
-                          onClick={() => {
-                            setActiveChatUser(profile);
-                            setActiveTab('messages');
-                          }}
-                        >
-                          <IconChat size={14} />
-                          <span>Message</span>
-                        </button>
-                      </>
                     )}
                   </div>
                 </div>
@@ -5798,7 +5667,83 @@ export function App() {
                   </div>
                 </div>
 
-                {/* Real Numerical Stats Bar - Fully Clickable Directories */}
+                {/* Apple VisionOS Glassmorphism Profile Action Bar */}
+                <div className="apple-profile-actions-bar">
+                  {isOwnProfile ? (
+                    <>
+                      <button
+                        type="button"
+                        className="apple-glass-action-btn primary"
+                        onClick={handleOpenEditProfile}
+                        title="Edit Profile Information"
+                      >
+                        <IconEdit size={14} />
+                        <span>Edit Profile</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="apple-glass-action-btn"
+                        onClick={() => setIsSettingsOpen(true)}
+                        title="Account & Privacy Settings"
+                      >
+                        <IconSettings size={14} />
+                        <span>Settings</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="apple-glass-action-btn icon-only"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(`https://privity.app/@${profile.handle}`);
+                          triggerToast(`Profile link copied: @${profile.handle}`);
+                        }}
+                        title="Share Profile Link"
+                      >
+                        <IconShare size={14} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className={`apple-glass-action-btn ${isFollowingThisUser ? 'following' : 'primary'}`}
+                        onClick={() => toggleFollow(profile.handle, profile.name)}
+                      >
+                        {isFollowingThisUser ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                            <IconUserCheck size={14} /> Following
+                          </span>
+                        ) : (
+                          'Follow'
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="apple-glass-action-btn"
+                        style={{
+                          color: isInCloseFriends ? 'var(--cf-emerald)' : undefined,
+                          borderColor: isInCloseFriends ? 'rgba(16, 185, 129, 0.4)' : undefined,
+                        }}
+                        onClick={() => toggleCloseFriends(profile.handle)}
+                      >
+                        <IconStarCloseFriends size={14} color={isInCloseFriends ? 'var(--cf-emerald)' : 'currentColor'} />
+                        <span>{isInCloseFriends ? 'Close Friend' : 'Add to Circle'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="apple-glass-action-btn"
+                        onClick={() => {
+                          setActiveChatUser(profile);
+                          setActiveTab('messages');
+                        }}
+                      >
+                        <IconChat size={14} />
+                        <span>Message</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Real Numerical Stats Bar - Apple VisionOS Complication Bar with Icons */}
                 {(() => {
                   const dynamicFollowersCount = isOwnProfile
                     ? (myProfile.followersList || profile.followersList || []).length
@@ -5810,6 +5755,15 @@ export function App() {
                     ? closeFriendsList.length
                     : (profile.trustCirclesList || []).length;
 
+                  const totalLikesReceived = userDispatches.reduce(
+                    (sum, p) => sum + (p.likesCount || (p.likersList ? p.likersList.length : 0) || 0),
+                    0
+                  ) + (profile.mediaItems || []).reduce((sum, m) => {
+                    const baseKey = extractMediaBaseKey(m.url);
+                    const photoRec = photoLikesMap[m.url] || (baseKey ? photoLikesMap[baseKey] : undefined);
+                    return sum + (photoRec ? photoRec.count : (m.likes || 0));
+                  }, 0);
+
                   return (
                     <div className="profile-stats-bar">
                       <div
@@ -5817,9 +5771,28 @@ export function App() {
                         onClick={() => setProfileSubTab('dispatches')}
                         title="Click to view all dispatches"
                       >
+                        <div className="profile-stat-icon-wrapper dispatches">
+                          <IconList size={13} color="var(--public-cyan)" />
+                        </div>
                         <span className="profile-stat-number">{userDispatches.length}</span>
                         <span className="profile-stat-label">Dispatches</span>
                       </div>
+
+                      <div
+                        className="profile-stat-item stat-clickable"
+                        onClick={() => {
+                          setProfileSubTab('liked');
+                          triggerToast(`${profile.name} has received ${totalLikesReceived} total likes across dispatches & studio.`);
+                        }}
+                        title="Total post & media likes received"
+                      >
+                        <div className="profile-stat-icon-wrapper likes">
+                          <IconHeart size={13} filled color="var(--heart-rose)" />
+                        </div>
+                        <span className="profile-stat-number">{totalLikesReceived.toLocaleString()}</span>
+                        <span className="profile-stat-label">Likes</span>
+                      </div>
+
                       <div
                         className="profile-stat-item stat-clickable"
                         onClick={() => openRoster(profile.handle, profile.name, 'followers')}
@@ -5829,13 +5802,17 @@ export function App() {
                             : 'Click to view followers directory'
                         }
                       >
+                        <div className="profile-stat-icon-wrapper followers">
+                          <IconUsers size={13} color="#818cf8" />
+                        </div>
                         <span className="profile-stat-number">
                           {dynamicFollowersCount.toLocaleString()}
                         </span>
-                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          Followers {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={11} color="var(--cf-emerald)" />}
+                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          Followers {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={10} color="var(--cf-emerald)" />}
                         </span>
                       </div>
+
                       <div
                         className="profile-stat-item stat-clickable"
                         onClick={() => openRoster(profile.handle, profile.name, 'following')}
@@ -5845,13 +5822,17 @@ export function App() {
                             : 'Click to view following directory'
                         }
                       >
+                        <div className="profile-stat-icon-wrapper following">
+                          <IconUserCheck size={13} color="#38bdf8" />
+                        </div>
                         <span className="profile-stat-number">
                           {dynamicFollowingCount.toLocaleString()}
                         </span>
-                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          Following {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={11} color="var(--cf-emerald)" />}
+                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          Following {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={10} color="var(--cf-emerald)" />}
                         </span>
                       </div>
+
                       <div
                         className="profile-stat-item stat-clickable"
                         onClick={() => openRoster(profile.handle, profile.name, 'circle')}
@@ -5861,9 +5842,12 @@ export function App() {
                             : 'Click to view trust circles network'
                         }
                       >
+                        <div className="profile-stat-icon-wrapper circles">
+                          <IconStarCloseFriends size={13} color="var(--cf-emerald)" />
+                        </div>
                         <span className="profile-stat-number">{dynamicCirclesCount.toLocaleString()}</span>
-                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                          Trust Circles {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={11} color="var(--cf-emerald)" />}
+                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          Circles {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={10} color="var(--cf-emerald)" />}
                         </span>
                       </div>
                     </div>

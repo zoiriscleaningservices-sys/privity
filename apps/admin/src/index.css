@@ -1998,41 +1998,168 @@ textarea::placeholder {
   gap: 6px;
 }
 
-.profile-stats-bar {
+/* ==================== APPLE VISIONOS PROFILE ACTIONS ==================== */
+.apple-profile-actions-bar {
   display: flex;
   align-items: center;
-  gap: 28px;
-  padding: 16px 20px;
-  background: var(--glass-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
+  gap: 10px;
+  margin-top: 18px;
+  margin-bottom: 22px;
+  width: 100%;
+}
+
+.apple-glass-action-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 18px;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(25px) saturate(180%);
+  -webkit-backdrop-filter: blur(25px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  color: var(--text-pure);
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 4px 16px rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+
+.apple-glass-action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.24);
+  transform: translateY(-1.5px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.apple-glass-action-btn:active {
+  transform: translateY(0.5px) scale(0.985);
+}
+
+.apple-glass-action-btn.primary {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 100%);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.apple-glass-action-btn.following {
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.apple-glass-action-btn.icon-only {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+/* ==================== APPLE VISIONOS STATS COMPLICATION BAR ==================== */
+.profile-stats-bar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  padding: 14px 12px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
   margin-bottom: 24px;
-  box-shadow: var(--glass-specular);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 12px 32px -8px rgba(0, 0, 0, 0.5);
 }
 
 .profile-stat-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.profile-stat-item.stat-clickable {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border-radius: 14px;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   cursor: pointer;
-  padding: 6px 12px;
-  border-radius: var(--radius-md);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
 }
 
-.profile-stat-item.stat-clickable:hover {
-  background: rgba(255, 255, 255, 0.06);
+.profile-stat-item:hover {
+  background: rgba(255, 255, 255, 0.08);
   transform: translateY(-2px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
-.profile-stat-item.stat-clickable:hover .profile-stat-number {
-  color: var(--brand);
+.profile-stat-item:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.profile-stat-icon-wrapper {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.profile-stat-item:hover .profile-stat-icon-wrapper {
+  transform: scale(1.12);
+}
+
+.profile-stat-icon-wrapper.dispatches {
+  background: rgba(6, 182, 212, 0.14);
+  border-color: rgba(6, 182, 212, 0.3);
+}
+
+.profile-stat-icon-wrapper.likes {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: rgba(244, 63, 94, 0.35);
+}
+
+.profile-stat-icon-wrapper.followers {
+  background: rgba(129, 140, 248, 0.14);
+  border-color: rgba(129, 140, 248, 0.3);
+}
+
+.profile-stat-icon-wrapper.following {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.profile-stat-icon-wrapper.circles {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.32);
+}
+
+.profile-stat-number {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text-pure);
+  letter-spacing: -0.3px;
+  line-height: 1.1;
+}
+
+.profile-stat-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 /* User Roster Modal */
@@ -5044,37 +5171,50 @@ textarea::placeholder {
     border-radius: 20px !important;
   }
 
-  .profile-action-dock {
-    width: 100% !important;
-    display: flex !important;
-    flex-wrap: wrap !important;
+  .apple-profile-actions-bar {
     gap: 8px !important;
+    margin-top: 14px !important;
+    margin-bottom: 18px !important;
   }
 
-  .profile-action-dock button {
-    flex: 1 !important;
-    min-width: 100px !important;
-    justify-content: center !important;
-    text-align: center !important;
-    padding: 8px 12px !important;
-    font-size: 12.5px !important;
+  .apple-glass-action-btn {
+    padding: 10px 14px !important;
+    font-size: 13px !important;
+  }
+
+  .apple-glass-action-btn.icon-only {
+    flex: 0 0 40px !important;
+    width: 40px !important;
+    height: 40px !important;
   }
 
   .profile-stats-bar {
     width: 100% !important;
-    justify-content: space-around !important;
-    gap: 4px !important;
-    padding: 12px 6px !important;
+    grid-template-columns: repeat(5, 1fr) !important;
+    gap: 3px !important;
+    padding: 10px 4px !important;
     margin-bottom: 16px !important;
-    border-radius: 16px !important;
+    border-radius: 18px !important;
+  }
+
+  .profile-stat-item {
+    padding: 4px 2px !important;
+    border-radius: 10px !important;
+  }
+
+  .profile-stat-icon-wrapper {
+    width: 24px !important;
+    height: 24px !important;
+    margin-bottom: 2px !important;
   }
 
   .profile-stat-number {
-    font-size: 17px !important;
+    font-size: 15px !important;
   }
 
   .profile-stat-label {
-    font-size: 10px !important;
+    font-size: 9px !important;
+    letter-spacing: 0.2px !important;
   }
 
   .profile-view-tabs {
@@ -5082,6 +5222,8 @@ textarea::placeholder {
     white-space: nowrap;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
     gap: 4px;
     padding: 0 8px 4px 8px;
   }
