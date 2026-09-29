@@ -2866,8 +2866,61 @@ export function App() {
         ];
   }, [posts]);
 
+  // Mobile Touch Swipe Navigation (Slide left/right like native mobile app)
+  const touchStartXRef = React.useRef<number | null>(null);
+  const touchStartYRef = React.useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      touchStartXRef.current = e.touches[0].clientX;
+      touchStartYRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
+    if (isModalOpen || isSettingsOpen || isEditProfileOpen || lightboxUrl || rosterModal || postMenuModal) return;
+
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const deltaX = touchEndX - touchStartXRef.current;
+    const deltaY = touchEndY - touchStartYRef.current;
+
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+
+    if (Math.abs(deltaX) > 60 && Math.abs(deltaY) < 40) {
+      const tabs: Array<'feed' | 'discover' | 'messages' | 'profile'> = ['feed', 'discover', 'messages', 'profile'];
+      const currentIndex = tabs.indexOf(activeTab as any);
+
+      if (deltaX > 0) {
+        if (activeTab === 'messages' && activeChatUser) {
+          setActiveChatUser(null);
+        } else if (currentIndex > 0) {
+          const prevTab = tabs[currentIndex - 1];
+          if (prevTab === 'profile') {
+            navigateToProfile('luciano');
+          } else {
+            setActiveTab(prevTab);
+          }
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      } else if (deltaX < 0) {
+        if (currentIndex >= 0 && currentIndex < tabs.length - 1) {
+          const nextTab = tabs[currentIndex + 1];
+          if (nextTab === 'profile') {
+            navigateToProfile('luciano');
+          } else {
+            setActiveTab(nextTab);
+          }
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }
+    }
+  };
+
   return (
-    <div className="app-container">
+    <div className="app-container" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {/* Apple visionOS Mirror Glass Toast Notification */}
       {toastMsg && (
         <div className="apple-glass-toast">
@@ -2881,10 +2934,13 @@ export function App() {
       {/* ======================================================== */}
       <header className="mobile-top-header">
         <div className="mobile-header-left" onClick={() => { setActiveTab('feed'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-          <div className="mobile-brand-box">
-            <img src="./privity-emblem.png" alt="Privity" className="mobile-brand-emblem" />
+          <div className="brand-emblem-box" style={{ width: '36px', height: '36px', borderRadius: '10px' }}>
+            <img src="./privity-emblem.png" alt="Privity Emblem" className="brand-emblem-img" style={{ width: '22px', height: '22px' }} />
           </div>
-          <span className="mobile-brand-wordmark">PRIVITY</span>
+          <div className="brand-logo-text" style={{ display: 'flex', alignItems: 'center' }}>
+            <img src="./privity-wordmark.png" alt="PRIVITY" className="brand-wordmark-img" style={{ height: '17px', width: 'auto' }} />
+            <span className="brand-pulsing-orbit"></span>
+          </div>
         </div>
 
         <div className="mobile-header-center">
@@ -6143,8 +6199,8 @@ export function App() {
         );
       })()}
 
-      {/* REAL-TIME DIRECT MESSAGING MODAL — APPLE VISIONOS SPECULAR GLASS */}
-      {activeChatUser && activeTab !== 'messages' && (
+      {/* REAL-TIME DIRECT MESSAGING MODAL — DESKTOP POPUP ONLY (NO OVERLAYS ON MOBILE) */}
+      {activeChatUser && activeTab !== 'messages' && typeof window !== 'undefined' && window.innerWidth > 768 && (
         <div className="direct-chat-backdrop" onClick={() => setActiveChatUser(null)}>
           <div className="direct-chat-window" onClick={(e) => e.stopPropagation()}>
             {/* Header */}

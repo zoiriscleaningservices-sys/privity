@@ -4726,13 +4726,53 @@ textarea::placeholder {
     border-radius: var(--radius-pill);
   }
 
-  /* Prevent iOS zoom on tap for inputs */
+  /* Prevent iOS zoom on tap for ALL inputs across the entire application */
+  input,
+  textarea,
+  select,
   .comment-text-field,
   .composer-text-input,
+  .composer-textarea,
   .lightbox-comment-input,
   .direct-chat-input,
-  .messages-search-bar input {
+  .messages-search-bar input,
+  .roster-search-bar input,
+  .settings-input,
+  .settings-select,
+  .comment-input-wrap input,
+  input[type="text"],
+  input[type="search"],
+  input[type="email"],
+  input[type="password"] {
     font-size: 16px !important;
+    touch-action: manipulation !important;
+  }
+
+  /* No popup chat overlay on mobile - use full spatial messages tab */
+  .direct-chat-backdrop {
+    display: none !important;
+  }
+
+  /* Silky smooth horizontal swipe tracks */
+  .audience-tabs-bar,
+  .messages-filter-pills,
+  .profile-view-tabs,
+  .explore-tag-pill-track,
+  .direct-chat-users-bar {
+    display: flex !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    -webkit-overflow-scrolling: touch !important;
+    scroll-snap-type: x proximity !important;
+    touch-action: pan-x !important;
+    scrollbar-width: none !important;
+  }
+  .audience-tabs-bar::-webkit-scrollbar,
+  .messages-filter-pills::-webkit-scrollbar,
+  .profile-view-tabs::-webkit-scrollbar,
+  .explore-tag-pill-track::-webkit-scrollbar,
+  .direct-chat-users-bar::-webkit-scrollbar {
+    display: none !important;
   }
 
   /* 5. Spatial Direct Messaging Full-Screen Mobile Suite */
