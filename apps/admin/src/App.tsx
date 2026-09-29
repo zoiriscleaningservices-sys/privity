@@ -46,6 +46,7 @@ import {
   IconPlay,
   IconPause,
   IconSend,
+  IconVideo,
 } from './components/Icons';
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -920,6 +921,7 @@ export interface DirectChatMessage {
   reactions?: Record<string, number>;
   userReactions?: Record<string, string[]>;
   mediaUrl?: string;
+  mediaType?: 'photo' | 'video';
   isVoiceMemo?: boolean;
   voiceDuration?: string;
   audioUrl?: string;
@@ -1112,6 +1114,7 @@ export function App() {
   const [chatChannelFilter, setChatChannelFilter] = useState<'all' | 'close_friends' | 'unread'>('all');
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [chatMediaAttachment, setChatMediaAttachment] = useState<string | null>(null);
+  const [chatMediaType, setChatMediaType] = useState<'photo' | 'video'>('photo');
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
@@ -2197,6 +2200,12 @@ export function App() {
     }
 
     if (isMedia) {
+      if (trimmed) {
+        return {
+          text: `"${trimmed}" — Absolutely love this visual! The composition, lighting, and textures are stunning. Thank you for sharing! 📸✨`,
+          reactionEmoji: '❤️',
+        };
+      }
       const mediaReplies = [
         { text: 'The tonal range and natural light diffusion here are sublime! Did you capture this with medium format? 📸', reactionEmoji: '❤️' },
         { text: 'Incredible visual composition. The atmosphere feels so serene and authentic without synthetic filters.', reactionEmoji: '✨' },
@@ -2494,60 +2503,11 @@ export function App() {
     }
   };
 
-  // Dispatch visual photo message
-  const handleSendDirectPhoto = (recipientHandle: string, photoDataUrl: string) => {
-    const cleanRecipient = recipientHandle.replace(/^@/, '');
-    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
-    const newMsg: DirectChatMessage = {
-      id: `msg-photo-${Date.now()}`,
-      senderHandle: cleanMyHandle,
-      recipientHandle: cleanRecipient,
-      text: 'Visual Studio Attachment',
-      mediaUrl: photoDataUrl,
-      timeAgo: 'Just now',
-      timestamp: Date.now(),
-      reactions: {},
-      userReactions: {},
-    };
-
-    setDirectMessages((prev) => {
-      const thread = prev[cleanRecipient] || [];
-      const updated = {
-        ...prev,
-        [cleanRecipient]: [...thread, newMsg],
-      };
-      safeSaveStorage('privity_direct_messages_v5', updated);
-      return updated;
-    });
-
-    setChatMediaAttachment(null);
-    triggerToast('Visual attachment transmitted');
-
-    setIsRecipientTyping(true);
-    setTimeout(() => {
-      const organicReply = getOrganicContactReply('Luciano', 'photo', true, false);
-      const replyMsg: DirectChatMessage = {
-        id: `msg-reply-${Date.now()}`,
-        senderHandle: cleanRecipient,
-        recipientHandle: cleanMyHandle,
-        text: organicReply.text,
-        timeAgo: 'Just now',
-        timestamp: Date.now(),
-        reactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: 1 } : { '❤️': 1 },
-        userReactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: [cleanRecipient] } : { '❤️': [cleanRecipient] },
-      };
-      setDirectMessages((prev) => {
-        const thread = prev[cleanRecipient] || [];
-        const updated = {
-          ...prev,
-          [cleanRecipient]: [...thread, replyMsg],
-        };
-        safeSaveStorage('privity_direct_messages_v5', updated);
-        return updated;
-      });
-      setIsRecipientTyping(false);
-      triggerToast(`New encrypted reply from @${cleanRecipient}`);
-    }, 1400);
+  // Stage visual photo or cinema video into the composer dock
+  const handleStagePresetMedia = (mediaUrl: string, type: 'photo' | 'video' = 'photo') => {
+    setChatMediaAttachment(mediaUrl);
+    setChatMediaType(type);
+    triggerToast(`${type === 'video' ? 'Cinema video' : 'Studio visual'} staged · Add text or press Send`);
   };
 
   // Real-Time Direct Message Dispatcher
@@ -2558,15 +2518,18 @@ export function App() {
 
     const recipientHandle = activeChatUser.handle.replace(/^@/, '');
     const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
-    const textToSend = chatDraftText.trim() || 'Visual Studio Attachment';
+    const textToSend = chatDraftText.trim();
     const isMedia = !!chatMediaAttachment;
+    const mediaTypeToSend = isMedia ? chatMediaType : undefined;
+    const attachedMediaUrl = chatMediaAttachment;
 
     const newMsg: DirectChatMessage = {
       id: `msg-${Date.now()}`,
       senderHandle: cleanMyHandle,
       recipientHandle: recipientHandle,
       text: textToSend,
-      mediaUrl: chatMediaAttachment || undefined,
+      mediaUrl: attachedMediaUrl || undefined,
+      mediaType: mediaTypeToSend,
       timeAgo: 'Just now',
       timestamp: Date.now(),
       reactions: {},
@@ -2585,6 +2548,7 @@ export function App() {
 
     setChatDraftText('');
     setChatMediaAttachment(null);
+    setChatMediaType('photo');
 
     // Trigger organic, conversational response from recipient in real time
     setIsRecipientTyping(true);
@@ -4162,20 +4126,35 @@ export function App() {
                                 </div>
                               </div>
                             ) : (
-                              <span>{msg.text}</span>
-                            )}
+                              <>
+                                {/* Media Attachment if present (Photo or Video) */}
+                                {msg.mediaUrl && (
+                                  <div className="spatial-bubble-media-wrapper" style={{ marginBottom: msg.text ? '8px' : '0' }}>
+                                    {msg.mediaType === 'video' || msg.mediaUrl.endsWith('.mp4') || msg.mediaUrl.startsWith('data:video') ? (
+                                      <video
+                                        src={msg.mediaUrl}
+                                        controls
+                                        playsInline
+                                        preload="metadata"
+                                        className="spatial-bubble-video"
+                                      />
+                                    ) : (
+                                      <img
+                                        src={msg.mediaUrl}
+                                        alt="Attached visual"
+                                        className="spatial-bubble-image"
+                                        onClick={() => setLightboxUrl(msg.mediaUrl || null)}
+                                        title="Click to view in high-res lightbox"
+                                      />
+                                    )}
+                                  </div>
+                                )}
 
-                            {/* Media Attachment if present */}
-                            {msg.mediaUrl && (
-                              <div>
-                                <img
-                                  src={msg.mediaUrl}
-                                  alt="Attached visual"
-                                  className="spatial-bubble-image"
-                                  onClick={() => setLightboxUrl(msg.mediaUrl || null)}
-                                  title="Click to view in high-res lightbox"
-                                />
-                              </div>
+                                {/* Message text if present */}
+                                {msg.text && (
+                                  <div className="spatial-bubble-text">{msg.text}</div>
+                                )}
+                              </>
                             )}
                           </div>
 
@@ -4228,50 +4207,60 @@ export function App() {
 
                 {/* Composer Dock */}
                 <form className="messages-composer-dock" onSubmit={handleSendMessage}>
-                  {/* Photo Attachment Preview in Composer */}
+                  {/* Staged Media Attachment Preview in Composer */}
                   {chatMediaAttachment && (
-                    <div style={{ position: 'relative', display: 'inline-block', maxWidth: '140px' }}>
-                      <img
-                        src={chatMediaAttachment}
-                        alt="Attachment preview"
-                        style={{
-                          width: '120px',
-                          height: '80px',
-                          borderRadius: '8px',
-                          objectFit: 'cover',
-                          border: '1px solid var(--brand)',
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setChatMediaAttachment(null)}
-                        style={{
-                          position: 'absolute',
-                          top: '-6px',
-                          right: '6px',
-                          background: 'rgba(0,0,0,0.8)',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: '50%',
-                          width: '20px',
-                          height: '20px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <IconX size={12} />
-                      </button>
+                    <div className="composer-staged-media-card">
+                      <div className="composer-staged-media-preview">
+                        {chatMediaType === 'video' ? (
+                          <>
+                            <video
+                              src={chatMediaAttachment}
+                              className="composer-staged-thumb"
+                              muted
+                              playsInline
+                            />
+                            <div className="composer-staged-badge">🎥 Video</div>
+                          </>
+                        ) : (
+                          <>
+                            <img
+                              src={chatMediaAttachment}
+                              alt="Attachment preview"
+                              className="composer-staged-thumb"
+                            />
+                            <div className="composer-staged-badge">📸 Photo</div>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          className="composer-staged-remove-btn"
+                          onClick={() => {
+                            setChatMediaAttachment(null);
+                            setChatMediaType('photo');
+                          }}
+                          title="Remove attachment"
+                        >
+                          <IconX size={12} />
+                        </button>
+                      </div>
+                      <div className="composer-staged-info">
+                        <span className="composer-staged-label">
+                          {chatMediaType === 'video' ? 'Video Encrypted & Ready' : 'Visual Encrypted & Ready'}
+                        </span>
+                        <span className="composer-staged-hint">
+                          Type your message below and press Send to dispatch both together
+                        </span>
+                      </div>
                     </div>
                   )}
 
                   {/* Quick Action Tools Bar */}
                   <div className="composer-quick-bar">
                     <div className="composer-attachments-group">
-                      <label className="composer-tool-btn">
+                      {/* Photo Upload */}
+                      <label className="composer-tool-btn" title="Attach photo from device">
                         <IconPhoto size={14} color="var(--brand-cyan)" />
-                        <span>Visual Attachment</span>
+                        <span>Photo</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -4279,15 +4268,39 @@ export function App() {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              compressImageFile(file, 1200, 0.82, (dataUrl) => {
+                              compressImageFile(file, 1200, 0.85, (dataUrl) => {
                                 setChatMediaAttachment(dataUrl);
-                                triggerToast('Photo staged for encrypted transmission');
+                                setChatMediaType('photo');
+                                triggerToast('Photo staged · Ready to dispatch with message');
                               });
                             }
+                            e.target.value = '';
                           }}
                         />
                       </label>
 
+                      {/* Video Upload */}
+                      <label className="composer-tool-btn" title="Attach video from device">
+                        <IconVideo size={14} color="#f59e0b" />
+                        <span>Video</span>
+                        <input
+                          type="file"
+                          accept="video/*"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const videoUrl = URL.createObjectURL(file);
+                              setChatMediaAttachment(videoUrl);
+                              setChatMediaType('video');
+                              triggerToast('Video staged · Ready to dispatch with message');
+                            }
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+
+                      {/* Voice Memo */}
                       <button
                         type="button"
                         className={`composer-tool-btn ${isRecordingVoice ? 'recording-active' : ''}`}
@@ -4298,7 +4311,7 @@ export function App() {
                         <span>{isRecordingVoice ? 'Cancel Mic' : 'Voice Memo'}</span>
                       </button>
 
-                      {/* Photo Presets dropdown or quick link */}
+                      {/* Studio Presets */}
                       <button
                         type="button"
                         className="composer-tool-btn"
@@ -4307,13 +4320,30 @@ export function App() {
                             'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=1000',
                             'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1000',
                             'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1000',
+                            'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1000',
                           ];
                           const randomPreset = presets[Math.floor(Math.random() * presets.length)];
-                          handleSendDirectPhoto(cleanRecipientHandle, randomPreset);
+                          handleStagePresetMedia(randomPreset, 'photo');
                         }}
-                        title="Send studio photography visual"
+                        title="Attach studio photo"
                       >
-                        <span>📸 Send Studio Visual</span>
+                        <span>📸 Studio Photo</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="composer-tool-btn"
+                        onClick={() => {
+                          const videoPresets = [
+                            'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+                            'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+                          ];
+                          const randomPreset = videoPresets[Math.floor(Math.random() * videoPresets.length)];
+                          handleStagePresetMedia(randomPreset, 'video');
+                        }}
+                        title="Attach cinema video"
+                      >
+                        <span>🎥 Cinema Video</span>
                       </button>
                     </div>
 
@@ -4383,7 +4413,11 @@ export function App() {
                       <input
                         type="text"
                         className="composer-text-input"
-                        placeholder={`Type encrypted dispatch to @${cleanRecipientHandle}... (Press Enter to Send)`}
+                        placeholder={
+                          chatMediaAttachment
+                            ? `Add encrypted note to this ${chatMediaType}... (Press Enter to Send)`
+                            : `Type encrypted dispatch to @${cleanRecipientHandle}... (Press Enter to Send)`
+                        }
                         value={chatDraftText}
                         onChange={(e) => setChatDraftText(e.target.value)}
                         autoFocus
