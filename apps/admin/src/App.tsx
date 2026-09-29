@@ -23,7 +23,6 @@ import {
   IconVerifiedStar,
   IconPhoto,
   IconLock,
-  IconUnlock,
   IconSearch,
   IconCheck,
   IconX,
@@ -1375,6 +1374,25 @@ export function App() {
           break;
         }
 
+        case 'SAVE_POST': {
+          const { postId, isSaved } = event;
+          setPosts((prev) => {
+            const nextPosts = prev.map((p) => {
+              if (p.id === postId) {
+                return {
+                  ...p,
+                  isSaved,
+                  savesCount: isSaved ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1),
+                };
+              }
+              return p;
+            });
+            safeSaveStorage('privity_posts_v5', nextPosts);
+            return nextPosts;
+          });
+          break;
+        }
+
         case 'LIKE_MEDIA': {
           const { mediaId, isLiked, count } = event;
           setPhotoLikesMap((prev) => {
@@ -2219,7 +2237,7 @@ export function App() {
     readStorage('privity_viewed_handle_v5', 'luciano')
   );
   const [profileHistory, setProfileHistory] = useState<string[]>([]);
-  const [profileSubTab, setProfileSubTab] = useState<'dispatches' | 'media' | 'circles'>('dispatches');
+  const [profileSubTab, setProfileSubTab] = useState<'dispatches' | 'media' | 'liked' | 'saved' | 'replies'>('dispatches');
 
   useEffect(() => {
     safeSaveStorage('privity_viewed_handle_v5', viewedUserHandle);
@@ -2707,10 +2725,12 @@ export function App() {
 
   // Bookmark / Save
   const handleSave = (postId: string) => {
-    setPosts((prev) =>
-      prev.map((p) => {
+    let nextSavedState = false;
+    setPosts((prev) => {
+      const nextPosts = prev.map((p) => {
         if (p.id === postId) {
           const next = !p.isSaved;
+          nextSavedState = next;
           triggerToast(next ? 'Saved to private collection' : 'Removed from saved');
           return {
             ...p,
@@ -2719,8 +2739,16 @@ export function App() {
           };
         }
         return p;
-      })
-    );
+      });
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+
+    broadcastSyncEvent({
+      action: 'SAVE_POST',
+      postId,
+      isSaved: nextSavedState,
+    });
   };
 
   // Share
@@ -5533,6 +5561,41 @@ export function App() {
                   p.authorHandle.toLowerCase() === myProfile.handle.toLowerCase()))
           );
 
+          const userLikedPosts = posts.filter((p) => {
+            if (isOwnProfile) {
+              return (
+                p.isLiked ||
+                (p.likersList || []).some(
+                  (h) =>
+                    h.toLowerCase() === 'luciano' ||
+                    h.toLowerCase() === myProfile.handle.toLowerCase()
+                )
+              );
+            }
+            return (p.likersList || []).some(
+              (h) => h.toLowerCase() === profile.handle.toLowerCase()
+            );
+          });
+
+          const userSavedPosts = posts.filter((p) => p.isSaved);
+
+          const userRepliesPosts = posts.filter((p) => {
+            const checkAuthor = (handle: string) => {
+              if (isOwnProfile) {
+                return (
+                  handle.toLowerCase() === 'luciano' ||
+                  handle.toLowerCase() === myProfile.handle.toLowerCase()
+                );
+              }
+              return handle.toLowerCase() === profile.handle.toLowerCase();
+            };
+            return (p.comments || []).some(
+              (c) =>
+                checkAuthor(c.authorHandle) ||
+                (c.replies || []).some((r) => checkAuthor(r.authorHandle))
+            );
+          });
+
           return (
             <div className="profile-screen-container">
               {/* Sticky Frosted Header */}
@@ -5807,72 +5870,6 @@ export function App() {
                   );
                 })()}
 
-                {/* If Viewing Own Profile: Privacy Controls & Close Friends Manager */}
-                {isOwnProfile && (
-                  <>
-                    {/* Account Privacy Control Switch */}
-                    <div className="glass-panel-card" style={{ marginBottom: '20px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div>
-                          <div style={{ fontSize: '15px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            {isPrivateAccount ? <IconLock size={17} color="var(--cf-emerald)" /> : <IconUnlock size={17} color="var(--public-cyan)" />}
-                            {isPrivateAccount ? 'Private Account Active' : 'Public Account Active'}
-                          </div>
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                            {isPrivateAccount
-                              ? 'Only approved followers can view your updates and follower directories. New follows require your approval.'
-                              : 'Anyone can follow you and view your public posts.'}
-                          </div>
-                        </div>
-                        <button
-                          className="btn-follow-toggle"
-                          onClick={() => {
-                            const next = !isPrivateAccount;
-                            setIsPrivateAccount(next);
-                            triggerToast(next ? 'Account privacy set to Private' : 'Account privacy set to Public');
-                          }}
-                        >
-                          {isPrivateAccount ? 'Switch to Public' : 'Switch to Private'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Close Friends Roster */}
-                    <div className="glass-panel-card" style={{ borderColor: 'var(--cf-border)', marginBottom: '20px' }}>
-                      <div className="panel-title-text" style={{ color: 'var(--cf-emerald)' }}>
-                        Close Friends Circle ({closeFriendsList.length} Active Members)
-                      </div>
-                      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
-                        Members in this circle receive your intimate dispatches. Click any member to view their profile.
-                      </p>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {closeFriendsList.map((handle) => (
-                          <span
-                            key={handle}
-                            onClick={() => navigateToProfile(handle)}
-                            style={{
-                              background: 'var(--cf-glass)',
-                              border: '1px solid var(--cf-border)',
-                              color: 'var(--cf-emerald)',
-                              padding: '5px 14px',
-                              borderRadius: 'var(--radius-pill)',
-                              fontSize: '12px',
-                              fontWeight: 700,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            <IconStarCloseFriends size={12} color="var(--cf-emerald)" />
-                            @{handle}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-
                 {/* PRIVATE ACCOUNT LOCK PROTECTION (PRD PRIVACY RULE) */}
                 {!isOwnProfile && profile.isPrivate && !isFollowingThisUser ? (
                   <div className="private-account-lock-stage">
@@ -5901,30 +5898,65 @@ export function App() {
                         className={`profile-view-tab-btn ${profileSubTab === 'dispatches' ? 'active' : ''}`}
                         onClick={() => setProfileSubTab('dispatches')}
                       >
-                        <IconList size={16} />
+                        <IconList size={15} />
                         <span>Dispatches ({userDispatches.length})</span>
                       </button>
                       <button
                         className={`profile-view-tab-btn ${profileSubTab === 'media' ? 'active' : ''}`}
                         onClick={() => setProfileSubTab('media')}
                       >
-                        <IconGrid size={16} />
-                        <span>Media & Studio ({profile.mediaItems.length})</span>
+                        <IconGrid size={15} />
+                        <span>Media & Studio ({profile.mediaItems ? profile.mediaItems.length : 0})</span>
                       </button>
                       <button
-                        className={`profile-view-tab-btn ${profileSubTab === 'circles' ? 'active' : ''}`}
-                        onClick={() => setProfileSubTab('circles')}
+                        className={`profile-view-tab-btn ${profileSubTab === 'liked' ? 'active' : ''}`}
+                        onClick={() => setProfileSubTab('liked')}
                       >
-                        <IconShield size={16} />
-                        <span>Trust Architecture</span>
+                        <IconHeart size={15} color={profileSubTab === 'liked' ? 'var(--brand-crimson)' : undefined} />
+                        <span>Liked ({userLikedPosts.length})</span>
+                      </button>
+                      {isOwnProfile && (
+                        <button
+                          className={`profile-view-tab-btn ${profileSubTab === 'saved' ? 'active' : ''}`}
+                          onClick={() => setProfileSubTab('saved')}
+                        >
+                          <IconBookmark size={15} color={profileSubTab === 'saved' ? 'var(--brand-gold)' : undefined} />
+                          <span>Saved ({userSavedPosts.length})</span>
+                        </button>
+                      )}
+                      <button
+                        className={`profile-view-tab-btn ${profileSubTab === 'replies' ? 'active' : ''}`}
+                        onClick={() => setProfileSubTab('replies')}
+                      >
+                        <IconChat size={15} color={profileSubTab === 'replies' ? 'var(--public-cyan)' : undefined} />
+                        <span>Replies ({userRepliesPosts.length})</span>
                       </button>
                     </div>
 
-                {/* Sub Tab 1: Dispatches */}
-                {profileSubTab === 'dispatches' && (
-                  <div style={{ marginTop: '14px' }}>
-                    {userDispatches.length > 0 ? (
-                      userDispatches.map((post) => (
+                {/* Sub Tab: Post Feeds (Dispatches, Liked, Saved, Replies) */}
+                {profileSubTab !== 'media' && (() => {
+                  const activeTabPosts =
+                    profileSubTab === 'liked'
+                      ? userLikedPosts
+                      : profileSubTab === 'saved'
+                      ? userSavedPosts
+                      : profileSubTab === 'replies'
+                      ? userRepliesPosts
+                      : userDispatches;
+
+                  const emptyMessage =
+                    profileSubTab === 'liked'
+                      ? 'No liked dispatches yet. Posts you heart will appear here.'
+                      : profileSubTab === 'saved'
+                      ? 'No saved dispatches yet. Bookmark dispatches to revisit them privately.'
+                      : profileSubTab === 'replies'
+                      ? 'No replies yet. Dispatches you have replied to or commented on will appear here.'
+                      : 'No dispatches published yet.';
+
+                  return (
+                    <div style={{ marginTop: '14px' }}>
+                      {activeTabPosts.length > 0 ? (
+                        activeTabPosts.map((post) => (
                         <article key={post.id} className={`feed-post-card ${highlightPostId === post.id ? 'post-just-published-shimmer' : ''}`}>
                           <img
                             src={post.authorAvatar}
@@ -6320,12 +6352,13 @@ export function App() {
                         </article>
                       ))
                     ) : (
-                      <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
-                        No dispatches visible in this audience circle yet.
+                      <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-muted)', fontSize: '13px', lineHeight: 1.6 }}>
+                        {emptyMessage}
                       </div>
                     )}
                   </div>
-                )}
+                );
+              })()}
 
                 {/* Sub Tab 2: Media & Studio Grid */}
                 {profileSubTab === 'media' && (
@@ -6415,42 +6448,6 @@ export function App() {
                   </div>
                 )}
 
-                {/* Sub Tab 3: Trust & Circles */}
-                {profileSubTab === 'circles' && (
-                  <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div className="glass-panel-card">
-                      <div className="panel-title-text" style={{ color: 'var(--public-cyan)' }}>
-                        Cryptographic Verification Proof
-                      </div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '20px' }}>
-                        This identity is authenticated with an Ed25519 cryptographic key pair registered to Privity's decentralized ledger.
-                      </div>
-                      <div style={{ marginTop: '12px' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                          Public Key Fingerprint:
-                        </span>
-                        <code style={{ background: 'var(--glass-input)', padding: '6px 12px', borderRadius: 'var(--radius-xs)', color: 'var(--public-cyan)', fontSize: '12px' }}>
-                          {profile.cryptoProofId || 'priv_ed25519_verified_proof'}
-                        </code>
-                      </div>
-                    </div>
-
-                    <div className="glass-panel-card">
-                      <div className="panel-title-text" style={{ color: 'var(--cf-emerald)' }}>
-                        Relationship Trust Level
-                      </div>
-                      <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                        {isOwnProfile
-                          ? 'This is your root identity. You have total autonomy over all audience circles.'
-                          : isInCloseFriends
-                          ? '★ Mutual Close Friends: You have granted this creator access to your intimate circle.'
-                          : isFollowingThisUser
-                          ? 'Follower: You receive standard updates delivered chronologically.'
-                          : 'Public Connection: You can view public dispatches and request circle access.'}
-                      </p>
-                    </div>
-                  </div>
-                )}
                 </>
               )}
               </div>

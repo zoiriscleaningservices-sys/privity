@@ -5082,8 +5082,8 @@ textarea::placeholder {
     white-space: nowrap;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    gap: 6px;
-    padding-bottom: 4px;
+    gap: 4px;
+    padding: 0 8px 4px 8px;
   }
 
   .profile-view-tabs::-webkit-scrollbar {
@@ -5091,9 +5091,12 @@ textarea::placeholder {
   }
 
   .profile-view-tab-btn {
-    padding: 9px 12px;
-    font-size: 12.5px;
-    flex-shrink: 0;
+    padding: 10px 14px;
+    font-size: 13px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
   }
 
   .profile-media-grid {
