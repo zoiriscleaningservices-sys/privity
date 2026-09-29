@@ -1,0 +1,27 @@
+{
+  "name": "privity-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Privity - Private-first social feed for real connections",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:mobile": "npm run dev --workspace=apps/mobile",
+    "dev:admin": "npm run dev --workspace=apps/admin",
+    "build:types": "npm run build --workspace=packages/types",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "keywords": [
+    "privity",
+    "privacy-first",
+    "social",
+    "monorepo"
+  ],
+  "author": "Privity Team",
+  "license": "UNLICENSED"
+}
