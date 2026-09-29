@@ -2877,6 +2877,48 @@ export function App() {
       )}
 
       {/* ======================================================== */}
+      {/* MOBILE TOP STATUS & BRAND HEADER (<= 768px)             */}
+      {/* ======================================================== */}
+      <header className="mobile-top-header">
+        <div className="mobile-header-left" onClick={() => { setActiveTab('feed'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+          <div className="mobile-brand-box">
+            <img src="./privity-emblem.png" alt="Privity" className="mobile-brand-emblem" />
+          </div>
+          <span className="mobile-brand-wordmark">PRIVITY</span>
+        </div>
+
+        <div className="mobile-header-center">
+          <span className="mobile-active-tab-title">
+            {activeTab === 'feed' && (feedFilter === 'close_friends' ? 'Close Friends' : feedFilter === 'followers' ? 'Audience' : 'Chronological')}
+            {activeTab === 'discover' && 'Discover'}
+            {activeTab === 'activity' && 'Activity'}
+            {activeTab === 'messages' && (activeChatUser ? activeChatUser.name : 'Direct Messages')}
+            {activeTab === 'profile' && `@${viewedUserHandle}`}
+            {activeTab === 'safety' && 'Security'}
+          </span>
+        </div>
+
+        <div className="mobile-header-right">
+          <button
+            type="button"
+            className="mobile-header-icon-btn"
+            onClick={() => setIsSettingsOpen(true)}
+            title="Account & Privacy Settings"
+          >
+            <IconSettings size={18} />
+          </button>
+          <button
+            type="button"
+            className="mobile-header-icon-btn mobile-header-compose-btn"
+            onClick={() => setIsModalOpen(true)}
+            title="Create New Dispatch"
+          >
+            <IconPlus size={18} color="#ffffff" />
+          </button>
+        </div>
+      </header>
+
+      {/* ======================================================== */}
       {/* 1. LEFT SIDEBAR NAVIGATION (BESPOKE VECTOR ICONS)        */}
       {/* ======================================================== */}
       <aside className="nav-sidebar">
@@ -3828,7 +3870,7 @@ export function App() {
           const isPartnerInCloseFriends = closeFriendsList.includes(cleanRecipientHandle);
 
           return (
-            <div className="spatial-messages-container">
+            <div className={`spatial-messages-container ${activeChatUser ? 'has-active-chat' : 'no-active-chat'}`}>
               {/* LEFT PANE: CONVERSATION CHANNELS ROSTER */}
               <div className="messages-roster-pane">
                 <div className="messages-roster-header">
@@ -3964,22 +4006,32 @@ export function App() {
               <div className="messages-active-thread-pane">
                 {/* Thread Workspace Header */}
                 <div className="messages-thread-header">
-                  <div
-                    className="messages-thread-user-meta"
-                    onClick={() => navigateToProfile(currentRecipient.handle)}
-                    title={`View @${currentRecipient.handle}'s profile`}
-                  >
-                    <div className="messages-thread-avatar-wrap">
-                      <img
-                        src={currentRecipient.avatar}
-                        alt={currentRecipient.name}
-                        className="messages-thread-avatar"
-                        style={{ borderColor: isPartnerInCloseFriends ? 'var(--cf-emerald)' : undefined }}
-                      />
-                      <span className="online-presence-dot" />
-                    </div>
-                    <div>
-                      <div className="messages-thread-name">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                    <button
+                      type="button"
+                      className="btn-chat-mobile-back"
+                      onClick={() => setActiveChatUser(null)}
+                      title="Back to all conversations"
+                    >
+                      <IconArrowLeft size={18} />
+                    </button>
+
+                    <div
+                      className="messages-thread-user-meta"
+                      onClick={() => navigateToProfile(currentRecipient.handle)}
+                      title={`View @${currentRecipient.handle}'s profile`}
+                    >
+                      <div className="messages-thread-avatar-wrap">
+                        <img
+                          src={currentRecipient.avatar}
+                          alt={currentRecipient.name}
+                          className="messages-thread-avatar"
+                          style={{ borderColor: isPartnerInCloseFriends ? 'var(--cf-emerald)' : undefined }}
+                        />
+                        <span className="online-presence-dot" />
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="messages-thread-name">
                         <span>{currentRecipient.name}</span>
                         {currentRecipient.isVerified && (
                           <VerifiedBadge
@@ -4019,8 +4071,9 @@ export function App() {
                       </div>
                     </div>
                   </div>
+                </div>
 
-                  <div className="messages-thread-tools">
+                <div className="messages-thread-tools">
                     <button
                       type="button"
                       className="btn-glass-back"
@@ -7751,6 +7804,82 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* ======================================================== */}
+      {/* MOBILE BOTTOM NAVIGATION DOCK (<= 768px)                */}
+      {/* ======================================================== */}
+      <nav className="mobile-bottom-nav">
+        <button
+          type="button"
+          className={`mobile-nav-item ${activeTab === 'feed' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('feed');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          title="Home Feed"
+        >
+          <IconHome size={22} color={activeTab === 'feed' ? '#ffffff' : 'currentColor'} />
+          <span className="mobile-nav-label">Feed</span>
+          {activeTab === 'feed' && <span className="mobile-nav-indicator" />}
+        </button>
+
+        <button
+          type="button"
+          className={`mobile-nav-item ${activeTab === 'discover' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('discover');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          title="Discover Creators"
+        >
+          <IconDiscover size={22} />
+          <span className="mobile-nav-label">Discover</span>
+          {activeTab === 'discover' && <span className="mobile-nav-indicator" />}
+        </button>
+
+        <button
+          type="button"
+          className="mobile-nav-item mobile-nav-compose-center"
+          onClick={() => setIsModalOpen(true)}
+          title="Create New Dispatch"
+        >
+          <div className="mobile-compose-orb">
+            <IconPlus size={22} color="#ffffff" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          className={`mobile-nav-item ${activeTab === 'messages' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('messages');
+          }}
+          title="Encrypted Messages"
+        >
+          <div style={{ position: 'relative' }}>
+            <IconChat size={22} color={activeTab === 'messages' ? '#ffffff' : 'currentColor'} />
+            <span className="mobile-badge-dot" />
+          </div>
+          <span className="mobile-nav-label">Messages</span>
+          {activeTab === 'messages' && <span className="mobile-nav-indicator" />}
+        </button>
+
+        <button
+          type="button"
+          className={`mobile-nav-item ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}
+          onClick={() => {
+            navigateToProfile('luciano');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          title="Your Profile"
+        >
+          <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}>
+            <img src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" />
+          </div>
+          <span className="mobile-nav-label">Profile</span>
+          {activeTab === 'profile' && viewedUserHandle === 'luciano' && <span className="mobile-nav-indicator" />}
+        </button>
+      </nav>
     </div>
   );
 }
