@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   PostPrivacy,
   PostType,
@@ -408,6 +408,7 @@ interface UserMediaItem {
   type: 'image' | 'video';
   likes: number;
   comments: number;
+  isLiked?: boolean;
 }
 
 interface UserProfile {
@@ -433,7 +434,7 @@ interface UserProfile {
   trustCirclesList: string[];
 }
 
-const PROFILES_REGISTRY: Record<string, UserProfile> = {
+const INITIAL_PROFILES_REGISTRY: Record<string, UserProfile> = {
   elena_rodriguez: {
     id: 'usr-elena',
     name: 'Elena Rodriguez',
@@ -664,28 +665,63 @@ const PROFILES_REGISTRY: Record<string, UserProfile> = {
   },
 };
 
-const getUserProfile = (handle: string, defaultName?: string, defaultAvatar?: string): UserProfile => {
-  const clean = handle.replace(/^@/, '');
-  if (PROFILES_REGISTRY[clean]) {
-    return PROFILES_REGISTRY[clean];
-  }
-  return {
-    id: `usr-${clean}`,
-    name: defaultName || clean.charAt(0).toUpperCase() + clean.slice(1),
-    handle: clean,
-    avatar: defaultAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-    coverUrl: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
-    isVerified: false,
-    bio: 'Privity creator sharing private-first moments and authentic updates.',
-    location: 'Global',
-    joinedDate: 'Joined 2026',
-    circleStatus: 'Public Connection',
-    isPrivate: false,
-    followersList: ['luciano', 'marcus_dev', 'elena_rodriguez'],
-    followingList: ['luciano'],
-    trustCirclesList: ['luciano'],
-    mediaItems: [],
+
+
+// Preset Avatars for 1-Click Profile Personalization
+const PRESET_AVATARS = [
+  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400',
+  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400',
+  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400',
+  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400',
+];
+
+// Preset Banners for Studio & Architectural Aesthetics
+const PRESET_BANNERS = [
+  'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=1600&auto=format&fit=crop&q=85',
+  'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600&auto=format&fit=crop&q=85',
+  'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1600&auto=format&fit=crop&q=85',
+  'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1600&auto=format&fit=crop&q=85',
+  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&auto=format&fit=crop&q=85',
+];
+
+// High-performance image file reader & canvas compressor (fits easily in localStorage)
+const compressImageFile = (
+  file: File,
+  maxDim: number,
+  quality: number,
+  onComplete: (dataUrl: string) => void
+) => {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const raw = e.target?.result as string;
+    if (!raw) return;
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width;
+      let h = img.height;
+      if (w > h && w > maxDim) {
+        h = Math.round((h * maxDim) / w);
+        w = maxDim;
+      } else if (h > maxDim) {
+        w = Math.round((w * maxDim) / h);
+        h = maxDim;
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, w, h);
+        onComplete(canvas.toDataURL('image/jpeg', quality));
+      } else {
+        onComplete(raw);
+      }
+    };
+    img.src = raw;
   };
+  reader.readAsDataURL(file);
 };
 
 // ==================== VERIFICATION BADGE COMPONENT ====================
@@ -798,7 +834,246 @@ export function App() {
   const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'activity' | 'profile' | 'safety'>('feed');
   const [feedFilter, setFeedFilter] = useState<'all' | PostPrivacy>('all');
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
-  const [posts, setPosts] = useState<PostItem[]>(SAMPLE_POSTS);
+
+  // Helper for persistent localStorage retrieval with safe fallback
+  const readStorage = <T,>(key: string, fallback: T): T => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw !== null) return JSON.parse(raw);
+    } catch (e) {
+      console.warn(`Error reading ${key} from storage:`, e);
+    }
+    return fallback;
+  };
+
+  // 1. Persistent Profiles State
+  const [profiles, setProfiles] = useState<Record<string, UserProfile>>(() =>
+    readStorage('privity_profiles_v5', INITIAL_PROFILES_REGISTRY)
+  );
+
+  // 2. Persistent Posts State
+  const [posts, setPosts] = useState<PostItem[]>(() =>
+    readStorage('privity_posts_v5', SAMPLE_POSTS)
+  );
+
+  // 3. Persistent Following Map
+  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>(() =>
+    readStorage('privity_following_v5', {
+      'elena_rodriguez': true,
+      'marcus_dev': true,
+      'julian_analogue': true,
+      'sara_architecture': true,
+      'chloe_visuals': false,
+      'oliver_wood': false,
+      'sam_arch': false,
+      'jess_film': false,
+    })
+  );
+
+  // 4. Persistent Close Friends List
+  const [closeFriendsList, setCloseFriendsList] = useState<string[]>(() =>
+    readStorage('privity_close_friends_v5', [
+      'elena_rodriguez',
+      'marcus_dev',
+      'sara_architecture',
+    ])
+  );
+
+  // 5. Persistent Private Account Setting
+  const [isPrivateAccount, setIsPrivateAccount] = useState<boolean>(() =>
+    readStorage('privity_private_account_v5', false)
+  );
+
+  // Auto-sync all changes to localStorage so they persist across page refreshes
+  useEffect(() => {
+    try {
+      localStorage.setItem('privity_profiles_v5', JSON.stringify(profiles));
+    } catch (e) {
+      console.warn('Failed to save profiles to localStorage', e);
+    }
+  }, [profiles]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('privity_posts_v5', JSON.stringify(posts));
+    } catch (e) {
+      console.warn('Failed to save posts to localStorage', e);
+    }
+  }, [posts]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('privity_following_v5', JSON.stringify(followingMap));
+    } catch (e) {
+      console.warn('Failed to save followingMap to localStorage', e);
+    }
+  }, [followingMap]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('privity_close_friends_v5', JSON.stringify(closeFriendsList));
+    } catch (e) {
+      console.warn('Failed to save closeFriendsList to localStorage', e);
+    }
+  }, [closeFriendsList]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('privity_private_account_v5', JSON.stringify(isPrivateAccount));
+    } catch (e) {
+      console.warn('Failed to save isPrivateAccount to localStorage', e);
+    }
+  }, [isPrivateAccount]);
+
+  // Synchronized Profile Fetcher
+  const getUserProfile = (handle: string, defaultName?: string, defaultAvatar?: string): UserProfile => {
+    const clean = handle.replace(/^@/, '');
+    if (profiles[clean]) {
+      return profiles[clean];
+    }
+    return {
+      id: `usr-${clean}`,
+      name: defaultName || clean.charAt(0).toUpperCase() + clean.slice(1),
+      handle: clean,
+      avatar: defaultAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
+      coverUrl: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+      isVerified: false,
+      bio: 'Privity creator sharing private-first moments and authentic updates.',
+      location: 'Global',
+      joinedDate: 'Joined 2026',
+      circleStatus: 'Public Connection',
+      isPrivate: false,
+      followersList: ['luciano', 'marcus_dev', 'elena_rodriguez'],
+      followingList: ['luciano'],
+      trustCirclesList: ['luciano'],
+      mediaItems: [],
+    };
+  };
+
+  const myProfile = getUserProfile('luciano');
+
+  // Edit Personal Profile Modal State
+  const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    handle: '',
+    bio: '',
+    avatar: '',
+    coverUrl: '',
+    location: '',
+    website: '',
+    category: '',
+  });
+
+  const handleOpenEditProfile = () => {
+    setEditForm({
+      name: myProfile.name,
+      handle: myProfile.handle,
+      bio: myProfile.bio,
+      avatar: myProfile.avatar,
+      coverUrl: myProfile.coverUrl,
+      location: myProfile.location || 'San Francisco, CA',
+      website: myProfile.website || 'privity.app',
+      category: myProfile.category || myProfile.verifiedCategory || 'Platform Founder',
+    });
+    setIsEditProfileOpen(true);
+  };
+
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editForm.name.trim()) {
+      triggerToast('Please enter a display name');
+      return;
+    }
+
+    const cleanHandle = editForm.handle.trim().replace(/^@/, '') || 'luciano';
+    const updated: UserProfile = {
+      ...myProfile,
+      name: editForm.name.trim(),
+      handle: cleanHandle,
+      bio: editForm.bio.trim(),
+      avatar: editForm.avatar || myProfile.avatar,
+      coverUrl: editForm.coverUrl || myProfile.coverUrl,
+      location: editForm.location.trim() || 'San Francisco, CA',
+      website: editForm.website.trim() || 'privity.app',
+      category: editForm.category.trim() || myProfile.category,
+      verifiedCategory: editForm.category.trim() || myProfile.verifiedCategory,
+    };
+
+    setProfiles((prev) => ({
+      ...prev,
+      luciano: updated,
+      ...(cleanHandle !== 'luciano' ? { [cleanHandle]: updated } : {}),
+    }));
+
+    // Synchronize posts authored by Luciano so new name & avatar appear everywhere
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.authorId === 'usr-luciano' || p.authorHandle === 'luciano' || p.authorHandle === myProfile.handle) {
+          return {
+            ...p,
+            authorName: updated.name,
+            authorAvatar: updated.avatar,
+            authorHandle: updated.handle,
+          };
+        }
+        return p;
+      })
+    );
+
+    setIsEditProfileOpen(false);
+    triggerToast('Profile updated & saved permanently!');
+  };
+
+  // Like media item directly on profile
+  const handleLikeMedia = (profileHandle: string, mediaId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const clean = profileHandle.replace(/^@/, '');
+    setProfiles((prev) => {
+      const prof = prev[clean];
+      if (!prof || !prof.mediaItems) return prev;
+      const nextMedia = prof.mediaItems.map((m) => {
+        if (m.id === mediaId) {
+          const nextLiked = !m.isLiked;
+          return {
+            ...m,
+            isLiked: nextLiked,
+            likes: nextLiked ? m.likes + 1 : Math.max(0, m.likes - 1),
+          };
+        }
+        return m;
+      });
+      return {
+        ...prev,
+        [clean]: {
+          ...prof,
+          mediaItems: nextMedia,
+        },
+      };
+    });
+    triggerToast('Photo reaction updated and saved');
+  };
+
+  // Post Actions Menu & Caption Editing State
+  const [postMenuModal, setPostMenuModal] = useState<{ post: PostItem; isOwn: boolean } | null>(null);
+  const [editingPostCaption, setEditingPostCaption] = useState<{ id: string; caption: string } | null>(null);
+
+  const handleDeletePost = (postId: string) => {
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    setPostMenuModal(null);
+    triggerToast('Dispatch deleted permanently');
+  };
+
+  const handleSavePostCaption = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPostCaption) return;
+    setPosts((prev) =>
+      prev.map((p) => (p.id === editingPostCaption.id ? { ...p, caption: editingPostCaption.caption } : p))
+    );
+    setEditingPostCaption(null);
+    setPostMenuModal(null);
+    triggerToast('Dispatch caption updated');
+  };
 
   // Floating heart tracker for double tap
   const [heartExplodingPostId, setHeartExplodingPostId] = useState<string | null>(null);
@@ -823,27 +1098,10 @@ export function App() {
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [replyTarget, setReplyTarget] = useState<{ postId: string; commentId: string; handle: string } | null>(null);
 
-  // Following list
-  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({
-    'elena_rodriguez': true,
-    'marcus_dev': true,
-    'julian_analogue': true,
-    'sara_architecture': true,
-    'chloe_visuals': false,
-    'oliver_wood': false,
-    'sam_arch': false,
-    'jess_film': false,
-  });
-
   // User Profile View State & Navigation History Stack
   const [viewedUserHandle, setViewedUserHandle] = useState<string>('luciano');
   const [profileHistory, setProfileHistory] = useState<string[]>([]);
   const [profileSubTab, setProfileSubTab] = useState<'dispatches' | 'media' | 'circles'>('dispatches');
-  const [closeFriendsList, setCloseFriendsList] = useState<string[]>([
-    'elena_rodriguez',
-    'marcus_dev',
-    'sara_architecture',
-  ]);
 
   // Private Account Shield Modal State
   const [privateLockModal, setPrivateLockModal] = useState<{ handle: string; name: string } | null>(null);
@@ -880,20 +1138,67 @@ export function App() {
   };
 
   const toggleFollow = (handleOrId: string, name?: string) => {
-    const current = !!followingMap[handleOrId];
-    setFollowingMap((prev) => ({ ...prev, [handleOrId]: !current }));
-    triggerToast(!current ? `Now following ${name || '@' + handleOrId}` : `Unfollowed ${name || '@' + handleOrId}`);
+    const clean = handleOrId.replace(/^@/, '');
+    const current = !!followingMap[clean];
+    const next = !current;
+    setFollowingMap((prev) => ({ ...prev, [clean]: next }));
+
+    setProfiles((prev) => {
+      const target = prev[clean];
+      let nextTarget = target ? { ...target } : null;
+      if (nextTarget) {
+        let followers = [...(nextTarget.followersList || [])];
+        if (next) {
+          if (!followers.includes('luciano')) followers = ['luciano', ...followers];
+        } else {
+          followers = followers.filter((h) => h !== 'luciano');
+        }
+        nextTarget.followersList = followers;
+      }
+
+      const myProf = prev['luciano'];
+      let nextMyProf = myProf ? { ...myProf } : null;
+      if (nextMyProf) {
+        let followings = [...(nextMyProf.followingList || [])];
+        if (next) {
+          if (!followings.includes(clean)) followings = [...followings, clean];
+        } else {
+          followings = followings.filter((h) => h !== clean);
+        }
+        nextMyProf.followingList = followings;
+      }
+
+      return {
+        ...prev,
+        ...(nextTarget ? { [clean]: nextTarget } : {}),
+        ...(nextMyProf ? { luciano: nextMyProf } : {}),
+      };
+    });
+
+    triggerToast(next ? `Now following ${name || '@' + clean}` : `Unfollowed ${name || '@' + clean}`);
   };
 
   const toggleCloseFriends = (handle: string) => {
     const clean = handle.replace(/^@/, '');
-    if (closeFriendsList.includes(clean)) {
-      setCloseFriendsList((prev) => prev.filter((h) => h !== clean));
-      triggerToast(`Removed @${clean} from your Close Friends circle`);
-    } else {
-      setCloseFriendsList((prev) => [...prev, clean]);
-      triggerToast(`Added @${clean} to your Close Friends circle`);
-    }
+    const exists = closeFriendsList.includes(clean);
+    const nextList = exists
+      ? closeFriendsList.filter((h) => h !== clean)
+      : [...closeFriendsList, clean];
+    setCloseFriendsList(nextList);
+
+    setProfiles((prev) => {
+      const myProf = prev['luciano'];
+      if (!myProf) return prev;
+      return {
+        ...prev,
+        luciano: {
+          ...myProf,
+          trustCirclesList: nextList,
+        },
+      };
+    });
+
+    triggerToast(exists ? `Removed @${clean} from your Close Friends circle` : `Added @${clean} to your Close Friends circle`);
   };
 
   // User Roster Modal State (Followers / Following / Circles / Liked by)
@@ -969,8 +1274,6 @@ export function App() {
     { id: 'fr-2', name: 'Jessica Vance', handle: 'jess_film', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120' },
   ]);
 
-  // Account privacy state
-  const [isPrivateAccount, setIsPrivateAccount] = useState(false);
 
   // Toast
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -1079,10 +1382,10 @@ export function App() {
               if (c.id === replyTarget.commentId) {
                 const reply = {
                   id: `r-${Date.now()}`,
-                  authorName: 'Luciano',
-                  authorHandle: 'luciano',
-                  authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-                  isVerified: true,
+                  authorName: myProfile.name,
+                  authorHandle: myProfile.handle,
+                  authorAvatar: myProfile.avatar,
+                  isVerified: myProfile.isVerified,
                   text,
                   timeAgo: 'Just now',
                 };
@@ -1094,10 +1397,10 @@ export function App() {
           } else {
             const comment: PostComment = {
               id: `c-${Date.now()}`,
-              authorName: 'Luciano',
-              authorHandle: 'luciano',
-              authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-              isVerified: true,
+              authorName: myProfile.name,
+              authorHandle: myProfile.handle,
+              authorAvatar: myProfile.avatar,
+              isVerified: myProfile.isVerified,
               text,
               timeAgo: 'Just now',
               likesCount: 0,
@@ -1111,7 +1414,7 @@ export function App() {
 
     setCommentInputs({ ...commentInputs, [postId]: '' });
     setReplyTarget(null);
-    triggerToast('Comment posted');
+    triggerToast('Comment posted and saved');
   };
 
   // Publish from inline composer
@@ -1122,17 +1425,17 @@ export function App() {
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
       authorId: 'usr-luciano',
-      authorName: 'Luciano',
-      authorHandle: 'luciano',
-      authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-      isVerified: true,
-      verifiedCategory: 'Product Founder',
-      verifiedSince: 'Verified 2026',
-      cryptoProofId: 'priv_ed25519_luciano_founder',
+      authorName: myProfile.name,
+      authorHandle: myProfile.handle,
+      authorAvatar: myProfile.avatar,
+      isVerified: myProfile.isVerified,
+      verifiedCategory: myProfile.verifiedCategory,
+      verifiedSince: myProfile.verifiedSince,
+      cryptoProofId: myProfile.cryptoProofId,
       type: composerPhotoUrl ? 'image' : 'text',
       contentUrl: composerPhotoUrl || undefined,
       caption: composerCaption,
-      tags: ['privity', 'privacyfirst'],
+      tags: ['privity', 'authentic'],
       privacy: composerPrivacy,
       likesCount: 0,
       commentsCount: 0,
@@ -1140,11 +1443,33 @@ export function App() {
       savesCount: 0,
       isLiked: false,
       isSaved: false,
+      likersList: [],
       timeAgo: 'Just now',
       comments: [],
     };
 
-    setPosts([newPost, ...posts]);
+    if (composerPhotoUrl) {
+      setProfiles((prev) => {
+        const prof = prev['luciano'] || myProfile;
+        const newMedia: UserMediaItem = {
+          id: `m-luciano-${Date.now()}`,
+          url: composerPhotoUrl,
+          type: 'image',
+          likes: 0,
+          comments: 0,
+          isLiked: false,
+        };
+        return {
+          ...prev,
+          luciano: {
+            ...prof,
+            mediaItems: [newMedia, ...(prof.mediaItems || [])],
+          },
+        };
+      });
+    }
+
+    setPosts((prev) => [newPost, ...prev]);
     setComposerCaption('');
     setComposerPhotoUrl(null);
     triggerToast(`Shared with ${composerPrivacy.replace('_', ' ')} audience!`);
@@ -1163,13 +1488,13 @@ export function App() {
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
       authorId: 'usr-luciano',
-      authorName: 'Luciano',
-      authorHandle: 'luciano',
-      authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-      isVerified: true,
-      verifiedCategory: 'Product Founder',
-      verifiedSince: 'Verified 2026',
-      cryptoProofId: 'priv_ed25519_luciano_founder',
+      authorName: myProfile.name,
+      authorHandle: myProfile.handle,
+      authorAvatar: myProfile.avatar,
+      isVerified: myProfile.isVerified,
+      verifiedCategory: myProfile.verifiedCategory,
+      verifiedSince: myProfile.verifiedSince,
+      cryptoProofId: myProfile.cryptoProofId,
       type: modalPhoto ? 'image' : 'text',
       contentUrl: modalPhoto || undefined,
       caption: modalCaption,
@@ -1181,11 +1506,33 @@ export function App() {
       savesCount: 0,
       isLiked: false,
       isSaved: false,
+      likersList: [],
       timeAgo: 'Just now',
       comments: [],
     };
 
-    setPosts([newPost, ...posts]);
+    if (modalPhoto) {
+      setProfiles((prev) => {
+        const prof = prev['luciano'] || myProfile;
+        const newMedia: UserMediaItem = {
+          id: `m-luciano-${Date.now()}`,
+          url: modalPhoto,
+          type: 'image',
+          likes: 0,
+          comments: 0,
+          isLiked: false,
+        };
+        return {
+          ...prev,
+          luciano: {
+            ...prof,
+            mediaItems: [newMedia, ...(prof.mediaItems || [])],
+          },
+        };
+      });
+    }
+
+    setPosts((prev) => [newPost, ...prev]);
     setIsModalOpen(false);
     setModalCaption('');
     setModalTags('');
@@ -1281,19 +1628,19 @@ export function App() {
           <span>New Dispatch</span>
         </button>
 
-        <div className="user-identity-card" onClick={() => navigateToProfile('luciano')}>
+        <div className="user-identity-card" onClick={handleOpenEditProfile} title="Click to customize profile">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <img
-              src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100"
-              alt="Avatar"
+              src={myProfile.avatar}
+              alt={myProfile.name}
               className="user-avatar-mini"
             />
             <div>
               <div style={{ fontSize: '13px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                Luciano
-                <VerifiedBadge authorName="Luciano" category="Platform Founder" since="2026" proofId="priv_ed25519_luciano" />
+                {myProfile.name}
+                <VerifiedBadge authorName={myProfile.name} category={myProfile.verifiedCategory} since={myProfile.verifiedSince} proofId={myProfile.cryptoProofId} />
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@luciano</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{myProfile.handle}</div>
             </div>
           </div>
           <IconSettings size={16} color="var(--text-muted)" />
@@ -1398,8 +1745,8 @@ export function App() {
             {/* Inline Post Composer */}
             <form onSubmit={handleInlinePublish} className="composer-card">
               <img
-                src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100"
-                alt="Luciano"
+                src={myProfile.avatar}
+                alt={myProfile.name}
                 className="composer-user-pic"
               />
 
@@ -1437,18 +1784,24 @@ export function App() {
                       <option value="public">Public</option>
                     </select>
 
-                    <button
-                      type="button"
-                      className="btn-media-toggle"
-                      onClick={() =>
-                        setComposerPhotoUrl(
-                          'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1000&auto=format&fit=crop&q=80',
-                        )
-                      }
-                    >
+                    <label className="btn-media-toggle" style={{ cursor: 'pointer' }} title="Attach photo from your device">
                       <IconPhoto size={16} />
                       <span>Photo</span>
-                    </button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            compressImageFile(file, 1400, 0.85, (dataUrl) => {
+                              setComposerPhotoUrl(dataUrl);
+                              triggerToast('Photo attached to dispatch');
+                            });
+                          }
+                        }}
+                      />
+                    </label>
                   </div>
 
                   <button
@@ -1673,11 +2026,14 @@ export function App() {
                           <IconBookmark size={18} filled={post.isSaved} color={post.isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
                         </button>
 
-                        {/* Report Menu */}
+                        {/* Options / Report Menu */}
                         <button
                           className="btn-post-action"
-                          onClick={() => setReportingPost(post)}
-                          title="Report content"
+                          onClick={() => {
+                            const isOwn = post.authorHandle === myProfile.handle || post.authorId === 'usr-luciano';
+                            setPostMenuModal({ post, isOwn });
+                          }}
+                          title={post.authorHandle === myProfile.handle ? 'Dispatch options' : 'Report content'}
                         >
                           <IconDots size={18} />
                         </button>
@@ -1917,7 +2273,7 @@ export function App() {
               <div className="panel-title-text">
                 {discoverSearch ? 'Search Results' : 'Featured Verified Creators'}
               </div>
-              {Object.values(PROFILES_REGISTRY)
+              {Object.values(profiles)
                 .filter((p) => {
                   if (!discoverSearch) return true;
                   const q = discoverSearch.toLowerCase();
@@ -2123,24 +2479,46 @@ export function App() {
               {/* Cover Stage Banner */}
               <div
                 className="profile-cover-stage"
-                style={{ backgroundImage: `url(${profile.coverUrl})` }}
-              />
+                style={{ backgroundImage: `url(${profile.coverUrl})`, position: 'relative' }}
+              >
+                {isOwnProfile && (
+                  <button
+                    className="btn-glass-banner-edit"
+                    onClick={handleOpenEditProfile}
+                    title="Change Cover Banner"
+                  >
+                    <IconPhoto size={14} />
+                    <span>Edit Cover</span>
+                  </button>
+                )}
+              </div>
 
               {/* Profile Card Info */}
               <div className="profile-header-card">
                 <div className="profile-hero-row">
-                  <img
-                    src={profile.avatar}
-                    alt={profile.name}
-                    className="profile-avatar-squircle"
-                  />
+                  <div style={{ position: 'relative' }}>
+                    <img
+                      src={profile.avatar}
+                      alt={profile.name}
+                      className="profile-avatar-squircle"
+                    />
+                    {isOwnProfile && (
+                      <button
+                        className="btn-glass-avatar-edit"
+                        onClick={handleOpenEditProfile}
+                        title="Change Profile Photo"
+                      >
+                        <IconPhoto size={13} />
+                      </button>
+                    )}
+                  </div>
 
                   <div className="profile-action-dock">
                     {isOwnProfile ? (
                       <>
                         <button
                           className="btn-glass-back"
-                          onClick={() => triggerToast('Profile settings loaded')}
+                          onClick={handleOpenEditProfile}
                         >
                           <IconSettings size={15} />
                           <span>Edit Profile</span>
@@ -2554,6 +2932,16 @@ export function App() {
                               >
                                 <IconBookmark size={18} filled={post.isSaved} color={post.isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
                               </button>
+                              <button
+                                className="btn-post-action"
+                                onClick={() => {
+                                  const isOwn = post.authorHandle === myProfile.handle || post.authorId === 'usr-luciano';
+                                  setPostMenuModal({ post, isOwn });
+                                }}
+                                title={post.authorHandle === myProfile.handle ? 'Dispatch options' : 'Report content'}
+                              >
+                                <IconDots size={18} />
+                              </button>
                             </div>
 
                             {/* Liked By Directory Strip - 100% Accurate & Clickable */}
@@ -2625,9 +3013,13 @@ export function App() {
                           >
                             <img src={item.url} alt="Studio Media" loading="lazy" />
                             <div className="profile-media-hover-overlay">
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <IconHeart size={16} filled color="#fff" />
-                                <span>{item.likes}</span>
+                              <div
+                                className="media-interactive-heart"
+                                onClick={(e) => handleLikeMedia(profile.handle, item.id, e)}
+                                title={item.isLiked ? 'Unlike photo' : 'Like photo'}
+                              >
+                                <IconHeart size={16} filled={item.isLiked} color={item.isLiked ? 'var(--heart-rose)' : '#fff'} />
+                                <span style={{ marginLeft: '4px', fontWeight: 700 }}>{item.likes}</span>
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <IconChat size={16} color="#fff" />
@@ -2839,11 +3231,91 @@ export function App() {
       {/* ======================================================== */}
 
       {/* LIGHTBOX FOR FULLSCREEN MEDIA */}
-      {lightboxUrl && (
-        <div className="lightbox-stage-overlay" onClick={() => setLightboxUrl(null)}>
-          <img src={lightboxUrl} alt="Fullscreen View" className="lightbox-hero-image" />
-        </div>
-      )}
+      {lightboxUrl && (() => {
+        const matchingMedia = Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => m.url === lightboxUrl);
+        const matchingPost = posts.find((p) => p.contentUrl === lightboxUrl || p.thumbnailUrl === lightboxUrl);
+        const isPhotoLiked = !!(matchingMedia?.isLiked || matchingPost?.isLiked);
+        const photoLikesCount = matchingMedia?.likes ?? (matchingPost?.likesCount ?? 0);
+
+        const handleLightboxLikeToggle = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (matchingPost) {
+            handleLike(matchingPost.id);
+          } else if (matchingMedia) {
+            for (const p of Object.values(profiles)) {
+              if (p.mediaItems?.some((m) => m.id === matchingMedia.id)) {
+                handleLikeMedia(p.handle, matchingMedia.id);
+                break;
+              }
+            }
+          }
+        };
+
+        return (
+          <div className="lightbox-stage-overlay" onClick={() => setLightboxUrl(null)}>
+            <div style={{ position: 'absolute', top: '24px', right: '28px', zIndex: 10 }} onClick={(e) => e.stopPropagation()}>
+              <button className="btn-glass-back" onClick={() => setLightboxUrl(null)}>
+                <IconX size={18} />
+                <span>Close</span>
+              </button>
+            </div>
+
+            <img
+              src={lightboxUrl}
+              alt="Fullscreen View"
+              className="lightbox-hero-image"
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={handleLightboxLikeToggle}
+            />
+
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '28px',
+                display: 'flex',
+                gap: '12px',
+                alignItems: 'center',
+                zIndex: 10,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className={`btn-post-action ${isPhotoLiked ? 'liked' : ''}`}
+                style={{
+                  background: 'rgba(15, 23, 42, 0.85)',
+                  backdropFilter: 'blur(20px)',
+                  padding: '9px 18px',
+                  borderRadius: 'var(--radius-full)',
+                  border: '1px solid var(--glass-border-light)',
+                  color: isPhotoLiked ? 'var(--heart-rose)' : '#fff',
+                }}
+                onClick={handleLightboxLikeToggle}
+              >
+                <IconHeart size={18} filled={isPhotoLiked} color={isPhotoLiked ? 'var(--heart-rose)' : 'currentColor'} />
+                <span>{photoLikesCount}</span>
+              </button>
+
+              <button
+                className="btn-glass-back"
+                style={{
+                  background: 'rgba(15, 23, 42, 0.85)',
+                  backdropFilter: 'blur(20px)',
+                  padding: '9px 18px',
+                  borderRadius: 'var(--radius-full)',
+                  border: '1px solid var(--glass-border-light)',
+                }}
+                onClick={() => {
+                  navigator.clipboard?.writeText(lightboxUrl);
+                  triggerToast('Photo URL copied to clipboard');
+                }}
+              >
+                <IconLink size={16} />
+                <span>Copy URL</span>
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* CREATE POST MODAL */}
       {isModalOpen && (
@@ -2876,6 +3348,75 @@ export function App() {
                   fontFamily: 'inherit',
                 }}
               />
+
+              {/* Photo Attachment Section */}
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <label className="btn-file-upload-label">
+                    <IconPhoto size={15} />
+                    <span>Upload Image File</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          compressImageFile(file, 1400, 0.85, (dataUrl) => {
+                            setModalPhoto(dataUrl);
+                            triggerToast('Photo attached to dispatch!');
+                          });
+                        }
+                      }}
+                    />
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Or paste photo image URL..."
+                    value={modalPhoto || ''}
+                    onChange={(e) => setModalPhoto(e.target.value || null)}
+                    className="edit-profile-input"
+                    style={{ flex: 1, minWidth: '180px' }}
+                  />
+                </div>
+
+                {modalPhoto && (
+                  <div style={{ position: 'relative', marginTop: '10px' }}>
+                    <img
+                      src={modalPhoto}
+                      alt="Attachment Preview"
+                      style={{
+                        width: '100%',
+                        maxHeight: '220px',
+                        objectFit: 'cover',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--glass-border)',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setModalPhoto(null)}
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        right: '8px',
+                        background: 'rgba(0,0,0,0.7)',
+                        border: 'none',
+                        color: '#fff',
+                        borderRadius: '50%',
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <IconX size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <input
                 type="text"
@@ -2913,7 +3454,7 @@ export function App() {
                   {modalPrivacy === 'close_friends' && <IconCheck size={16} color="var(--cf-emerald)" />}
                 </div>
                 <div className="tier-explanation-copy">
-                  Reaches only the 14 approved members of your intimate Close Friends circle.
+                  Reaches only the {closeFriendsList.length} approved members of your intimate Close Friends circle.
                 </div>
               </div>
 
@@ -2930,7 +3471,7 @@ export function App() {
                   {modalPrivacy === 'followers' && <IconCheck size={16} color="var(--followers-iris)" />}
                 </div>
                 <div className="tier-explanation-copy">
-                  Reaches your 148 followers (approved followers if your account is private).
+                  Reaches your {(myProfile.followersList || []).length} followers (approved followers if your account is private).
                 </div>
               </div>
 
@@ -2965,6 +3506,364 @@ export function App() {
                   disabled={!modalCaption.trim()}
                 >
                   Publish Dispatch
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT PERSONAL PROFILE MODAL */}
+      {isEditProfileOpen && (
+        <div className="frosted-modal-backdrop" onClick={() => setIsEditProfileOpen(false)}>
+          <div
+            className="frosted-modal-window"
+            style={{ maxWidth: '640px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header-strip">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <IconSettings size={18} color="var(--apple-blue)" />
+                <span className="modal-title-bold">Edit Personal Profile</span>
+              </div>
+              <button className="btn-close-strip" onClick={() => setIsEditProfileOpen(false)}>
+                <IconX size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveProfile}>
+              <div className="edit-profile-modal-body">
+                {/* Cover Photo Customization */}
+                <div className="edit-profile-section">
+                  <label className="edit-profile-label">Cover Banner Photo</label>
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '110px',
+                      borderRadius: 'var(--radius-md)',
+                      backgroundImage: `url(${editForm.coverUrl})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      position: 'relative',
+                      border: '1px solid var(--glass-border)',
+                      marginBottom: '10px',
+                    }}
+                  />
+                  <div className="photo-upload-dock">
+                    <label className="btn-file-upload-label">
+                      <IconPhoto size={15} />
+                      <span>Upload Banner From Device</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            compressImageFile(file, 1400, 0.82, (dataUrl) => {
+                              setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
+                              triggerToast('Cover banner photo updated!');
+                            });
+                          }
+                        }}
+                      />
+                    </label>
+                    <input
+                      type="text"
+                      className="edit-profile-input"
+                      style={{ flex: 1, minWidth: '180px' }}
+                      placeholder="Or paste banner image URL..."
+                      value={editForm.coverUrl}
+                      onChange={(e) => setEditForm({ ...editForm, coverUrl: e.target.value })}
+                    />
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                    Quick Presets:
+                  </div>
+                  <div className="preset-thumbs-row">
+                    {PRESET_BANNERS.map((banner, idx) => (
+                      <img
+                        key={idx}
+                        src={banner}
+                        alt={`Banner ${idx + 1}`}
+                        className={`preset-banner-thumb ${editForm.coverUrl === banner ? 'selected' : ''}`}
+                        onClick={() => setEditForm((prev) => ({ ...prev, coverUrl: banner }))}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Avatar Customization */}
+                <div className="edit-profile-section">
+                  <label className="edit-profile-label">Profile Avatar</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <img
+                      src={editForm.avatar}
+                      alt="Avatar Preview"
+                      style={{
+                        width: '68px',
+                        height: '68px',
+                        borderRadius: 'var(--radius-md)',
+                        objectFit: 'cover',
+                        border: '2px solid var(--glass-border-light)',
+                        boxShadow: 'var(--shadow-elevated)',
+                      }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div className="photo-upload-dock">
+                        <label className="btn-file-upload-label">
+                          <IconPhoto size={15} />
+                          <span>Upload Photo From Device</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                compressImageFile(file, 400, 0.88, (dataUrl) => {
+                                  setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
+                                  triggerToast('Avatar photo updated!');
+                                });
+                              }
+                            }}
+                          />
+                        </label>
+                        <input
+                          type="text"
+                          className="edit-profile-input"
+                          style={{ flex: 1, minWidth: '160px' }}
+                          placeholder="Or paste avatar URL..."
+                          value={editForm.avatar}
+                          onChange={(e) => setEditForm({ ...editForm, avatar: e.target.value })}
+                        />
+                      </div>
+                      <div className="preset-thumbs-row">
+                        {PRESET_AVATARS.map((av, idx) => (
+                          <img
+                            key={idx}
+                            src={av}
+                            alt={`Avatar ${idx + 1}`}
+                            className={`preset-avatar-thumb ${editForm.avatar === av ? 'selected' : ''}`}
+                            onClick={() => setEditForm((prev) => ({ ...prev, avatar: av }))}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Display Name & Handle */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                  <div className="edit-profile-section">
+                    <label className="edit-profile-label">Display Name *</label>
+                    <input
+                      type="text"
+                      className="edit-profile-input"
+                      placeholder="Your full name"
+                      value={editForm.name}
+                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="edit-profile-section">
+                    <label className="edit-profile-label">Username / Handle</label>
+                    <input
+                      type="text"
+                      className="edit-profile-input"
+                      placeholder="username"
+                      value={editForm.handle}
+                      onChange={(e) => setEditForm({ ...editForm, handle: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                {/* Bio / Dispatch Narrative */}
+                <div className="edit-profile-section">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="edit-profile-label">Personal Bio</label>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {editForm.bio.length} / 280
+                    </span>
+                  </div>
+                  <textarea
+                    className="edit-profile-textarea"
+                    placeholder="Tell your trusted circles about your work, thoughts, and vision..."
+                    value={editForm.bio}
+                    maxLength={280}
+                    onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
+                  />
+                </div>
+
+                {/* Location & Website */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                  <div className="edit-profile-section">
+                    <label className="edit-profile-label">Location</label>
+                    <input
+                      type="text"
+                      className="edit-profile-input"
+                      placeholder="e.g. San Francisco, CA"
+                      value={editForm.location}
+                      onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
+                    />
+                  </div>
+                  <div className="edit-profile-section">
+                    <label className="edit-profile-label">Website</label>
+                    <input
+                      type="text"
+                      className="edit-profile-input"
+                      placeholder="e.g. privity.app"
+                      value={editForm.website}
+                      onChange={(e) => setEditForm({ ...editForm, website: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                {/* Role / Focus */}
+                <div className="edit-profile-section">
+                  <label className="edit-profile-label">Professional Role / Focus</label>
+                  <input
+                    type="text"
+                    className="edit-profile-input"
+                    placeholder="e.g. Platform Founder & Systems Architect"
+                    value={editForm.category}
+                    onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '16px 24px',
+                  borderTop: '1px solid var(--glass-border)',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '12px',
+                  background: 'rgba(0, 0, 0, 0.25)',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn-glass-back"
+                  onClick={() => setIsEditProfileOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-post-dispatch" style={{ padding: '9px 24px' }}>
+                  Save Profile
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* POST OPTIONS & EDIT CAPTION MODAL */}
+      {postMenuModal && (
+        <div className="frosted-modal-backdrop" onClick={() => setPostMenuModal(null)}>
+          <div
+            className="frosted-modal-window"
+            style={{ maxWidth: '440px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header-strip">
+              <span className="modal-title-bold">Dispatch Options</span>
+              <button className="btn-close-strip" onClick={() => setPostMenuModal(null)}>
+                <IconX size={18} />
+              </button>
+            </div>
+            <div style={{ padding: '20px' }}>
+              {postMenuModal.isOwn ? (
+                <>
+                  <div
+                    onClick={() => {
+                      setEditingPostCaption({ id: postMenuModal.post.id, caption: postMenuModal.post.caption });
+                      setPostMenuModal(null);
+                    }}
+                    style={{
+                      padding: '12px',
+                      borderBottom: '1px solid var(--glass-border)',
+                      cursor: 'pointer',
+                      borderRadius: 'var(--radius-sm)',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '14px' }}>Edit Caption</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      Update the narrative text of this dispatch
+                    </div>
+                  </div>
+                  <div
+                    onClick={() => handleDeletePost(postMenuModal.post.id)}
+                    style={{
+                      padding: '12px',
+                      cursor: 'pointer',
+                      color: 'var(--heart-rose)',
+                      borderRadius: 'var(--radius-sm)',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '14px' }}>Delete Dispatch</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      Permanently remove this dispatch from Privity
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div
+                  onClick={() => {
+                    const post = postMenuModal.post;
+                    setPostMenuModal(null);
+                    setReportingPost(post);
+                  }}
+                  style={{
+                    padding: '12px',
+                    cursor: 'pointer',
+                    color: 'var(--heart-rose)',
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: '14px' }}>Report Content</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Flag this post for community review
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT CAPTION MODAL */}
+      {editingPostCaption && (
+        <div className="frosted-modal-backdrop" onClick={() => setEditingPostCaption(null)}>
+          <div
+            className="frosted-modal-window"
+            style={{ maxWidth: '480px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header-strip">
+              <span className="modal-title-bold">Edit Dispatch Caption</span>
+              <button className="btn-close-strip" onClick={() => setEditingPostCaption(null)}>
+                <IconX size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSavePostCaption} style={{ padding: '20px' }}>
+              <textarea
+                className="edit-profile-textarea"
+                style={{ minHeight: '120px', marginBottom: '16px' }}
+                value={editingPostCaption.caption}
+                onChange={(e) =>
+                  setEditingPostCaption({ ...editingPostCaption, caption: e.target.value })
+                }
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn-glass-back"
+                  onClick={() => setEditingPostCaption(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-post-dispatch">
+                  Save Changes
                 </button>
               </div>
             </form>
