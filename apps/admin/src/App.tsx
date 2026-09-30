@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   PostPrivacy,
   PostType,
@@ -52,7 +52,6 @@ import {
   IconSwords,
   IconZap,
   IconSmile,
-  IconMaximize,
 } from './components/Icons';
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -801,8 +800,8 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
     creatorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
     isVerified: true,
     category: 'System Architect',
-    title: 'Live Battle Match · Mesh Protocol Defense vs Sybil Attacks',
-    description: 'Real-time interactive live battle! Cheer with gifts and boost the sovereign cryptographic ledger.',
+    title: 'Live Battle Match · Arena Championship',
+    description: 'Real-time interactive live battle! Cheer with gifts and help Elena win the round.',
     viewersCount: 1840,
     likesCount: 14820,
     dailyRank: '🔥 Daily Ranking #2',
@@ -1321,7 +1320,6 @@ export function App() {
     'live-julian-3': 6320,
     'live-chloe-4': 4890,
   });
-  const [fullScreenLive, setFullScreenLive] = useState(false);
   const [activeLiveStream, setActiveLiveStream] = useState<LiveStreamSession | null>(null);
   const [liveChatInput, setLiveChatInput] = useState('');
   const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; badge?: string; level?: number; isHost?: boolean; isJoin?: boolean; giftName?: string; giftIcon?: string }>>([
@@ -1333,6 +1331,98 @@ export function App() {
   ]);
   const [floatingHearts, setFloatingHearts] = useState<Array<{ id: number; left: number; color: string; size: number }>>([]);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+
+  // Top Likers & Contributors Leaderboard Modal State
+  const [isLikesLeaderboardOpen, setIsLikesLeaderboardOpen] = useState(false);
+  const [likersLeaderboard, setLikersLeaderboard] = useState<Array<{ id: string; name: string; handle: string; avatar: string; likes: number; badge: string; level: number }>>([
+    { id: '1', name: 'Luciano', handle: 'luciano', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120', likes: 5840, badge: '🥇 Top Contributor', level: 29 },
+    { id: '2', name: 'Carlos', handle: 'carlos_m', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', likes: 3210, badge: '🥈 Fan Club #19', level: 19 },
+    { id: '3', name: 'TRIPLE', handle: 'triple_beat', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120', likes: 2450, badge: '🥉 VIP Supporter', level: 26 },
+    { id: '4', name: 'ELIKS', handle: 'eliks_fan', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120', likes: 1980, badge: 'Loyal Fan', level: 10 },
+    { id: '5', name: 'mlChAEL', handle: 'michael_wave', avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=120', likes: 1340, badge: 'Supporter', level: 4 },
+  ]);
+
+  // Live Vertical Slide Direction & Navigation
+  const [liveSlideDirection, setLiveSlideDirection] = useState<'down' | 'up' | null>(null);
+  const lastLiveWheelTime = useRef<number>(0);
+  const liveTouchStartY = useRef<number>(0);
+
+  const handleNextLiveStream = useCallback(() => {
+    setLiveSlideDirection('down');
+    setActiveLiveIndex((prev) => {
+      const nextIdx = (prev + 1) % liveStreamsList.length;
+      const nextStream = liveStreamsList[nextIdx];
+      setBattleScoreHost(nextStream.battleInfo.hostScore);
+      setBattleScoreOpponent(nextStream.battleInfo.opponentScore);
+      return nextIdx;
+    });
+    setTimeout(() => setLiveSlideDirection(null), 360);
+  }, [liveStreamsList]);
+
+  const handlePrevLiveStream = useCallback(() => {
+    setLiveSlideDirection('up');
+    setActiveLiveIndex((prev) => {
+      const prevIdx = (prev - 1 + liveStreamsList.length) % liveStreamsList.length;
+      const prevStream = liveStreamsList[prevIdx];
+      setBattleScoreHost(prevStream.battleInfo.hostScore);
+      setBattleScoreOpponent(prevStream.battleInfo.opponentScore);
+      return prevIdx;
+    });
+    setTimeout(() => setLiveSlideDirection(null), 360);
+  }, [liveStreamsList]);
+
+  const handleLiveWheel = (e: React.WheelEvent) => {
+    const now = Date.now();
+    if (now - lastLiveWheelTime.current < 420) return;
+    if (e.deltaY > 30) {
+      lastLiveWheelTime.current = now;
+      handleNextLiveStream();
+    } else if (e.deltaY < -30) {
+      lastLiveWheelTime.current = now;
+      handlePrevLiveStream();
+    }
+  };
+
+  const handleLiveTouchStart = (e: React.TouchEvent) => {
+    liveTouchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleLiveTouchEnd = (e: React.TouchEvent) => {
+    const diff = liveTouchStartY.current - e.changedTouches[0].clientY;
+    if (diff > 45) {
+      handleNextLiveStream();
+    } else if (diff < -45) {
+      handlePrevLiveStream();
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'feed' || feedFilter !== 'live') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['input', 'textarea'].includes((e.target as HTMLElement)?.tagName?.toLowerCase())) return;
+      if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+        e.preventDefault();
+        handleNextLiveStream();
+      } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+        e.preventDefault();
+        handlePrevLiveStream();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTab, feedFilter, handleNextLiveStream, handlePrevLiveStream]);
+
+  const handleGiveLikesFromLeaderboard = (streamId: string, currentCount: number) => {
+    setHostLiveLikes((prev) => ({
+      ...prev,
+      [streamId]: (prev[streamId] || currentCount) + 15,
+    }));
+    setLikersLeaderboard((prev) =>
+      prev.map((item) => (item.handle === 'luciano' ? { ...item, likes: item.likes + 15 } : item))
+    );
+    handleLiveHeartBurst('#ff4d6d');
+    triggerToast('Tapped +15 Likes for Host! ♥');
+  };
 
   // Live Battle Timer Countdown & Dynamic Opponent Simulation
   useEffect(() => {
@@ -2713,7 +2803,7 @@ export function App() {
     setLiveStreamsList((prev) => [userStream, ...prev]);
     setActiveLiveIndex(0);
     setFeedFilter('live');
-    triggerToast('Broadcast initialized: Live on P2P mesh network');
+    triggerToast('Broadcast initialized: You are now Live!');
   };
 
 
@@ -4134,7 +4224,7 @@ export function App() {
   }, [posts]);
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${activeTab === 'feed' && feedFilter === 'live' ? 'live-mode-active' : ''}`}>
       {/* Apple visionOS Mirror Glass Toast Notification */}
       {toastMsg && (
         <div className="apple-glass-toast">
@@ -4375,97 +4465,89 @@ export function App() {
             onPointerDown={handleFeedPointerDown}
             onPointerUp={handleFeedPointerUp}
           >
-            <header className="feed-sticky-nav">
-              <div className="feed-title-line">
-                <div className="feed-main-heading">
-                  {feedFilter === 'live' && 'Live Broadcasts'}
-                  {feedFilter === 'feed' && 'Feed'}
-                  {feedFilter === 'all' && 'All Circles'}
-                  {feedFilter === 'close_friends' && 'Close Friends'}
-                  {feedFilter === 'followers' && 'Followers Only'}
+            {feedFilter !== 'live' && (
+              <header className="feed-sticky-nav">
+                <div className="feed-title-line">
+                  <div className="feed-main-heading">
+                    {feedFilter === 'feed' && 'Feed'}
+                    {feedFilter === 'all' && 'All Circles'}
+                    {feedFilter === 'close_friends' && 'Close Friends'}
+                    {feedFilter === 'followers' && 'Followers Only'}
+                  </div>
+                  <div className="feed-pulse-indicator" title="Decentralized algorithm synchronized in real time">
+                    <span className="live-green-orb"></span>
+                    <span>Chronological Feed • Synced</span>
+                  </div>
                 </div>
-                <div className="feed-pulse-indicator" title="Decentralized algorithm synchronized in real time">
-                  {feedFilter === 'live' ? (
-                    <>
-                      <span className="live-red-orb"></span>
-                      <span>P2P Encrypted Mesh • 4 Streams Active</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="live-green-orb"></span>
-                      <span>Chronological Algorithm • Synced</span>
-                    </>
-                  )}
+
+                {/* Feed Audience Tabs: 1st Live, 2nd Feed, 3rd All Circles, 4th Close Friends, 5th Followers Only */}
+                <div className="audience-tabs-bar" role="tablist" aria-label="Feed channels">
+                  <button
+                    id="tab-feed-live"
+                    type="button"
+                    role="tab"
+                    aria-selected={false}
+                    className="audience-tab-btn live"
+                    onClick={() => handleSelectFeedTab('live')}
+                  >
+                    <span className="live-tab-radar">
+                      <span className="live-radar-ping"></span>
+                      <span className="live-radar-core"></span>
+                    </span>
+                    <span>Live</span>
+                    <span className="live-badge-count">{liveStreamsList.length}</span>
+                  </button>
+
+                  <button
+                    id="tab-feed-feed"
+                    type="button"
+                    role="tab"
+                    aria-selected={feedFilter === 'feed'}
+                    className={`audience-tab-btn feed ${feedFilter === 'feed' ? 'active' : ''}`}
+                    onClick={() => handleSelectFeedTab('feed')}
+                  >
+                    <IconFeedStream size={13} color="var(--primary-light)" />
+                    <span>Feed</span>
+                  </button>
+
+                  <button
+                    id="tab-feed-all"
+                    type="button"
+                    role="tab"
+                    aria-selected={feedFilter === 'all'}
+                    className={`audience-tab-btn ${feedFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => handleSelectFeedTab('all')}
+                  >
+                    <IconGlobe size={13} color="var(--public-cyan)" />
+                    <span>All Circles</span>
+                  </button>
+
+                  <button
+                    id="tab-feed-close_friends"
+                    type="button"
+                    role="tab"
+                    aria-selected={feedFilter === 'close_friends'}
+                    className={`audience-tab-btn cf ${feedFilter === 'close_friends' ? 'active' : ''}`}
+                    onClick={() => handleSelectFeedTab('close_friends')}
+                  >
+                    <IconStarCloseFriends size={13} color="var(--cf-emerald)" />
+                    <span>Close Friends</span>
+                  </button>
+
+                  <button
+                    id="tab-feed-followers"
+                    type="button"
+                    role="tab"
+                    aria-selected={feedFilter === 'followers'}
+                    className={`audience-tab-btn followers ${feedFilter === 'followers' ? 'active' : ''}`}
+                    onClick={() => handleSelectFeedTab('followers')}
+                  >
+                    <IconUsers size={14} color="var(--followers-iris)" />
+                    <span>Followers Only</span>
+                  </button>
                 </div>
-              </div>
-
-              {/* Feed Audience Tabs: 1st Live, 2nd Feed, 3rd All Circles, 4th Close Friends, 5th Followers Only */}
-              <div className="audience-tabs-bar" role="tablist" aria-label="Feed channels">
-                <button
-                  id="tab-feed-live"
-                  type="button"
-                  role="tab"
-                  aria-selected={feedFilter === 'live'}
-                  className={`audience-tab-btn live ${feedFilter === 'live' ? 'active' : ''}`}
-                  onClick={() => handleSelectFeedTab('live')}
-                >
-                  <span className="live-tab-radar">
-                    <span className="live-radar-ping"></span>
-                    <span className="live-radar-core"></span>
-                  </span>
-                  <span>Live</span>
-                  <span className="live-badge-count">{liveStreamsList.length}</span>
-                </button>
-
-                <button
-                  id="tab-feed-feed"
-                  type="button"
-                  role="tab"
-                  aria-selected={feedFilter === 'feed'}
-                  className={`audience-tab-btn feed ${feedFilter === 'feed' ? 'active' : ''}`}
-                  onClick={() => handleSelectFeedTab('feed')}
-                >
-                  <IconFeedStream size={13} color="var(--primary-light)" />
-                  <span>Feed</span>
-                </button>
-
-                <button
-                  id="tab-feed-all"
-                  type="button"
-                  role="tab"
-                  aria-selected={feedFilter === 'all'}
-                  className={`audience-tab-btn ${feedFilter === 'all' ? 'active' : ''}`}
-                  onClick={() => handleSelectFeedTab('all')}
-                >
-                  <IconGlobe size={13} color="var(--public-cyan)" />
-                  <span>All Circles</span>
-                </button>
-
-                <button
-                  id="tab-feed-close_friends"
-                  type="button"
-                  role="tab"
-                  aria-selected={feedFilter === 'close_friends'}
-                  className={`audience-tab-btn cf ${feedFilter === 'close_friends' ? 'active' : ''}`}
-                  onClick={() => handleSelectFeedTab('close_friends')}
-                >
-                  <IconStarCloseFriends size={13} color="var(--cf-emerald)" />
-                  <span>Close Friends</span>
-                </button>
-
-                <button
-                  id="tab-feed-followers"
-                  type="button"
-                  role="tab"
-                  aria-selected={feedFilter === 'followers'}
-                  className={`audience-tab-btn followers ${feedFilter === 'followers' ? 'active' : ''}`}
-                  onClick={() => handleSelectFeedTab('followers')}
-                >
-                  <IconUsers size={14} color="var(--followers-iris)" />
-                  <span>Followers Only</span>
-                </button>
-              </div>
-            </header>
+              </header>
+            )}
 
             {/* LIVE BROADCASTS FULL-SCREEN ARENA WHEN LIVE TAB IS SELECTED */}
             {feedFilter === 'live' ? (() => {
@@ -4476,43 +4558,40 @@ export function App() {
               const hostPct = battleTotal > 0 ? Math.min(88, Math.max(12, (battleScoreHost / battleTotal) * 100)) : 50;
 
               return (
-                <div className={`fullscreen-live-arena ${fullScreenLive ? 'expanded-fullscreen' : ''}`}>
-                  {/* STREAM SWITCHER QUICK PILLS BAR */}
-                  <div className="live-stream-switcher-row">
-                    <div className="live-stream-switcher-label">
-                      <span className="live-radar-core small"></span>
-                      <span>ACTIVE FEEDS:</span>
+                <div className="fullscreen-live-arena">
+                  {/* MAIN LIVE VIDEO VIEWPORT WITH VERTICAL SLIDING SPEEDWAY */}
+                  <div
+                    className={`live-feed-viewport ${liveSlideDirection ? `live-slide-${liveSlideDirection}` : ''}`}
+                    onWheel={handleLiveWheel}
+                    onTouchStart={handleLiveTouchStart}
+                    onTouchEnd={handleLiveTouchEnd}
+                    onDoubleClick={() => handleLiveHeartBurst()}
+                  >
+                    {/* FLOATING CHANNELS PILL AT TOP CENTER */}
+                    <div className="live-floating-top-tabs">
+                      <button
+                        type="button"
+                        className="live-top-tab active"
+                        onClick={() => handleSelectFeedTab('live')}
+                      >
+                        <span className="live-radar-core small"></span> Live
+                      </button>
+                      <button
+                        type="button"
+                        className="live-top-tab"
+                        onClick={() => handleSelectFeedTab('feed')}
+                      >
+                        Feed
+                      </button>
+                      <button
+                        type="button"
+                        className="live-top-tab"
+                        onClick={() => handleSelectFeedTab('all')}
+                      >
+                        All Circles
+                      </button>
                     </div>
-                    <div className="live-stream-pills-list">
-                      {liveStreamsList.map((stream, idx) => (
-                        <button
-                          key={stream.id}
-                          type="button"
-                          className={`live-switcher-pill ${activeLiveIndex === idx ? 'active' : ''}`}
-                          onClick={() => {
-                            setActiveLiveIndex(idx);
-                            setBattleScoreHost(stream.battleInfo.hostScore);
-                            setBattleScoreOpponent(stream.battleInfo.opponentScore);
-                          }}
-                        >
-                          <img src={stream.creatorAvatar} alt={stream.creatorName} className="live-switcher-avatar" />
-                          <span>{stream.creatorName.split(' ')[0]}</span>
-                          <span className="live-switcher-viewers">{stream.viewersCount}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      className="live-go-live-quick-btn"
-                      onClick={handleStartGoLive}
-                      title="Broadcast Live Now"
-                    >
-                      + Go Live
-                    </button>
-                  </div>
 
-                  {/* MAIN LIVE VIDEO VIEWPORT */}
-                  <div className="live-feed-viewport" onDoubleClick={() => handleLiveHeartBurst()}>
                     {/* 1. TOP LIVE HEADER (OVERLAY) */}
                     <div className="live-arena-top-bar">
                       <div className="live-arena-host-pill">
@@ -4524,12 +4603,20 @@ export function App() {
                             onClick={() => navigateToProfile(currentLive.creatorHandle)}
                           />
                         </div>
-                        <div className="live-host-info" onClick={() => navigateToProfile(currentLive.creatorHandle)}>
-                          <div className="live-host-name-row">
+                        <div className="live-host-info">
+                          <div
+                            className="live-host-name-row clickable"
+                            onClick={() => navigateToProfile(currentLive.creatorHandle)}
+                            title="View Creator Profile"
+                          >
                             <span className="live-host-name">{currentLive.creatorName}</span>
                             {currentLive.isVerified && <IconVerifiedStar size={12} />}
                           </div>
-                          <div className="live-host-likes">
+                          <div
+                            className="live-host-likes clickable"
+                            onClick={() => setIsLikesLeaderboardOpen(true)}
+                            title="Tap to view Top Likers Leaderboard"
+                          >
                             ♥ {currentLikes.toLocaleString()}
                           </div>
                         </div>
@@ -4539,7 +4626,7 @@ export function App() {
                           className={`live-follow-action-btn ${isFollowing ? 'following' : ''}`}
                           onClick={() => handleToggleFollowLiveHost(currentLive.creatorHandle)}
                         >
-                          {isFollowing ? '✓' : '+ Follow'}
+                          {isFollowing ? '✓ Following' : '+ Join'}
                         </button>
                       </div>
 
@@ -4563,11 +4650,11 @@ export function App() {
 
                         <button
                           type="button"
-                          className="live-fullscreen-toggle-btn"
-                          onClick={() => setFullScreenLive((prev) => !prev)}
-                          title={fullScreenLive ? "Exit Fullscreen" : "Go Fullscreen"}
+                          className="live-close-btn"
+                          onClick={() => setFeedFilter('feed')}
+                          title="Exit Live & Return to Feed"
                         >
-                          <IconMaximize size={16} />
+                          ✕
                         </button>
                       </div>
                     </div>
@@ -4577,9 +4664,11 @@ export function App() {
                       <div className="live-ranking-badge">
                         <span>{currentLive.dailyRank}</span>
                       </div>
-                      <div className="live-sparks-balance-chip" onClick={() => setIsGiftTrayOpen(true)}>
-                        <IconZap size={12} color="#f59e0b" />
-                        <span>{userSparksBalance.toLocaleString()} Sparks</span>
+                      <div className="live-gift-goal-pill" onClick={() => setIsGiftTrayOpen(true)} title="Task Goal">
+                        <span>🎁 0/1</span>
+                      </div>
+                      <div className="live-gallery-pill" onClick={() => setIsGiftTrayOpen(true)} title="Open Gift Gallery">
+                        <span>Gift Gallery... 🎟️</span>
                       </div>
                       <div className="live-mode-toggle-group">
                         <button
@@ -4608,6 +4697,14 @@ export function App() {
                         >
                           <IconUser size={12} />
                           <span>Solo</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="live-mode-chip go-live-sub"
+                          onClick={handleStartGoLive}
+                          title="Broadcast Live Now"
+                        >
+                          <span>+ Go Live</span>
                         </button>
                       </div>
                     </div>
@@ -4709,7 +4806,7 @@ export function App() {
                               className={`guest-box-cell ${guest.role === 'Host' ? 'is-host' : ''} ${guest.role === 'Join' ? 'is-empty-chair' : ''}`}
                               onClick={() => {
                                 if (guest.role === 'Join') {
-                                  triggerToast('Requested to take guest chair in this live mesh room! 💺');
+                                  triggerToast('Requested to take guest chair in this live room! 💺');
                                 }
                               }}
                             >
@@ -4810,7 +4907,7 @@ export function App() {
                         <input
                           type="text"
                           className="live-comment-input-field"
-                          placeholder="Type a thoughtful comment..."
+                          placeholder="Type..."
                           value={liveChatInput}
                           onChange={(e) => setLiveChatInput(e.target.value)}
                         />
@@ -4915,6 +5012,84 @@ export function App() {
                             >
                               <span>Throw {LIVE_GIFTS_CATALOG.find((item) => item.id === selectedGiftId)?.name || 'Gift'}</span>
                               <span>{LIVE_GIFTS_CATALOG.find((item) => item.id === selectedGiftId)?.icon}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {/* 9. FLOATING VERTICAL SLIDER ON RIGHT SIDE */}
+                    <div className="live-vertical-nav-pill">
+                      <button
+                        type="button"
+                        className="live-nav-arrow-btn"
+                        onClick={handlePrevLiveStream}
+                        title="Slide Up / Previous Creator"
+                      >
+                        ▲
+                      </button>
+                      <span className="live-nav-indicator-text">{activeLiveIndex + 1}/{liveStreamsList.length}</span>
+                      <button
+                        type="button"
+                        className="live-nav-arrow-btn"
+                        onClick={handleNextLiveStream}
+                        title="Slide Down / Next Creator"
+                      >
+                        ▼
+                      </button>
+                    </div>
+
+                    {/* 10. TOP LIKERS & CONTRIBUTORS LEADERBOARD MODAL */}
+                    {isLikesLeaderboardOpen && (
+                      <div className="live-likes-modal-overlay" onClick={() => setIsLikesLeaderboardOpen(false)}>
+                        <div className="live-likes-modal-card" onClick={(e) => e.stopPropagation()}>
+                          <div className="likes-modal-header">
+                            <div className="likes-modal-host-row">
+                              <img src={currentLive.creatorAvatar} alt={currentLive.creatorName} className="likes-modal-host-avatar" />
+                              <div>
+                                <div className="likes-modal-host-name">{currentLive.creatorName}</div>
+                                <div className="likes-modal-total-likes">♥ {currentLikes.toLocaleString()} total likes received</div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="likes-modal-close-btn"
+                              onClick={() => setIsLikesLeaderboardOpen(false)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          <div className="likes-modal-subtitle">
+                            Top Contributors & Tap Leaderboard
+                          </div>
+
+                          <div className="likes-modal-list">
+                            {likersLeaderboard.map((item, idx) => (
+                              <div key={item.id} className={`liker-rank-row ${item.handle === 'luciano' ? 'is-you' : ''}`}>
+                                <span className={`liker-rank-pos rank-${idx + 1}`}>#{idx + 1}</span>
+                                <img src={item.avatar} alt={item.name} className="liker-avatar" />
+                                <div className="liker-info-col">
+                                  <div className="liker-name-line">
+                                    <span className="liker-name">{item.name}</span>
+                                    <span className="liker-level-chip">💎 {item.level}</span>
+                                    {item.handle === 'luciano' && <span className="liker-you-tag">You</span>}
+                                  </div>
+                                  <span className="liker-badge-text">{item.badge}</span>
+                                </div>
+                                <div className="liker-score-num">
+                                  ♥ {item.likes.toLocaleString()}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="likes-modal-footer">
+                            <button
+                              type="button"
+                              className="btn-give-likes-tap"
+                              onClick={() => handleGiveLikesFromLeaderboard(currentLive.id, currentLikes)}
+                            >
+                              <span>💖 Tap to send +15 Likes</span>
                             </button>
                           </div>
                         </div>
