@@ -48,14 +48,10 @@ import {
   IconSend,
   IconVideo,
   IconFeedStream,
-  IconGift,
-  IconSmile,
 } from './components/Icons';
 import {
   Gift,
   GiftEvent,
-  GiftAnimationPlayer,
-  GiftPickerModal,
   AdminGiftManager,
   globalGiftQueue,
   loadGiftsCatalog,
@@ -63,6 +59,7 @@ import {
 } from './gifts';
 import './gifts/gifts.css';
 import { CameraModal } from './camera';
+import { LiveMeStreamArena } from './components/liveme';
 
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -3080,6 +3077,43 @@ export function App() {
     setFeedFilter('live');
     triggerToast('Broadcast initialized: You are now Live!');
   };
+    void [
+      liveLayoutMode,
+      setLiveLayoutMode,
+      isGiftTrayOpen,
+      battleScoreHost,
+      battleScoreOpponent,
+      battleTimeSeconds,
+      setIsBattleMatchActive,
+      hostLiveLikes,
+      aiLensMode,
+      setAiLensMode,
+      isLiveSoundMuted,
+      setIsLiveSoundMuted,
+      isGloveClashing,
+      screenScoreFloaters,
+      liveComments,
+      floatingHearts,
+      isLikesLeaderboardOpen,
+      setIsLikesLeaderboardOpen,
+      likersLeaderboard,
+      isViewersModalOpen,
+      setIsViewersModalOpen,
+      setLiveViewersSearch,
+      filteredLiveViewers,
+      liveSlideDirection,
+      handleLiveWheel,
+      handleLiveTouchStart,
+      handleLiveTouchEnd,
+      handleGiveLikesFromLeaderboard,
+      formatBattleTime,
+      handleCreatorTap,
+      handleQuickRose,
+      handleToggleFollowLiveHost,
+      handleSendLiveComment,
+      handleStartGoLive,
+    ];
+
 
 
   // User Profile View State & Navigation History Stack (persisted across refreshes)
@@ -4981,714 +5015,20 @@ export function App() {
               </header>
             )}
 
-            {/* LIVE BROADCASTS FULL-SCREEN ARENA WHEN LIVE TAB IS SELECTED */}
-            {feedFilter === 'live' ? (() => {
-              const currentLive = liveStreamsList[activeLiveIndex] || liveStreamsList[0];
-              const isFollowing = !!followedCreators[currentLive.creatorHandle];
-              const currentLikes = (hostLiveLikes[currentLive.id] || currentLive.likesCount);
-              const battleTotal = battleScoreHost + battleScoreOpponent;
-              const hostPct = battleTotal > 0 ? Math.min(88, Math.max(12, (battleScoreHost / battleTotal) * 100)) : 50;
-
-              return (
-                <div className="fullscreen-live-arena">
-                  {/* MAIN LIVE VIDEO VIEWPORT */}
-                  <div
-                    className={`live-feed-viewport ${liveSlideDirection ? `live-slide-${liveSlideDirection}` : ''}`}
-                    onWheel={handleLiveWheel}
-                    onTouchStart={handleLiveTouchStart}
-                    onTouchEnd={handleLiveTouchEnd}
-                    onClick={(e) => {
-                      const target = e.target as HTMLElement | null;
-                      if (target && !target.closest('button, input, textarea, a, .live-arena-chat-overlay, .live-arena-bottom-controls-bar, .live-arena-top-bar, .live-arena-sub-bar, .live-gift-tray-backdrop, .live-likes-modal-overlay, .live-viewers-modal-overlay, .battle-supporters-under-cam-row, .battle-cam-tag, .battle-exact-cam-box')) {
-                        handleLiveHeartBurst(undefined, e.clientX, e.clientY);
-                      }
-                    }}
-                    onDoubleClick={(e) => handleLiveHeartBurst(undefined, e.clientX, e.clientY)}
-                  >
-                    {/* 1. TOP LIVE HEADER (OVERLAY) */}
-                    <div className="live-arena-top-bar">
-                      <div className="live-arena-host-pill">
-                        <div className="live-host-avatar-ring">
-                          <img
-                            src={currentLive.creatorAvatar}
-                            alt={currentLive.creatorName}
-                            className="live-host-avatar-img"
-                            onClick={() => navigateToProfile(currentLive.creatorHandle)}
-                          />
-                        </div>
-                        <div className="live-host-info">
-                          <div
-                            className="live-host-name-row clickable"
-                            onClick={() => navigateToProfile(currentLive.creatorHandle)}
-                            title="View Creator Profile"
-                          >
-                            <span className="live-host-name">{currentLive.creatorName}</span>
-                            {currentLive.isVerified && <IconVerifiedStar size={12} />}
-                          </div>
-                          <div
-                            className="live-host-likes clickable"
-                            onClick={() => setIsLikesLeaderboardOpen(true)}
-                            title="Tap to view Top Likers Leaderboard"
-                          >
-                            ♥ {currentLikes.toLocaleString()}
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          className={`live-follow-action-btn ${isFollowing ? 'following' : ''}`}
-                          onClick={() => handleToggleFollowLiveHost(currentLive.creatorHandle)}
-                        >
-                          {isFollowing ? '✓ Following' : '+ Follow'}
-                        </button>
-                      </div>
-
-                      <div className="live-arena-top-right">
-                        {/* Top Gifters Facepile (Image 3 & 2) */}
-                        <div className="live-top-gifters-pile">
-                          <div className="live-gifter-slot rank-1" title="Top Gifter #1">
-                            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100" alt="Gifter 1" />
-                            <span className="gifter-rank-tag">10+</span>
-                          </div>
-                          <div className="live-gifter-slot rank-2" title="Top Gifter #2">
-                            <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100" alt="Gifter 2" />
-                            <span className="gifter-rank-tag">10+</span>
-                          </div>
-                        </div>
-
-                        {/* Clickable Viewers Count Pill (Opens Full Viewers Audience Modal) */}
-                        <div
-                          className="live-viewers-count-pill clickable"
-                          onClick={() => setIsViewersModalOpen(true)}
-                          title="Click to view all viewers in this live"
-                        >
-                          <IconUser size={12} />
-                          <span>{currentLive.viewersCount.toLocaleString()}</span>
-                          <span className="live-chevron-down">⌄</span>
-                        </div>
-
-                        {/* Native Sound FX Mute Toggle */}
-                        <button
-                          type="button"
-                          className="live-sound-toggle-btn"
-                          onClick={() => {
-                            const next = !isLiveSoundMuted;
-                            setIsLiveSoundMuted(next);
-                            triggerToast(next ? 'Live Audio Muted 🔇' : 'Live Audio Unmuted 🔊');
-                          }}
-                          title={isLiveSoundMuted ? 'Unmute Live Audio' : 'Mute Live Audio'}
-                        >
-                          {isLiveSoundMuted ? '🔇' : '🔊'}
-                        </button>
-
-                        <button
-                          type="button"
-                          className="live-close-btn"
-                          onClick={() => setFeedFilter('feed')}
-                          title="Exit Live & Return to Feed"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* SUB-HEADER: RANKING, AI LENS & GOALS */}
-                    <div className="live-arena-sub-bar">
-                      <div className="live-ranking-badge">
-                        <span>{currentLive.dailyRank}</span>
-                      </div>
-                      <div className="live-gift-goal-pill" onClick={() => setIsGiftTrayOpen(true)} title="Task Goal">
-                        <span>🎯 0/1</span>
-                      </div>
-
-                      {/* Interactive AI Vision Lens Switcher */}
-                      <div
-                        className={`live-ai-lens-pill lens-${aiLensMode}`}
-                        onClick={() => {
-                          const modes: Array<'cyber' | 'elemental' | 'anime' | 'studio'> = ['cyber', 'elemental', 'anime', 'studio'];
-                          const nextIdx = (modes.indexOf(aiLensMode) + 1) % modes.length;
-                          const nextMode = modes[nextIdx];
-                          setAiLensMode(nextMode);
-                          playLiveSoundFX('cheer');
-                          triggerToast(`✨ AI Vision: ${nextMode.toUpperCase()} Filter Activated!`);
-                        }}
-                        title="Tap to cycle AI Video Lens"
-                      >
-                        <span className="ai-lens-sparkle">✨</span>
-                        <span className="ai-lens-label">AI {aiLensMode.toUpperCase()}</span>
-                      </div>
-
-                      <div className="live-gallery-pill" onClick={() => { handleStartGoLive(); triggerToast('Now broadcasting live! 🎥'); }} title="Go Live as Host">
-                        <span>Get Into Game... 🎟️</span>
-                      </div>
-                    </div>
-
-                    {/* 2. BATTLE PK PROGRESS TUG-OF-WAR BAR (EXACT IMAGE 3) */}
-                    {liveLayoutMode === 'battle' && (
-                      <div className="live-battle-exact-shell">
-                        {/* Dual-color Split Bar: Pink Left vs Cyan Right */}
-                        <div className="live-battle-exact-bar">
-                          <div
-                            className="battle-bar-half host-half"
-                            style={{ width: `${hostPct}%` }}
-                            onClick={(e) => handleCreatorTap('host', e)}
-                            title="Cheer Host"
-                          >
-                            <span className="battle-bar-score host-num">{battleScoreHost.toLocaleString()}</span>
-                          </div>
-                          <div
-                            className={`battle-bar-center-gloves ${isGloveClashing ? 'clash-pulse' : ''}`}
-                            onClick={(e) => handleCreatorTap('host', e)}
-                            title="Tap to Clash!"
-                          >
-                            <span className="battle-gloves-icon">🥊</span>
-                          </div>
-                          <div
-                            className="battle-bar-half rival-half"
-                            style={{ width: `${100 - hostPct}%` }}
-                            onClick={(e) => handleCreatorTap('rival', e)}
-                            title="Cheer Rival"
-                          >
-                            <span className="battle-bar-score rival-num">{battleScoreOpponent.toLocaleString()}</span>
-                          </div>
-                        </div>
-
-                        {/* Sub-row under score bar: Tier pill, Countdown Timer capsule, Tier pill */}
-                        <div className="live-battle-exact-subrow">
-                          <div className="battle-tier-pill host-tier">
-                            <span>💎 B5</span>
-                          </div>
-
-                          <div
-                            className="battle-timer-capsule"
-                            onClick={() => setIsBattleMatchActive((prev) => !prev)}
-                            title={isBattleMatchActive ? 'Pause Battle' : 'Resume Battle'}
-                          >
-                            <span className="battle-timer-gloves">🥊</span>
-                            <span className="battle-timer-digits">{formatBattleTime(battleTimeSeconds)}</span>
-                          </div>
-
-                          <div className="battle-tier-pill rival-tier">
-                            <span>💎 B5</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* GIFTERS CIRCLES UNDER SCORE BAR (EXACT IMAGE 3 - TOP: 142px) */}
-                    {liveLayoutMode === 'battle' && (
-                      <div className="battle-supporters-under-cam-row">
-                        {/* Host Gifters Circles: 3, 2, 1 */}
-                        <div className="supporters-group host-group">
-                          <div className="supporter-avatar-circle rank-3" title="Top Gifter #3">
-                            <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=90" alt="Gifter 3" />
-                            <span className="supporter-rank-chip pink">3</span>
-                          </div>
-                          <div className="supporter-avatar-circle rank-2" title="Top Gifter #2">
-                            <img src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=90" alt="Gifter 2" />
-                            <span className="supporter-rank-chip pink">2</span>
-                          </div>
-                          <div className="supporter-avatar-circle rank-1" title="Top Gifter #1">
-                            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=90" alt="Gifter 1" />
-                            <span className="supporter-rank-chip pink">1</span>
-                          </div>
-                        </div>
-
-                        {/* Rival Gifters Circles: 1, 2, 3 */}
-                        <div className="supporters-group rival-group">
-                          <div className="supporter-avatar-circle rank-1" title="Rival Gifter #1">
-                            <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=90" alt="Rival Gifter 1" />
-                            <span className="supporter-rank-chip cyan">1</span>
-                          </div>
-                          <div className="supporter-avatar-circle rank-2" title="Rival Gifter #2">
-                            <img src="https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=90" alt="Rival Gifter 2" />
-                            <span className="supporter-rank-chip cyan">2</span>
-                          </div>
-                          <div className="supporter-avatar-circle rank-3" title="Rival Gifter #3">
-                            <img src="https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=90" alt="Rival Gifter 3" />
-                            <span className="supporter-rank-chip cyan">3</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 3. DYNAMIC FULL-SCREEN VIDEO STAGE (EDGE-TO-EDGE, NO BLACK SPOTS) */}
-                    <div className={`live-stage-surface mode-${liveLayoutMode} lens-${aiLensMode}`}>
-                      {/* Ambient high-blur backdrop ensuring 0 dead pixels */}
-                      <div
-                        className="live-fullscreen-ambient-backdrop"
-                        style={{ backgroundImage: `url(${currentLive.previewUrl})` }}
-                      />
-
-                      {liveLayoutMode === 'battle' ? (
-                        /* 1v1 MATCH (EXACT IMAGE 3) */
-                        <div className="battle-exact-split-stage">
-                          {/* Left Half: Host Chloe */}
-                          <div
-                            className="battle-exact-cam-box host"
-                            onClick={(e) => handleCreatorTap('host', e)}
-                          >
-                            <video
-                              className="battle-exact-cam-video"
-                              autoPlay
-                              loop
-                              muted
-                              playsInline
-                              poster={currentLive.previewUrl}
-                              src={currentLive.videoStreamUrl || 'https://assets.mixkit.co/videos/preview/mixkit-woman-talking-on-a-video-call-with-her-laptop-42998-large.mp4'}
-                            />
-                            <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="battle-exact-cam-img fallback" />
-                            <div className="battle-exact-cam-overlay" />
-
-                            {/* AI Video Lens Effect: Solar Fire Aura */}
-                            {aiLensMode === 'elemental' && (
-                              <div className="elemental-aura-host">
-                                <div className="elemental-fire-shimmer" />
-                                <div className="elemental-spark-particle p1">🔥</div>
-                                <div className="elemental-spark-particle p2">✨</div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Center Divider Energy Clash Beam */}
-                          <div className={`battle-exact-divider-line ${isGloveClashing ? 'clash-flash' : ''}`}>
-                            <div className="pk-clash-core-beam" />
-                          </div>
-
-                          {/* Right Half: Rival Julian */}
-                          <div
-                            className="battle-exact-cam-box rival"
-                            onClick={(e) => handleCreatorTap('rival', e)}
-                          >
-                            <video
-                              className="battle-exact-cam-video"
-                              autoPlay
-                              loop
-                              muted
-                              playsInline
-                              poster={currentLive.battleInfo.opponentVideoUrl}
-                              src={currentLive.battleInfo.opponentStreamUrl || 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4'}
-                            />
-                            <img src={currentLive.battleInfo.opponentVideoUrl} alt={currentLive.battleInfo.opponentName} className="battle-exact-cam-img fallback" />
-                            <div className="battle-exact-cam-overlay" />
-
-                            {/* AI Video Lens Effect: Glacial Frost Aura */}
-                            {aiLensMode === 'elemental' && (
-                              <div className="elemental-aura-rival">
-                                <div className="elemental-ice-shimmer" />
-                                <div className="elemental-spark-particle p1">❄️</div>
-                                <div className="elemental-spark-particle p2">⚡</div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        /* 4-WAY 2x2 MATCH (EXACT IMAGE 2) */
-                        <div className="fourway-grid-stage">
-                          <div className="fourway-cell cell-1">
-                            <img src={currentLive.previewUrl} alt="Host" className="fourway-cam-img" />
-                            <div className="fourway-tag">
-                              <span>👑 {currentLive.creatorName}</span>
-                            </div>
-                          </div>
-                          <div className="fourway-cell cell-2">
-                            <img src={currentLive.battleInfo.opponentVideoUrl} alt="Alfredoc" className="fourway-cam-img" />
-                            <div className="fourway-tag">
-                              <span className="mic-mute-icon">🔇</span>
-                              <span>{currentLive.battleInfo.opponentName}</span>
-                            </div>
-                          </div>
-                          <div className="fourway-cell cell-3">
-                            <img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=700" alt="Huron" className="fourway-cam-img" />
-                            <div className="fourway-tag">
-                              <span className="mic-mute-icon">🔇</span>
-                              <span>Hurón Ve...</span>
-                            </div>
-                          </div>
-                          <div className="fourway-cell cell-4">
-                            <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=700" alt="Lavo" className="fourway-cam-img" />
-                            <div className="fourway-tag">
-                              <span className="mic-live-icon">🎙️</span>
-                              <span>lavo... ➕</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* AI Anime Speedburst Lines */}
-                      {aiLensMode === 'anime' && <div className="ai-anime-speedlines" />}
-
-                      {/* Studio Anamorphic Flare */}
-                      {aiLensMode === 'studio' && <div className="ai-studio-lens-flare" />}
-
-                      {/* Bottom Scrim ensuring comments are 100% readable over video */}
-                      <div className="live-stage-bottom-scrim" />
-                    </div>
-
-                    {/* CREATOR NAME TAGS ROW (PINNED DIRECTLY ABOVE CHAT STREAM) */}
-                    {liveLayoutMode === 'battle' && (
-                      <div className="battle-cam-footer-tags-row">
-                        <div
-                          className="battle-cam-tag host-tag"
-                          onClick={() => navigateToProfile(currentLive.creatorHandle)}
-                          title="Host Creator"
-                        >
-                          <span>👑 {currentLive.creatorName}</span>
-                        </div>
-
-                        <div
-                          className="battle-cam-tag rival-tag"
-                          onClick={() => triggerToast(`Followed @${currentLive.battleInfo.opponentHandle}! ✨`)}
-                          title={`Follow @${currentLive.battleInfo.opponentHandle}`}
-                        >
-                          <span className="rival-heart">💚</span>
-                          <span className="rival-name">{currentLive.battleInfo.opponentName}</span>
-                          <span className="rival-plus-btn">+</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* INTERACTIVE BOXING GLOVE IMPACT CLASH ANIMATION */}
-                    {isGloveClashing && (
-                      <div className="pk-interactive-glove-clash-modal">
-                        <div className="clash-shockwave-ring" />
-                        <div className="clash-gloves-pair">
-                          <span className="clashing-glove left">🥊</span>
-                          <span className="clashing-spark">💥</span>
-                          <span className="clashing-glove right">🥊</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* FLOATING TAP SCORE FLOATERS */}
-                    {screenScoreFloaters.map((floater) => (
-                      <div
-                        key={floater.id}
-                        className={`screen-score-floater ${floater.side}`}
-                        style={{ left: `${floater.x}px`, top: `${floater.y - 40}px` }}
-                      >
-                        {floater.text}
-                      </div>
-                    ))}
-
-                    {/* PK COMBO STREAK BADGE */}
-                    {pkComboCount >= 3 && (
-                      <div className="pk-combo-streak-badge">
-                        <span>🔥 SPEED COMBO x{pkComboCount}!</span>
-                      </div>
-                    )}
-
-                    {/* PRIVITY ANIMATED VIRTUAL GIFT ENGINE OVERLAY */}
-                    <GiftAnimationPlayer isMuted={isLiveSoundMuted} />
-
-                    {/* 5. FLOATING HEARTS ANIMATION LAYER */}
-                    <div className="live-arena-floating-hearts-layer">
-                      {floatingHearts.map((heart) => (
-                        <div
-                          key={heart.id}
-                          className="floating-heart-particle"
-                          style={{
-                            left: `${heart.x}px`,
-                            top: `${heart.y}px`,
-                            color: heart.color || '#f43f5e',
-                            fontSize: `${heart.size || 26}px`,
-                            ['--rot' as any]: `${heart.rot || 0}deg`,
-                          }}
-                        >
-                          ♥
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* 6. TRANSPARENT OVERLAY LIVE CHAT STREAM (EXACT IMAGE 3 & 2) */}
-                    <div
-                      className="live-arena-chat-overlay"
-                      onTouchStart={(e) => e.stopPropagation()}
-                      onTouchMove={(e) => e.stopPropagation()}
-                      onTouchEnd={(e) => e.stopPropagation()}
-                      onWheel={(e) => e.stopPropagation()}
-                    >
-                      <div
-                        className="live-arena-chat-scroll"
-                        onTouchStart={(e) => e.stopPropagation()}
-                        onTouchMove={(e) => e.stopPropagation()}
-                        onTouchEnd={(e) => e.stopPropagation()}
-                        onWheel={(e) => e.stopPropagation()}
-                      >
-                        {/* System LIVE Match Notice (Image 3) */}
-                        <div className="live-chat-bubble-row system-match-banner">
-                          <span className="system-tiktok-note">🎵</span>
-                          <span className="live-chat-bubble-text">LIVE Match has started! Cheer on your creator, like the match, and send Gifts.</span>
-                        </div>
-
-                        {liveComments.map((c) => (
-                          <div
-                            key={c.id}
-                            className={`live-chat-bubble-row ${c.isJoin ? 'join-notice' : ''} ${c.giftName ? 'gift-notice' : ''}`}
-                          >
-                            {c.isJoin && <span className="join-wave-icon">👋</span>}
-                            {c.level && (
-                              <span className="live-chat-badge-diamond">
-                                💎 {c.level}
-                              </span>
-                            )}
-                            {c.badge && <span className="live-chat-badge-tag">{c.badge}</span>}
-                            <span className="live-chat-author-handle">@{c.user}</span>
-                            <span className="live-chat-bubble-text">{c.text}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 7. FLOATING BOTTOM ACTION CONTROLS BAR (EXACT IMAGE 3 & 2) */}
-                    <div
-                      className="live-arena-bottom-controls-bar"
-                      onTouchStart={(e) => e.stopPropagation()}
-                      onTouchMove={(e) => e.stopPropagation()}
-                      onTouchEnd={(e) => e.stopPropagation()}
-                      onWheel={(e) => e.stopPropagation()}
-                    >
-                      <form onSubmit={handleSendLiveComment} className="live-comment-input-pill">
-                        <input
-                          type="text"
-                          className="live-comment-input-field"
-                          placeholder="Type..."
-                          value={liveChatInput}
-                          onChange={(e) => setLiveChatInput(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="btn-live-input-smile"
-                          onClick={() => handleLiveHeartBurst('#fbbf24')}
-                          title="Add Emote"
-                        >
-                          <IconSmile size={18} />
-                        </button>
-                      </form>
-
-                      {/* Co-host / Layout Toggle (1v1 vs 4-Way) */}
-                      <button
-                        type="button"
-                        className="live-action-icon-circle co-host-btn"
-                        onClick={() => setLiveLayoutMode((prev) => (prev === 'battle' ? '4way' : 'battle'))}
-                        title={liveLayoutMode === 'battle' ? 'Switch to 4-Way Grid' : 'Switch to 1v1 Battle'}
-                      >
-                        <IconUsers size={18} />
-                      </button>
-
-                      {/* Quick Rose */}
-                      <button
-                        type="button"
-                        className="live-action-icon-circle quick-rose"
-                        onClick={handleQuickRose}
-                        title="Throw Rose (1 Spark)"
-                      >
-                        <span className="live-rose-emoji">🌹</span>
-                      </button>
-
-                      {/* Gift Gallery */}
-                      <button
-                        type="button"
-                        className="live-action-icon-circle gift-box"
-                        onClick={() => setIsGiftTrayOpen(true)}
-                        title="Open Gift Gallery"
-                      >
-                        <IconGift size={19} color="#fff" />
-                        <span className="gift-btn-glow"></span>
-                      </button>
-
-                      {/* Share Arrow with Counter */}
-                      <button
-                        type="button"
-                        className="live-action-icon-circle share-btn"
-                        onClick={() => {
-                          navigator.clipboard?.writeText(window.location.href);
-                          triggerToast('Live match link copied! 🔗');
-                        }}
-                        title="Share Match"
-                      >
-                        <IconShare size={15} />
-                        <span className="share-counter-text">4</span>
-                      </button>
-                    </div>
-
-                    {/* 8. ANIMATED VIRTUAL GIFT PICKER & ECONOMY DRAWER */}
-                    <GiftPickerModal
-                      isOpen={isGiftTrayOpen}
-                      onClose={() => setIsGiftTrayOpen(false)}
-                      userCoins={userSparksBalance}
-                      streamerName={currentLive.creatorName}
-                      catalog={giftsCatalog}
-                      onSendGift={handleSendAnimatedGift}
-                      onTopUpCoins={() => {
-                        setUserSparksBalance((prev) => prev + 5000);
-                        triggerToast('Added 5,000 Coins to wallet! 🪙');
-                      }}
-                    />
-
-                    {/* 10. TOP LIKERS & CONTRIBUTORS LEADERBOARD MODAL */}
-                    {isLikesLeaderboardOpen && (
-                      <div className="live-likes-modal-overlay" onClick={() => setIsLikesLeaderboardOpen(false)}>
-                        <div className="live-likes-modal-card" onClick={(e) => e.stopPropagation()}>
-                          <div className="likes-modal-header">
-                            <div className="likes-modal-host-row">
-                              <img src={currentLive.creatorAvatar} alt={currentLive.creatorName} className="likes-modal-host-avatar" />
-                              <div>
-                                <div className="likes-modal-host-name">{currentLive.creatorName}</div>
-                                <div className="likes-modal-total-likes">♥ {currentLikes.toLocaleString()} total likes received</div>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="likes-modal-close-btn"
-                              onClick={() => setIsLikesLeaderboardOpen(false)}
-                            >
-                              ✕
-                            </button>
-                          </div>
-
-                          <div className="likes-modal-subtitle">
-                            Top Contributors & Tap Leaderboard
-                          </div>
-
-                          <div className="likes-modal-list">
-                            {likersLeaderboard.map((item, idx) => (
-                              <div key={item.id} className={`liker-rank-row ${item.handle === 'luciano' ? 'is-you' : ''}`}>
-                                <span className={`liker-rank-pos rank-${idx + 1}`}>#{idx + 1}</span>
-                                <img src={item.avatar} alt={item.name} className="liker-avatar" />
-                                <div className="liker-info-col">
-                                  <div className="liker-name-line">
-                                    <span className="liker-name">{item.name}</span>
-                                    <span className="liker-level-chip">💎 {item.level}</span>
-                                    {item.handle === 'luciano' && <span className="liker-you-tag">You</span>}
-                                  </div>
-                                  <span className="liker-badge-text">{item.badge}</span>
-                                </div>
-                                <div className="liker-score-num">
-                                  ♥ {item.likes.toLocaleString()}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-
-                          <div className="likes-modal-footer">
-                            <button
-                              type="button"
-                              className="btn-give-likes-tap"
-                              onClick={() => handleGiveLikesFromLeaderboard(currentLive.id, currentLikes)}
-                            >
-                              <span>💖 Tap to send +15 Likes</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 11. LIVE VIEWERS AUDIENCE ROSTER MODAL */}
-                    {isViewersModalOpen && (
-                      <div className="live-viewers-modal-overlay" onClick={() => setIsViewersModalOpen(false)}>
-                        <div className="live-viewers-modal-card" onClick={(e) => e.stopPropagation()}>
-                          <div className="viewers-modal-header">
-                            <div className="viewers-modal-title-wrap">
-                              <div className="viewers-modal-title">Live Viewers</div>
-                              <span className="viewers-modal-count-badge">
-                                <IconUser size={12} /> {currentLive.viewersCount.toLocaleString()} watching
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              className="viewers-modal-close-btn"
-                              onClick={() => setIsViewersModalOpen(false)}
-                              title="Close Viewers List"
-                            >
-                              ✕
-                            </button>
-                          </div>
-
-                          <div className="viewers-modal-search-wrap">
-                            <span className="viewers-modal-search-icon">🔍</span>
-                            <input
-                              type="text"
-                              className="viewers-modal-search-input"
-                              placeholder="Search by name, handle, or role..."
-                              value={liveViewersSearch}
-                              onChange={(e) => setLiveViewersSearch(e.target.value)}
-                              autoFocus
-                            />
-                            {liveViewersSearch && (
-                              <button
-                                type="button"
-                                className="viewers-modal-search-clear"
-                                onClick={() => setLiveViewersSearch('')}
-                                title="Clear search"
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="viewers-modal-list">
-                            {filteredLiveViewers.length === 0 ? (
-                              <div className="viewers-empty-state">
-                                <span className="viewers-empty-icon">👥</span>
-                                <p>No viewers found matching "{liveViewersSearch}"</p>
-                              </div>
-                            ) : (
-                              filteredLiveViewers.map((viewer) => {
-                                const isFollowed = !!followedCreators[viewer.handle];
-                                return (
-                                  <div
-                                    key={viewer.id}
-                                    className="viewer-person-row clickable"
-                                    onClick={() => {
-                                      navigateToProfile(viewer.handle);
-                                      setIsViewersModalOpen(false);
-                                    }}
-                                    title={`Click to view @${viewer.handle}'s profile`}
-                                  >
-                                    <div className="viewer-avatar-wrap">
-                                      <img src={viewer.avatar} alt={viewer.name} className="viewer-avatar-img" />
-                                      <span className="viewer-online-dot" />
-                                    </div>
-                                    <div className="viewer-info-col">
-                                      <div className="viewer-name-row">
-                                        <span className="viewer-name-text">{viewer.name}</span>
-                                        {viewer.isVerified && <IconVerifiedStar size={12} />}
-                                        {viewer.level && <span className="viewer-level-chip">💎 {viewer.level}</span>}
-                                      </div>
-                                      <div className="viewer-handle-role-row">
-                                        <span className="viewer-handle-text">@{viewer.handle}</span>
-                                        <span className="viewer-bullet-sep">•</span>
-                                        <span className="viewer-role-badge">{viewer.role}</span>
-                                      </div>
-                                    </div>
-                                    <div className="viewer-actions-col" onClick={(e) => e.stopPropagation()}>
-                                      <button
-                                        type="button"
-                                        className={`btn-viewer-follow-toggle ${isFollowed ? 'is-followed' : ''}`}
-                                        onClick={() => {
-                                          handleToggleFollowLiveHost(viewer.handle);
-                                        }}
-                                      >
-                                        {isFollowed ? 'Following' : '+ Follow'}
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            )}
-                          </div>
-
-                          <div className="viewers-modal-footer">
-                            <span className="viewers-footer-hint">💡 Tap any viewer to open their full profile</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })() : (
+            {/* LIVE BROADCASTS 100% FAITHFUL LIVEME STREAM ARENA & HOT CATALOG */}
+            {feedFilter === 'live' ? (
+              <LiveMeStreamArena
+                onClose={() => setFeedFilter('feed')}
+                currentUser={{
+                  name: myProfile.name,
+                  handle: myProfile.handle,
+                  avatar: myProfile.avatar,
+                }}
+                userCoins={userSparksBalance}
+                onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
+                showToast={triggerToast}
+              />
+            ) : (
               <>
 
             {/* Circles & Stories Rail */}
@@ -8404,151 +7744,20 @@ export function App() {
       {/* 4. MODALS & LIGHTBOXES                                   */}
       {/* ======================================================== */}
 
-      {/* INTERACTIVE LIVE BROADCAST MODAL — VISIONOS FROSTED STAGE */}
+      {/* 100% FAITHFUL LIVEME STREAM ARENA REPLICATION */}
       {activeLiveStream && (
-        <div
-          className="live-modal-backdrop"
-          onClick={() => setActiveLiveStream(null)}
-        >
-          <div
-            className="live-stream-modal-window"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Live Modal Top Bar */}
-            <div className="live-modal-top-bar">
-              <div className="live-modal-author-group">
-                <img
-                  src={activeLiveStream.creatorAvatar}
-                  alt={activeLiveStream.creatorName}
-                  className="live-modal-creator-avatar"
-                />
-                <div className="live-modal-creator-meta">
-                  <div className="live-modal-creator-name-row">
-                    <span className="live-modal-creator-name">{activeLiveStream.creatorName}</span>
-                    {activeLiveStream.isVerified && <IconVerifiedStar size={13} />}
-                    <span className="live-badge-red small">
-                      <span className="live-radar-core small"></span>
-                      LIVE
-                    </span>
-                  </div>
-                  <div className="live-modal-stream-topic">
-                    @{activeLiveStream.creatorHandle} · {activeLiveStream.category}
-                  </div>
-                </div>
-              </div>
-
-              <div className="live-modal-top-actions">
-                <div className="live-modal-viewers-pill">
-                  <IconUser size={13} />
-                  <span>{activeLiveStream.viewersCount.toLocaleString()} watching</span>
-                </div>
-                <button
-                  type="button"
-                  className="live-modal-close-btn"
-                  onClick={() => setActiveLiveStream(null)}
-                  title="Close Live Stream"
-                >
-                  <IconX size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* Video Canvas & Floating Hearts Stage */}
-            <div className="live-modal-main-stage">
-              <div className="live-video-screen">
-                <img
-                  src={activeLiveStream.previewUrl}
-                  alt={activeLiveStream.title}
-                  className="live-video-media-feed"
-                />
-                <div className="live-video-overlay-gradient"></div>
-                {/* PRIVITY ANIMATED VIRTUAL GIFT ENGINE OVERLAY */}
-                <GiftAnimationPlayer isMuted={isLiveSoundMuted} />
-
-                {/* Floating Heart Bursts Layer */}
-                <div className="live-floating-hearts-layer">
-                  {floatingHearts.map((heart) => (
-                    <div
-                      key={heart.id}
-                      className="floating-heart-burst"
-                      style={{
-                        left: `${heart.x}px`,
-                        top: `${heart.y}px`,
-                        color: heart.color || '#f43f5e',
-                      }}
-                    >
-                      <IconHeart size={28} color={heart.color || '#f43f5e'} filled />
-                    </div>
-                  ))}
-                </div>
-
-                {/* Stream Info Overlay */}
-                <div className="live-stream-overlay-title-card">
-                  <h3 className="live-stream-overlay-h3">{activeLiveStream.title}</h3>
-                  <div className="live-stream-overlay-tags">
-                    {activeLiveStream.tags.map((tag) => (
-                      <span key={tag} className="live-overlay-tag">#{tag}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Live Chat & Interaction Column */}
-              <div className="live-chat-panel">
-                <div className="live-chat-header">
-                  <div className="live-chat-title">
-                    <IconChat size={14} />
-                    <span>Real-Time Circle Chat</span>
-                  </div>
-                  <span className="live-chat-badge">Ed25519 Encrypted</span>
-                </div>
-
-                <div className="live-chat-messages-box">
-                  {liveComments.map((msg) => (
-                    <div key={msg.id} className="live-chat-msg-row">
-                      <span className="live-chat-user-handle">@{msg.user}:</span>
-                      <span className="live-chat-text-bubble">{msg.text}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <form onSubmit={handleSendLiveComment} className="live-chat-input-bar">
-                  <input
-                    type="text"
-                    className="live-chat-input-field"
-                    placeholder="Say something to the circle..."
-                    value={liveChatInput}
-                    onChange={(e) => setLiveChatInput(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="live-heart-reaction-btn"
-                    onClick={() => setIsGiftTrayOpen(true)}
-                    title="Send Virtual Gift"
-                  >
-                    <IconGift size={18} color="#fbbf24" />
-                  </button>
-                  <button
-                    type="button"
-                    className="live-heart-reaction-btn"
-                    onClick={() => handleLiveHeartBurst()}
-                    title="Send Heart Reaction"
-                  >
-                    <IconHeart size={18} color="#f43f5e" filled />
-                  </button>
-                  <button
-                    type="submit"
-                    className="live-send-comment-btn"
-                    disabled={!liveChatInput.trim()}
-                    title="Send Comment"
-                  >
-                    <IconSend size={15} />
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
+        <LiveMeStreamArena
+          initialStreamerId={activeLiveStream.id}
+          onClose={() => setActiveLiveStream(null)}
+          currentUser={{
+            name: myProfile.name,
+            handle: myProfile.handle,
+            avatar: myProfile.avatar,
+          }}
+          userCoins={userSparksBalance}
+          onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
+          showToast={triggerToast}
+        />
       )}
 
       {/* LIGHTBOX FOR FULLSCREEN MEDIA — APPLE VISIONOS SPECULAR GLASS */}
