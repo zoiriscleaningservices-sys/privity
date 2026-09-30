@@ -49,7 +49,6 @@ import {
   IconVideo,
   IconFeedStream,
   IconGift,
-  IconSwords,
   IconZap,
   IconSmile,
 } from './components/Icons';
@@ -1301,7 +1300,7 @@ export function App() {
   const [feedFilter, setFeedFilter] = useState<FeedFilterTab>('feed');
   const [liveStreamsList, setLiveStreamsList] = useState<LiveStreamSession[]>(INITIAL_LIVE_STREAMS);
   const [activeLiveIndex, setActiveLiveIndex] = useState(0);
-  const [liveLayoutMode, setLiveLayoutMode] = useState<'battle' | 'multiguest' | 'solo'>('battle');
+  const [liveLayoutMode, setLiveLayoutMode] = useState<'battle' | '4way'>('battle');
   const [isGiftTrayOpen, setIsGiftTrayOpen] = useState(false);
   const [selectedGiftId, setSelectedGiftId] = useState<string>('gift-rocket');
   const [userSparksBalance, setUserSparksBalance] = useState(2450);
@@ -4291,7 +4290,7 @@ export function App() {
             </button>
           </div>
         </header>
-      ) : (
+      ) : activeTab === 'feed' && feedFilter === 'live' ? null : (
         <header className="mobile-top-header">
           <div className="mobile-header-left" onClick={() => { setActiveTab('feed'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
             <div className="brand-emblem-box" style={{ width: '36px', height: '36px', borderRadius: '10px' }}>
@@ -4559,7 +4558,7 @@ export function App() {
 
               return (
                 <div className="fullscreen-live-arena">
-                  {/* MAIN LIVE VIDEO VIEWPORT WITH VERTICAL SLIDING SPEEDWAY */}
+                  {/* MAIN LIVE VIDEO VIEWPORT */}
                   <div
                     className={`live-feed-viewport ${liveSlideDirection ? `live-slide-${liveSlideDirection}` : ''}`}
                     onWheel={handleLiveWheel}
@@ -4567,31 +4566,6 @@ export function App() {
                     onTouchEnd={handleLiveTouchEnd}
                     onDoubleClick={() => handleLiveHeartBurst()}
                   >
-                    {/* FLOATING CHANNELS PILL AT TOP CENTER */}
-                    <div className="live-floating-top-tabs">
-                      <button
-                        type="button"
-                        className="live-top-tab active"
-                        onClick={() => handleSelectFeedTab('live')}
-                      >
-                        <span className="live-radar-core small"></span> Live
-                      </button>
-                      <button
-                        type="button"
-                        className="live-top-tab"
-                        onClick={() => handleSelectFeedTab('feed')}
-                      >
-                        Feed
-                      </button>
-                      <button
-                        type="button"
-                        className="live-top-tab"
-                        onClick={() => handleSelectFeedTab('all')}
-                      >
-                        All Circles
-                      </button>
-                    </div>
-
                     {/* 1. TOP LIVE HEADER (OVERLAY) */}
                     <div className="live-arena-top-bar">
                       <div className="live-arena-host-pill">
@@ -4626,26 +4600,27 @@ export function App() {
                           className={`live-follow-action-btn ${isFollowing ? 'following' : ''}`}
                           onClick={() => handleToggleFollowLiveHost(currentLive.creatorHandle)}
                         >
-                          {isFollowing ? '✓ Following' : '+ Join'}
+                          {isFollowing ? '✓ Following' : '+ Follow'}
                         </button>
                       </div>
 
                       <div className="live-arena-top-right">
-                        {/* Top Gifters Facepile */}
+                        {/* Top Gifters Facepile (Image 3 & 2) */}
                         <div className="live-top-gifters-pile">
                           <div className="live-gifter-slot rank-1" title="Top Gifter #1">
                             <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100" alt="Gifter 1" />
-                            <span className="gifter-rank-tag">1</span>
+                            <span className="gifter-rank-tag">10+</span>
                           </div>
                           <div className="live-gifter-slot rank-2" title="Top Gifter #2">
                             <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100" alt="Gifter 2" />
-                            <span className="gifter-rank-tag">2</span>
+                            <span className="gifter-rank-tag">10+</span>
                           </div>
                         </div>
 
-                        <div className="live-viewers-count-pill">
+                        <div className="live-viewers-count-pill" title="Current Viewers">
                           <IconUser size={12} />
                           <span>{currentLive.viewersCount.toLocaleString()}</span>
+                          <span className="live-chevron-down">⌄</span>
                         </div>
 
                         <button
@@ -4659,189 +4634,165 @@ export function App() {
                       </div>
                     </div>
 
-                    {/* SUB-HEADER: RANKING & Sparks */}
+                    {/* SUB-HEADER: RANKING & GIFT GOALS (IMAGE 3) */}
                     <div className="live-arena-sub-bar">
                       <div className="live-ranking-badge">
                         <span>{currentLive.dailyRank}</span>
                       </div>
                       <div className="live-gift-goal-pill" onClick={() => setIsGiftTrayOpen(true)} title="Task Goal">
-                        <span>🎁 0/1</span>
+                        <span>🎯 0/1</span>
                       </div>
-                      <div className="live-gallery-pill" onClick={() => setIsGiftTrayOpen(true)} title="Open Gift Gallery">
-                        <span>Gift Gallery... 🎟️</span>
-                      </div>
-                      <div className="live-mode-toggle-group">
-                        <button
-                          type="button"
-                          className={`live-mode-chip ${liveLayoutMode === 'battle' ? 'active' : ''}`}
-                          onClick={() => setLiveLayoutMode('battle')}
-                          title="Switch to 1v1 Battle PK Mode"
-                        >
-                          <IconSwords size={12} />
-                          <span>Battle</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`live-mode-chip ${liveLayoutMode === 'multiguest' ? 'active' : ''}`}
-                          onClick={() => setLiveLayoutMode('multiguest')}
-                          title="Switch to 9-Box Multi-Guest Panel"
-                        >
-                          <IconUsers size={12} />
-                          <span>9-Guest</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`live-mode-chip ${liveLayoutMode === 'solo' ? 'active' : ''}`}
-                          onClick={() => setLiveLayoutMode('solo')}
-                          title="Switch to Solo Live View"
-                        >
-                          <IconUser size={12} />
-                          <span>Solo</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="live-mode-chip go-live-sub"
-                          onClick={handleStartGoLive}
-                          title="Broadcast Live Now"
-                        >
-                          <span>+ Go Live</span>
-                        </button>
+                      <div className="live-gallery-pill" onClick={() => { handleStartGoLive(); triggerToast('Now broadcasting live! 🎥'); }} title="Go Live as Host">
+                        <span>Get Into Game... 🎟️</span>
                       </div>
                     </div>
 
-                    {/* 2. BATTLE PK PROGRESS TUG-OF-WAR BAR (WHEN BATTLE MODE) */}
+                    {/* 2. BATTLE PK PROGRESS TUG-OF-WAR BAR (EXACT IMAGE 3) */}
                     {liveLayoutMode === 'battle' && (
-                      <div className="live-battle-score-bar-shell">
-                        <div className="live-battle-scores-row">
-                          <div className="live-battle-host-score">
-                            <span className="live-battle-rank-badge host">1st</span>
-                            <span className="live-battle-pts">{battleScoreHost.toLocaleString()} pts</span>
-                          </div>
-
+                      <div className="live-battle-exact-shell">
+                        {/* Dual-color Split Bar: Pink Left vs Cyan Right */}
+                        <div className="live-battle-exact-bar">
                           <div
-                            className="live-battle-center-tag"
-                            onClick={() => setIsBattleMatchActive((prev) => !prev)}
-                            style={{ cursor: 'pointer' }}
-                            title={isBattleMatchActive ? 'Click to Pause Battle' : 'Click to Resume Battle'}
+                            className="battle-bar-half host-half"
+                            style={{ width: `${hostPct}%` }}
                           >
-                            <span className="live-battle-pk-icon">{isBattleMatchActive ? '🥊 LIVE PK' : '⏸️ PAUSED'}</span>
-                            <span className="live-battle-countdown">⏱️ {formatBattleTime(battleTimeSeconds)}</span>
+                            <span className="battle-bar-score host-num">{battleScoreHost.toLocaleString()}</span>
                           </div>
-
-                          <div className="live-battle-opponent-score">
-                            <span className="live-battle-pts">{battleScoreOpponent.toLocaleString()} pts</span>
-                            <span className="live-battle-rank-badge opponent">2nd</span>
+                          <div className="battle-bar-center-gloves">
+                            <span className="battle-gloves-icon">🥊</span>
+                          </div>
+                          <div
+                            className="battle-bar-half rival-half"
+                            style={{ width: `${100 - hostPct}%` }}
+                          >
+                            <span className="battle-bar-score rival-num">{battleScoreOpponent.toLocaleString()}</span>
                           </div>
                         </div>
 
-                        {/* Animated Tug-of-war Bar */}
-                        <div className="live-battle-tug-bar">
+                        {/* Sub-row under score bar: Tier pill, Countdown Timer capsule, Tier pill */}
+                        <div className="live-battle-exact-subrow">
+                          <div className="battle-tier-pill host-tier">
+                            <span>💎 B5</span>
+                          </div>
+
                           <div
-                            className="live-battle-bar-host"
-                            style={{ width: `${hostPct}%` }}
-                          ></div>
-                          <div className="live-battle-divider-spark"></div>
-                          <div
-                            className="live-battle-bar-opponent"
-                            style={{ width: `${100 - hostPct}%` }}
-                          ></div>
+                            className="battle-timer-capsule"
+                            onClick={() => setIsBattleMatchActive((prev) => !prev)}
+                            title={isBattleMatchActive ? 'Pause Battle' : 'Resume Battle'}
+                          >
+                            <span className="battle-timer-gloves">🥊</span>
+                            <span className="battle-timer-digits">{formatBattleTime(battleTimeSeconds)}</span>
+                          </div>
+
+                          <div className="battle-tier-pill rival-tier">
+                            <span>💎 B5</span>
+                          </div>
                         </div>
                       </div>
                     )}
 
-                    {/* 3. DYNAMIC STAGE CONTENT ACCORDING TO MODE */}
-                    <div className="live-stage-surface">
-                      {/* --- A. BATTLE PK SPLIT-SCREEN LAYOUT --- */}
-                      {liveLayoutMode === 'battle' && (
-                        <div className="battle-split-stage">
-                          {/* Left Panel: Host Creator */}
-                          <div className="battle-panel host-side">
-                            <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="battle-camera-feed" />
-                            <div className="battle-cam-overlay-gradient"></div>
-                            <div className="battle-cam-badge-top">
-                              <span className="battle-side-tag host">HOST · 1st</span>
-                              <span className="battle-audio-wave"><span /><span /><span /></span>
-                            </div>
-                            <div className="battle-cam-footer">
-                              <span className="battle-creator-label">@{currentLive.creatorHandle}</span>
+                    {/* 3. DYNAMIC VIDEO STAGE */}
+                    <div className={`live-stage-surface mode-${liveLayoutMode}`}>
+                      {liveLayoutMode === 'battle' ? (
+                        /* 1v1 MATCH (EXACT IMAGE 3) */
+                        <div className="battle-exact-split-stage">
+                          {/* Left Half: Host */}
+                          <div className="battle-exact-cam-box host">
+                            <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="battle-exact-cam-img" />
+                            <div className="battle-exact-cam-overlay" />
+                            <div className="battle-cam-tag host-tag">
+                              <span>👑 {currentLive.creatorName}</span>
                             </div>
                           </div>
 
-                          {/* Right Panel: Opponent / Co-Hosts */}
-                          <div className="battle-panel opponent-side">
-                            <div className="battle-opponent-main">
-                              <img src={currentLive.battleInfo.opponentVideoUrl} alt={currentLive.battleInfo.opponentName} className="battle-camera-feed" />
-                              <div className="battle-cam-overlay-gradient"></div>
-                              <div className="battle-cam-badge-top">
-                                <span className="battle-side-tag opponent">RIVAL · 2nd</span>
-                              </div>
-                              <div className="battle-cam-footer">
-                                <span className="battle-creator-label">@{currentLive.battleInfo.opponentHandle}</span>
-                              </div>
-                            </div>
+                          {/* Center Divider Line */}
+                          <div className="battle-exact-divider-line" />
 
-                            {/* 3-Way Co-Host Panel if available */}
-                            {currentLive.battleInfo.coHostVideoUrl && (
-                              <div className="battle-opponent-sub">
-                                <img src={currentLive.battleInfo.coHostVideoUrl} alt="Co-Host" className="battle-camera-feed" />
-                                <div className="battle-cam-overlay-gradient"></div>
-                                <div className="battle-cam-badge-top">
-                                  <span className="battle-side-tag cohost">3rd</span>
-                                </div>
-                                <div className="battle-cam-footer">
-                                  <span className="battle-creator-label">@{currentLive.battleInfo.coHostName}</span>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* --- B. 9-GUEST BOXES MULTI-ROOM LAYOUT --- */}
-                      {liveLayoutMode === 'multiguest' && (
-                        <div className="multiguest-9box-grid">
-                          {currentLive.multiGuests.map((guest) => (
+                          {/* Right Half: Rival */}
+                          <div className="battle-exact-cam-box rival">
+                            <img src={currentLive.battleInfo.opponentVideoUrl} alt={currentLive.battleInfo.opponentName} className="battle-exact-cam-img" />
+                            <div className="battle-exact-cam-overlay" />
                             <div
-                              key={guest.id}
-                              className={`guest-box-cell ${guest.role === 'Host' ? 'is-host' : ''} ${guest.role === 'Join' ? 'is-empty-chair' : ''}`}
-                              onClick={() => {
-                                if (guest.role === 'Join') {
-                                  triggerToast('Requested to take guest chair in this live room! 💺');
-                                }
-                              }}
+                              className="battle-cam-tag rival-tag"
+                              onClick={() => triggerToast(`Followed @${currentLive.battleInfo.opponentHandle}! ✨`)}
+                              title={`Follow @${currentLive.battleInfo.opponentHandle}`}
                             >
-                              <div className="guest-box-avatar-wrap">
-                                <img src={guest.avatar} alt={guest.name} className="guest-box-img" />
-                                {guest.isSpeaking && <div className="guest-speaking-ring"></div>}
-                              </div>
-                              <div className="guest-box-meta">
-                                <span className="guest-box-name">{guest.flag || ''} {guest.name}</span>
-                                <span className="guest-box-viewers">{guest.viewers}</span>
-                              </div>
-                              {guest.role === 'Join' && (
-                                <div className="guest-join-hover-badge">+ Take Seat</div>
-                              )}
+                              <span className="rival-heart">💚</span>
+                              <span className="rival-name">{currentLive.battleInfo.opponentName}</span>
+                              <span className="rival-plus-btn">+</span>
                             </div>
-                          ))}
+                          </div>
                         </div>
-                      )}
-
-                      {/* --- C. SOLO CREATOR FULLSCREEN LAYOUT --- */}
-                      {liveLayoutMode === 'solo' && (
-                        <div className="solo-creator-stage">
-                          <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="solo-camera-feed" />
-                          <div className="solo-cam-overlay-gradient"></div>
-                          <div className="solo-stage-topic-card">
-                            <h3 className="solo-stage-title">{currentLive.title}</h3>
-                            <div className="solo-stage-tags">
-                              {currentLive.tags.map((t) => (
-                                <span key={t} className="solo-tag-pill">#{t}</span>
-                              ))}
+                      ) : (
+                        /* 4-WAY 2x2 MATCH (EXACT IMAGE 2) */
+                        <div className="fourway-grid-stage">
+                          <div className="fourway-cell cell-1">
+                            <img src={currentLive.previewUrl} alt="Host" className="fourway-cam-img" />
+                            <div className="fourway-tag">
+                              <span>👑 {currentLive.creatorName}</span>
+                            </div>
+                          </div>
+                          <div className="fourway-cell cell-2">
+                            <img src={currentLive.battleInfo.opponentVideoUrl} alt="Alfredoc" className="fourway-cam-img" />
+                            <div className="fourway-tag">
+                              <span className="mic-mute-icon">🔇</span>
+                              <span>{currentLive.battleInfo.opponentName}</span>
+                            </div>
+                          </div>
+                          <div className="fourway-cell cell-3">
+                            <img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=700" alt="Huron" className="fourway-cam-img" />
+                            <div className="fourway-tag">
+                              <span className="mic-mute-icon">🔇</span>
+                              <span>Hurón Ve...</span>
+                            </div>
+                          </div>
+                          <div className="fourway-cell cell-4">
+                            <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=700" alt="Lavo" className="fourway-cam-img" />
+                            <div className="fourway-tag">
+                              <span className="mic-live-icon">🎙️</span>
+                              <span>lavo... ➕</span>
                             </div>
                           </div>
                         </div>
                       )}
                     </div>
+
+                    {/* GIFTERS CIRCLES UNDER EACH VIDEO (EXACT IMAGE 3) */}
+                    {liveLayoutMode === 'battle' && (
+                      <div className="battle-supporters-under-cam-row">
+                        {/* Host Gifters Circles: 3, 2, 1 */}
+                        <div className="supporters-group host-group">
+                          <div className="supporter-avatar-circle rank-3" title="Top Gifter #3">
+                            <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=90" alt="Gifter 3" />
+                            <span className="supporter-rank-chip pink">3</span>
+                          </div>
+                          <div className="supporter-avatar-circle rank-2" title="Top Gifter #2">
+                            <img src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=90" alt="Gifter 2" />
+                            <span className="supporter-rank-chip pink">2</span>
+                          </div>
+                          <div className="supporter-avatar-circle rank-1" title="Top Gifter #1">
+                            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=90" alt="Gifter 1" />
+                            <span className="supporter-rank-chip pink">1</span>
+                          </div>
+                        </div>
+
+                        {/* Rival Gifters Circles: 1, 2, 3 */}
+                        <div className="supporters-group rival-group">
+                          <div className="supporter-avatar-circle rank-1" title="Rival Gifter #1">
+                            <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=90" alt="Rival Gifter 1" />
+                            <span className="supporter-rank-chip cyan">1</span>
+                          </div>
+                          <div className="supporter-avatar-circle rank-2" title="Rival Gifter #2">
+                            <img src="https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=90" alt="Rival Gifter 2" />
+                            <span className="supporter-rank-chip cyan">2</span>
+                          </div>
+                          <div className="supporter-avatar-circle rank-3" title="Rival Gifter #3">
+                            <img src="https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=90" alt="Rival Gifter 3" />
+                            <span className="supporter-rank-chip cyan">3</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* 4. ACTIVE GIFT BANNER POPUP ANIMATION (TOP/CENTER) */}
                     {activeGiftBanner && (
@@ -4880,14 +4831,21 @@ export function App() {
                       ))}
                     </div>
 
-                    {/* 6. TRANSPARENT OVERLAY LIVE CHAT STREAM */}
+                    {/* 6. TRANSPARENT OVERLAY LIVE CHAT STREAM (EXACT IMAGE 3 & 2) */}
                     <div className="live-arena-chat-overlay">
                       <div className="live-arena-chat-scroll">
+                        {/* System LIVE Match Notice (Image 3) */}
+                        <div className="live-chat-bubble-row system-match-banner">
+                          <span className="system-tiktok-note">🎵</span>
+                          <span className="live-chat-bubble-text">LIVE Match has started! Cheer on your creator, like the match, and send Gifts.</span>
+                        </div>
+
                         {liveComments.map((c) => (
                           <div
                             key={c.id}
                             className={`live-chat-bubble-row ${c.isJoin ? 'join-notice' : ''} ${c.giftName ? 'gift-notice' : ''}`}
                           >
+                            {c.isJoin && <span className="join-wave-icon">👋</span>}
                             {c.level && (
                               <span className="live-chat-badge-diamond">
                                 💎 {c.level}
@@ -4901,7 +4859,7 @@ export function App() {
                       </div>
                     </div>
 
-                    {/* 7. FLOATING BOTTOM ACTION CONTROLS BAR */}
+                    {/* 7. FLOATING BOTTOM ACTION CONTROLS BAR (EXACT IMAGE 3 & 2) */}
                     <div className="live-arena-bottom-controls-bar">
                       <form onSubmit={handleSendLiveComment} className="live-comment-input-pill">
                         <input
@@ -4912,33 +4870,36 @@ export function App() {
                           onChange={(e) => setLiveChatInput(e.target.value)}
                         />
                         <button
-                          type="submit"
-                          className="btn-live-send-comment"
-                          disabled={!liveChatInput.trim()}
-                          title="Send Comment"
+                          type="button"
+                          className="btn-live-input-smile"
+                          onClick={() => handleLiveHeartBurst('#fbbf24')}
+                          title="Add Emote"
                         >
-                          <IconSend size={15} />
+                          <IconSmile size={18} />
                         </button>
                       </form>
 
+                      {/* Co-host / Layout Toggle (1v1 vs 4-Way) */}
                       <button
                         type="button"
-                        className="live-action-icon-circle"
-                        onClick={() => handleLiveHeartBurst('#fbbf24')}
-                        title="Cheer with Emote"
+                        className="live-action-icon-circle co-host-btn"
+                        onClick={() => setLiveLayoutMode((prev) => (prev === 'battle' ? '4way' : 'battle'))}
+                        title={liveLayoutMode === 'battle' ? 'Switch to 4-Way Grid' : 'Switch to 1v1 Battle'}
                       >
-                        <IconSmile size={18} />
+                        <IconUsers size={18} />
                       </button>
 
+                      {/* Quick Rose */}
                       <button
                         type="button"
                         className="live-action-icon-circle quick-rose"
                         onClick={handleQuickRose}
-                        title="Throw Privity Rose (1 Spark)"
+                        title="Throw Rose (1 Spark)"
                       >
                         <span className="live-rose-emoji">🌹</span>
                       </button>
 
+                      {/* Gift Gallery */}
                       <button
                         type="button"
                         className="live-action-icon-circle gift-box"
@@ -4949,16 +4910,18 @@ export function App() {
                         <span className="gift-btn-glow"></span>
                       </button>
 
+                      {/* Share Arrow with Counter */}
                       <button
                         type="button"
-                        className="live-action-icon-circle"
+                        className="live-action-icon-circle share-btn"
                         onClick={() => {
                           navigator.clipboard?.writeText(window.location.href);
-                          triggerToast('Live stream link copied to clipboard! 🔗');
+                          triggerToast('Live match link copied! 🔗');
                         }}
-                        title="Share Live Stream"
+                        title="Share Match"
                       >
-                        <IconShare size={17} />
+                        <IconShare size={15} />
+                        <span className="share-counter-text">4</span>
                       </button>
                     </div>
 
@@ -5017,26 +4980,6 @@ export function App() {
                         </div>
                       </div>
                     )}
-                    {/* 9. FLOATING VERTICAL SLIDER ON RIGHT SIDE */}
-                    <div className="live-vertical-nav-pill">
-                      <button
-                        type="button"
-                        className="live-nav-arrow-btn"
-                        onClick={handlePrevLiveStream}
-                        title="Slide Up / Previous Creator"
-                      >
-                        ▲
-                      </button>
-                      <span className="live-nav-indicator-text">{activeLiveIndex + 1}/{liveStreamsList.length}</span>
-                      <button
-                        type="button"
-                        className="live-nav-arrow-btn"
-                        onClick={handleNextLiveStream}
-                        title="Slide Down / Next Creator"
-                      >
-                        ▼
-                      </button>
-                    </div>
 
                     {/* 10. TOP LIKERS & CONTRIBUTORS LEADERBOARD MODAL */}
                     {isLikesLeaderboardOpen && (
@@ -9975,10 +9918,8 @@ export function App() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* MOBILE BOTTOM NAVIGATION DOCK (<= 768px)                */}
-      {/* ======================================================== */}
-      {!(activeTab === 'messages' && activeChatUser) && (
+      {/* 5. MOBILE BOTTOM NAVIGATION (<= 768px) */}
+      {!(activeTab === 'messages' && activeChatUser) && !(activeTab === 'feed' && feedFilter === 'live') && (
         <nav className="mobile-bottom-nav">
           <button
             type="button"
