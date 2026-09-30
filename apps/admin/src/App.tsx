@@ -62,6 +62,8 @@ import {
   DEFAULT_GIFTS,
 } from './gifts';
 import './gifts/gifts.css';
+import { CameraModal } from './camera';
+
 
 // ==================== SETTINGS DATA MODEL ====================
 
@@ -141,6 +143,8 @@ interface PostItem {
   type: PostType;
   contentUrl?: string;
   thumbnailUrl?: string;
+  videoUrl?: string;
+  soundName?: string;
   voiceMemoDuration?: string;
   caption: string;
   tags: string[];
@@ -2681,6 +2685,7 @@ export function App() {
 
   // Modal Composer State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [modalCaption, setModalCaption] = useState('');
   const [modalTags, setModalTags] = useState('');
   const [modalPrivacy, setModalPrivacy] = useState<PostPrivacy>('close_friends');
@@ -2743,7 +2748,7 @@ export function App() {
 
   const handleFeedTouchEnd = (e: React.TouchEvent) => {
     if (feedTouchStartXRef.current === null || feedTouchStartYRef.current === null) return;
-    if (isModalOpen || isSettingsOpen || isEditProfileOpen || lightboxUrl || rosterModal || postMenuModal || activeLiveStream) return;
+    if (isModalOpen || isCameraOpen || isSettingsOpen || isEditProfileOpen || lightboxUrl || rosterModal || postMenuModal || activeLiveStream) return;
 
     const touchEndX = e.changedTouches[0].clientX;
     const touchEndY = e.changedTouches[0].clientY;
@@ -2769,7 +2774,7 @@ export function App() {
   const handleFeedPointerUp = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch') return;
     if (feedPointerStartXRef.current === null || feedPointerStartYRef.current === null) return;
-    if (isModalOpen || isSettingsOpen || isEditProfileOpen || lightboxUrl || rosterModal || postMenuModal || activeLiveStream) return;
+    if (isModalOpen || isCameraOpen || isSettingsOpen || isEditProfileOpen || lightboxUrl || rosterModal || postMenuModal || activeLiveStream) return;
 
     const deltaX = e.clientX - feedPointerStartXRef.current;
     const deltaY = e.clientY - feedPointerStartYRef.current;
@@ -4467,6 +4472,163 @@ export function App() {
     triggerToast('Published to your feed');
   };
 
+  const handleCameraPublishPost = ({
+    caption,
+    mediaUrl,
+    mediaType,
+    tags,
+    privacy,
+    soundName,
+  }: {
+    caption: string;
+    mediaUrl?: string | null;
+    mediaType?: 'photo' | 'video';
+    tags: string;
+    privacy: 'close_friends' | 'followers' | 'public';
+    soundName?: string;
+  }) => {
+    const rawTags = tags
+      .split(' ')
+      .map((t) => t.replace('#', '').trim())
+      .filter(Boolean);
+    const captionTags = (caption.match(/#[\w-]+/g) || []).map((t) => t.slice(1));
+    const combinedTags = Array.from(new Set([...rawTags, ...captionTags]));
+    const finalTags = combinedTags.length > 0 ? combinedTags : ['privity', 'moments'];
+
+    const newPost: PostItem = {
+      id: `p-${Date.now()}`,
+      authorId: 'usr-luciano',
+      authorName: myProfile.name,
+      authorHandle: myProfile.handle,
+      authorAvatar: myProfile.avatar,
+      isVerified: myProfile.isVerified,
+      verifiedCategory: myProfile.verifiedCategory,
+      verifiedSince: myProfile.verifiedSince,
+      cryptoProofId: myProfile.cryptoProofId,
+      type: mediaType === 'video' ? 'video' : mediaUrl ? 'image' : 'text',
+      contentUrl: mediaUrl || undefined,
+      thumbnailUrl: mediaType === 'video' ? undefined : (mediaUrl || undefined),
+      videoUrl: mediaType === 'video' ? (mediaUrl || undefined) : undefined,
+      soundName: soundName,
+      caption: caption,
+      tags: finalTags,
+      privacy: privacy as PostPrivacy,
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      savesCount: 0,
+      isLiked: false,
+      isSaved: false,
+      likersList: [],
+      timeAgo: 'Just now',
+      comments: [],
+    };
+
+    if (mediaUrl) {
+      const newMedia: UserMediaItem = {
+        id: `m-luciano-${Date.now()}`,
+        url: mediaUrl,
+        type: mediaType === 'video' ? 'video' : 'image',
+        likes: 0,
+        comments: 0,
+        isLiked: false,
+      };
+
+      setProfiles((prev) => {
+        const prof = prev['luciano'] || prev[myProfile.handle] || myProfile;
+        const nextProfiles = {
+          ...prev,
+          luciano: {
+            ...prof,
+            mediaItems: [newMedia, ...(prof.mediaItems || [])],
+          },
+          ...(myProfile.handle !== 'luciano'
+            ? {
+                [myProfile.handle]: {
+                  ...prof,
+                  mediaItems: [newMedia, ...(prof.mediaItems || [])],
+                },
+              }
+            : {}),
+        };
+        safeSaveStorage('privity_profiles_v5', nextProfiles);
+        return nextProfiles;
+      });
+    }
+
+    setPosts((prev) => {
+      const nextPosts = [newPost, ...prev];
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+
+    broadcastSyncEvent({
+      action: 'NEW_POST',
+      post: newPost,
+    });
+
+    setIsCameraOpen(false);
+    setFeedFilter('all');
+    setActiveTagFilter(null);
+
+    if (activeTab !== 'profile' || viewedUserHandle !== 'luciano') {
+      setActiveTab('feed');
+    }
+
+    setHighlightPostId(newPost.id);
+    setTimeout(() => setHighlightPostId(null), 3500);
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    triggerToast(mediaType === 'video' ? 'Video dispatch published to feed!' : 'Photo dispatch published to feed!');
+  };
+
+  const handleCameraGoLive = ({
+    title,
+    category,
+    goal,
+  }: {
+    title: string;
+    category: string;
+    goal: string;
+    cameraStream?: MediaStream | null;
+  }) => {
+    const userStream: LiveStreamSession = {
+      id: `live-user-${Date.now()}`,
+      creatorHandle: myProfile.handle,
+      creatorName: myProfile.name,
+      creatorAvatar: myProfile.avatar,
+      isVerified: myProfile.isVerified,
+      category: category || 'Visionary Host',
+      title: title || 'Live Broadcast · Sovereign Node',
+      description: `Streaming live directly to authorized circles. ${goal}`,
+      viewersCount: 1,
+      likesCount: 1,
+      dailyRank: '🔥 Genesis Host',
+      previewUrl: myProfile.coverUrl || myProfile.avatar,
+      battleInfo: {
+        opponentName: 'Marcus Vance',
+        opponentHandle: 'marcus_dev',
+        opponentAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+        opponentVideoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
+        hostScore: 100,
+        opponentScore: 50,
+        timeLeft: '03:00',
+        isMatchActive: true,
+        matchTitle: 'Genesis PK Match',
+      },
+      multiGuests: [],
+      participants: [{ name: myProfile.name, avatar: myProfile.avatar, role: 'Host' }],
+      tags: ['Live', 'P2P', 'Privity'],
+    };
+
+    setLiveStreamsList((prev) => [userStream, ...prev]);
+    setActiveLiveIndex(0);
+    setActiveLiveStream(userStream);
+    setIsCameraOpen(false);
+    triggerToast(`Broadcast started: ${userStream.title}`);
+  };
+
+
   // Dynamic trending topics refreshed based on active reverse-chronological stream
   const dynamicTrendingTags = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -4601,8 +4763,8 @@ export function App() {
             <button
               type="button"
               className="mobile-header-icon-btn mobile-header-compose-btn"
-              onClick={() => setIsModalOpen(true)}
-              title="Create New Dispatch"
+              onClick={() => setIsCameraOpen(true)}
+              title="Open Camera & Studio"
             >
               <IconPlus size={18} color="#ffffff" />
             </button>
@@ -4683,7 +4845,7 @@ export function App() {
           </button>
         </nav>
 
-        <button className="btn-compose-prime" onClick={() => setIsModalOpen(true)}>
+        <button className="btn-compose-prime" onClick={() => setIsCameraOpen(true)}>
           <IconPlus size={18} />
           <span>New Dispatch</span>
         </button>
@@ -5575,7 +5737,7 @@ export function App() {
                 <span className="circle-tag-name">Chloe</span>
               </div>
 
-              <div className="circle-unit" onClick={() => setIsModalOpen(true)}>
+              <div className="circle-unit" onClick={() => setIsCameraOpen(true)}>
                 <div className="circle-halo-ring add-circle">
                   <div className="circle-add-icon"><IconPlus size={20} /></div>
                 </div>
@@ -5770,6 +5932,14 @@ export function App() {
                         </div>
                       )}
 
+                      {/* Audio / Music Track Badge */}
+                      {post.soundName && (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 12px', background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(0,240,255,0.3)', borderRadius: '16px', fontSize: '12px', color: '#00f0ff', marginBottom: '10px' }}>
+                          <span>🎵</span>
+                          <span style={{ fontWeight: 700 }}>{post.soundName}</span>
+                        </div>
+                      )}
+
                       {/* Photo Display with Double-Tap to Like */}
                       {post.type === 'image' && post.contentUrl && (
                         <div
@@ -5790,18 +5960,28 @@ export function App() {
                         </div>
                       )}
 
-                      {/* Video Player Display */}
-                      {post.type === 'video' && post.thumbnailUrl && (
-                        <div
-                          className="post-visual-stage"
-                          onClick={() => setLightboxUrl(post.thumbnailUrl || null)}
-                        >
-                          <img
-                            src={post.thumbnailUrl}
-                            alt="Video Thumbnail"
-                            loading="lazy"
-                          />
-                          <div className="video-status-pill">4K • 60 FPS • 0:48</div>
+                      {/* Video Player Display (Real Video or Cinematic Thumbnail) */}
+                      {post.type === 'video' && (post.videoUrl || post.contentUrl || post.thumbnailUrl) && (
+                        <div className="post-visual-stage">
+                          {post.videoUrl || (post.contentUrl && (post.contentUrl.startsWith('data:video') || post.contentUrl.endsWith('.mp4') || post.contentUrl.endsWith('.webm') || post.contentUrl.startsWith('blob:'))) ? (
+                            <video
+                              src={post.videoUrl || post.contentUrl}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              poster={post.thumbnailUrl}
+                              style={{ width: '100%', maxHeight: '520px', borderRadius: '16px', background: '#000', objectFit: 'contain' }}
+                            />
+                          ) : (
+                            <div onClick={() => setLightboxUrl(post.thumbnailUrl || post.contentUrl || null)}>
+                              <img
+                                src={post.thumbnailUrl || post.contentUrl}
+                                alt="Video Thumbnail"
+                                loading="lazy"
+                              />
+                              <div className="video-status-pill">4K • 60 FPS • 0:48</div>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -7633,13 +7813,23 @@ export function App() {
                               </div>
                             )}
 
-                            {post.type === 'video' && post.thumbnailUrl && (
-                              <div
-                                className="post-visual-stage"
-                                onClick={() => setLightboxUrl(post.thumbnailUrl || null)}
-                              >
-                                <img src={post.thumbnailUrl} alt="Video Thumbnail" loading="lazy" />
-                                <div className="video-status-pill">4K • 60 FPS • 0:48</div>
+                            {post.type === 'video' && (post.videoUrl || post.contentUrl || post.thumbnailUrl) && (
+                              <div className="post-visual-stage">
+                                {post.videoUrl || (post.contentUrl && (post.contentUrl.startsWith('data:video') || post.contentUrl.endsWith('.mp4') || post.contentUrl.endsWith('.webm') || post.contentUrl.startsWith('blob:'))) ? (
+                                  <video
+                                    src={post.videoUrl || post.contentUrl}
+                                    controls
+                                    playsInline
+                                    preload="metadata"
+                                    poster={post.thumbnailUrl}
+                                    style={{ width: '100%', maxHeight: '520px', borderRadius: '16px', background: '#000', objectFit: 'contain' }}
+                                  />
+                                ) : (
+                                  <div onClick={() => setLightboxUrl(post.thumbnailUrl || post.contentUrl || null)}>
+                                    <img src={post.thumbnailUrl || post.contentUrl} alt="Video Thumbnail" loading="lazy" />
+                                    <div className="video-status-pill">4K • 60 FPS • 0:48</div>
+                                  </div>
+                                )}
                               </div>
                             )}
 
@@ -8896,6 +9086,21 @@ export function App() {
           </div>
         </div>
       )}
+
+      {/* CAMERA & LIVE BROADCAST STUDIO (TIKTOK / REELS SPEC) */}
+      <CameraModal
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        currentUser={{
+          name: myProfile.name,
+          handle: myProfile.handle,
+          avatar: myProfile.avatar,
+          isVerified: myProfile.isVerified,
+          followersCount: (myProfile.followersList || []).length,
+        }}
+        onPublishPost={handleCameraPublishPost}
+        onGoLive={handleCameraGoLive}
+      />
 
       {/* CREATE POST MODAL */}
       {isModalOpen && (
@@ -10469,8 +10674,8 @@ export function App() {
           <button
             type="button"
             className="mobile-nav-item mobile-nav-compose-center"
-            onClick={() => setIsModalOpen(true)}
-            title="Create New Dispatch"
+            onClick={() => setIsCameraOpen(true)}
+            title="Open Camera & Studio"
           >
             <div className="mobile-compose-orb">
               <IconPlus size={22} color="#ffffff" />
