@@ -14,6 +14,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { SearchModule } from './search/search.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { MediaModule } from './media/media.module';
+import { GiftsModule } from './gifts/gifts.module';
 
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -33,6 +34,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     SearchModule,
     ModerationModule,
     MediaModule,
+    GiftsModule,
   ],
   providers: [
     {

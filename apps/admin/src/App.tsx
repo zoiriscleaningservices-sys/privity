@@ -49,9 +49,19 @@ import {
   IconVideo,
   IconFeedStream,
   IconGift,
-  IconZap,
   IconSmile,
 } from './components/Icons';
+import {
+  Gift,
+  GiftEvent,
+  GiftAnimationPlayer,
+  GiftPickerModal,
+  AdminGiftManager,
+  globalGiftQueue,
+  loadGiftsCatalog,
+  DEFAULT_GIFTS,
+} from './gifts';
+import './gifts/gifts.css';
 
 // ==================== SETTINGS DATA MODEL ====================
 
@@ -1310,9 +1320,7 @@ export function App() {
   const [activeLiveIndex, setActiveLiveIndex] = useState(0);
   const [liveLayoutMode, setLiveLayoutMode] = useState<'battle' | '4way'>('battle');
   const [isGiftTrayOpen, setIsGiftTrayOpen] = useState(false);
-  const [selectedGiftId, setSelectedGiftId] = useState<string>('gift-rocket');
   const [userSparksBalance, setUserSparksBalance] = useState(2450);
-  const [activeGiftBanner, setActiveGiftBanner] = useState<{ id: string; sender: string; giftName: string; giftIcon: string; count: number; creatorName: string } | null>(null);
   const [battleScoreHost, setBattleScoreHost] = useState(2150);
   const [battleScoreOpponent, setBattleScoreOpponent] = useState(2407);
   const [battleTimeSeconds, setBattleTimeSeconds] = useState(129);
@@ -1336,14 +1344,6 @@ export function App() {
   const [pkComboCount, setPkComboCount] = useState(0);
   const [isGloveClashing, setIsGloveClashing] = useState(false);
   const [screenScoreFloaters, setScreenScoreFloaters] = useState<Array<{ id: number; text: string; x: number; y: number; side: 'host' | 'rival' }>>([]);
-  const [activeSuperGift, setActiveSuperGift] = useState<{
-    id: string;
-    type: 'rose_storm' | 'celestial_dragon' | 'starship_warp' | 'supernova_galaxy' | 'coronation_crown';
-    name: string;
-    icon: string;
-    sender: string;
-    creatorName: string;
-  } | null>(null);
 
   const [activeLiveStream, setActiveLiveStream] = useState<LiveStreamSession | null>(null);
   const [liveChatInput, setLiveChatInput] = useState('');
@@ -1639,7 +1639,9 @@ export function App() {
     readStorage('privity_user_settings_v5', DEFAULT_USER_SETTINGS)
   );
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsSubTab, setSettingsSubTab] = useState<'account' | 'privacy' | 'notifications' | 'security' | 'terms'>('account');
+  const [settingsSubTab, setSettingsSubTab] = useState<'account' | 'privacy' | 'notifications' | 'security' | 'terms' | 'gifts'>('account');
+  const [giftsCatalog, setGiftsCatalog] = useState<Gift[]>(() => loadGiftsCatalog());
+  const isSendingGiftRef = useRef(false);
   const [copiedFingerprint, setCopiedFingerprint] = useState(false);
 
   useEffect(() => {
@@ -1776,6 +1778,31 @@ export function App() {
       const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
 
       switch (event.action) {
+        case 'LIVESTREAM_GIFT_EVENT': {
+          const { giftEvent, gift } = event;
+          if (!giftEvent || !gift) return;
+
+          // Enqueue animation for all watching viewers
+          globalGiftQueue.enqueue(giftEvent, gift);
+
+          const pts = (gift.coinCost || 10) * (giftEvent.quantity || 1) * 2;
+          setBattleScoreHost((prev) => prev + pts);
+
+          setLiveComments((prev) => [
+            ...prev,
+            {
+              id: giftEvent.id || String(Date.now()),
+              user: giftEvent.senderName,
+              text: `sent ${gift.name} ${giftEvent.quantity > 1 ? `x${giftEvent.quantity} ` : ''}(+${pts} pts)!`,
+              badge: gift.rarity === 'legendary' ? 'Crown VIP' : 'Top Gifter',
+              level: 30,
+              giftName: gift.name,
+              giftIcon: gift.icon,
+            },
+          ]);
+          break;
+        }
+
         case 'LIKE_POST': {
           const { postId, isLiked, likesCount, userHandle } = event;
           setPosts((prev) => {
@@ -2897,81 +2924,100 @@ export function App() {
     }, 1100);
   };
 
-  const handleThrowGift = (gift: LiveGiftItem) => {
-    if (userSparksBalance < gift.sparksCost) {
-      triggerToast(`Insufficient Sparks! Need ${gift.sparksCost} Sparks.`);
-      return;
-    }
-    setUserSparksBalance((prev) => prev - gift.sparksCost);
-    setIsGiftTrayOpen(false);
-
-    // Boost Host's Battle Points
-    const pts = gift.sparksCost * 20;
-    setBattleScoreHost((prev) => prev + pts);
-
+  const handleSendAnimatedGift = async (gift: Gift, quantity: number = 1): Promise<boolean> => {
+    if (isSendingGiftRef.current) return false;
     const currentStream = liveStreamsList[activeLiveIndex] || liveStreamsList[0];
-    const banner = {
-      id: String(Date.now()),
-      sender: myProfile.name,
-      giftName: gift.name,
-      giftIcon: gift.icon,
-      count: 1,
-      creatorName: currentStream.creatorName,
-    };
-    setActiveGiftBanner(banner);
-    setTimeout(() => {
-      setActiveGiftBanner(null);
-    }, 3400);
+    const totalCost = gift.coinCost * quantity;
 
-    // Append gift comment in live chat
-    setLiveComments((prev) => [
-      ...prev,
-      {
-        id: String(Date.now()),
-        user: myProfile.handle,
-        text: `sent ${gift.name} ${gift.icon} (+${pts} pts)!`,
-        badge: 'Top Gifter',
-        level: 30,
+    if (userSparksBalance < totalCost) {
+      triggerToast(`Insufficient Coins! Need ${totalCost.toLocaleString()} Coins.`);
+      return false;
+    }
+
+    isSendingGiftRef.current = true;
+    try {
+      // 1. Server-side transaction via backend API if available
+      try {
+        await fetch('/api/gifts/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            giftId: gift.id,
+            livestreamId: currentStream.id,
+            recipientId: currentStream.creatorHandle,
+            quantity,
+          }),
+        });
+      } catch (err) {
+        // Fallback for offline/local standalone mode
+      }
+
+      // 2. Safe client coin deduction
+      setUserSparksBalance((prev) => Math.max(0, prev - totalCost));
+      setIsGiftTrayOpen(false);
+
+      // 3. Boost Host Battle Score
+      const pts = totalCost * 2;
+      setBattleScoreHost((prev) => prev + pts);
+
+      // 4. Construct GiftEvent
+      const giftEvent: GiftEvent = {
+        id: `evt_gift_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        livestreamId: currentStream.id,
+        senderId: (myProfile.handle || 'luciano').replace(/^@/, ''),
+        senderName: myProfile.name,
+        senderAvatar: myProfile.avatar,
+        recipientId: currentStream.creatorHandle,
+        recipientName: currentStream.creatorName,
+        giftId: gift.id,
         giftName: gift.name,
         giftIcon: gift.icon,
-      },
-    ]);
+        quantity,
+        coinValue: totalCost,
+        createdAt: new Date().toISOString(),
+      };
 
-    // Check for 3D AI Super-Gift Celebrations
-    let superType: 'rose_storm' | 'celestial_dragon' | 'starship_warp' | 'supernova_galaxy' | 'coronation_crown' | null = null;
-    if (gift.id === 'gift-rose') superType = 'rose_storm';
-    else if (gift.id === 'gift-dragon') superType = 'celestial_dragon';
-    else if (gift.id === 'gift-rocket') superType = 'starship_warp';
-    else if (gift.id === 'gift-galaxy') superType = 'supernova_galaxy';
-    else if (gift.id === 'gift-crown') superType = 'coronation_crown';
+      // 5. Enqueue into global animation queue (local view)
+      globalGiftQueue.enqueue(giftEvent, gift);
 
-    if (superType) {
-      playLiveSoundFX('supergift');
-      setActiveSuperGift({
-        id: String(Date.now()),
-        type: superType,
-        name: gift.name,
-        icon: gift.icon,
-        sender: myProfile.name,
-        creatorName: currentStream.creatorName,
+      // 6. Broadcast event to livestream in real time across all tabs & devices
+      broadcastSyncEvent({
+        action: 'LIVESTREAM_GIFT_EVENT',
+        giftEvent,
+        gift,
+        livestreamId: currentStream.id,
       });
-      setTimeout(() => {
-        setActiveSuperGift(null);
-      }, 4200);
-    } else {
-      playLiveSoundFX('gift');
-    }
 
-    // Burst hearts with gift color
-    for (let i = 0; i < 6; i++) {
-      setTimeout(() => handleLiveHeartBurst(gift.color), i * 110);
-    }
+      // 7. Append gift comment in live chat
+      setLiveComments((prev) => [
+        ...prev,
+        {
+          id: giftEvent.id,
+          user: myProfile.name,
+          text: `sent ${gift.name} ${quantity > 1 ? `x${quantity} ` : ''}(+${pts} pts)!`,
+          badge: gift.rarity === 'legendary' ? 'Crown VIP' : 'Top Gifter',
+          level: 30,
+          giftName: gift.name,
+          giftIcon: gift.icon,
+        },
+      ]);
 
-    triggerToast(`Sent ${gift.name} ${gift.icon} (+${pts} battle pts)!`);
+      // Burst floating hearts
+      const color = gift.rarity === 'legendary' ? '#fbbf24' : gift.category === 'love' ? '#f43f5e' : '#38bdf8';
+      for (let i = 0; i < 6; i++) {
+        setTimeout(() => handleLiveHeartBurst(color), i * 100);
+      }
+
+      triggerToast(`Sent ${gift.name} ${quantity > 1 ? `x${quantity} ` : ''}to ${currentStream.creatorName}!`);
+      return true;
+    } finally {
+      isSendingGiftRef.current = false;
+    }
   };
 
   const handleQuickRose = () => {
-    handleThrowGift(LIVE_GIFTS_CATALOG[0]);
+    const roseGift = giftsCatalog.find((g) => g.id === 'rose') || DEFAULT_GIFTS[0];
+    handleSendAnimatedGift(roseGift, 1);
   };
 
   const handleToggleFollowLiveHost = (creatorHandle: string) => {
@@ -5170,92 +5216,8 @@ export function App() {
                       </div>
                     )}
 
-                    {/* FULL-SCREEN 3D AI SUPER-GIFT CINEMATIC CELEBRATIONS */}
-                    {activeSuperGift && (
-                      <div className={`super-gift-cinematic-overlay ${activeSuperGift.type}`}>
-                        {/* 1. Rose Storm / Tornado */}
-                        {activeSuperGift.type === 'rose_storm' && (
-                          <div className="rose-tornado-scene">
-                            {Array.from({ length: 24 }).map((_, idx) => (
-                              <div
-                                key={idx}
-                                className="rose-swirl-petal"
-                                style={{
-                                  left: `${(idx * 4.2) % 100}%`,
-                                  animationDelay: `${(idx * 0.12).toFixed(2)}s`,
-                                  fontSize: `${28 + (idx % 4) * 8}px`,
-                                }}
-                              >
-                                🌹
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* 2. Celestial Golden Dragon */}
-                        {activeSuperGift.type === 'celestial_dragon' && (
-                          <div className="celestial-dragon-scene">
-                            <div className="dragon-cosmic-glow" />
-                            <div className="golden-dragon-avatar">🐉</div>
-                            <div className="dragon-lightning-arcs" />
-                          </div>
-                        )}
-
-                        {/* 3. Falcon Starship Warp */}
-                        {activeSuperGift.type === 'starship_warp' && (
-                          <div className="starship-launch-scene">
-                            <div className="warp-speed-stars" />
-                            <div className="falcon-rocket-body">🚀</div>
-                            <div className="rocket-exhaust-plume" />
-                          </div>
-                        )}
-
-                        {/* 4. Supernova Galaxy */}
-                        {activeSuperGift.type === 'supernova_galaxy' && (
-                          <div className="galaxy-nebula-scene">
-                            <div className="supernova-center-core">🌌</div>
-                            <div className="spiral-galaxy-arms" />
-                          </div>
-                        )}
-
-                        {/* 5. Coronation Crown */}
-                        {activeSuperGift.type === 'coronation_crown' && (
-                          <div className="diamond-crown-scene">
-                            <div className="regal-light-rays" />
-                            <div className="descending-crown">👑</div>
-                            <div className="coronation-sparkles">✨ 💎 ✨</div>
-                          </div>
-                        )}
-
-                        {/* Cinematic Super-Gift Banner */}
-                        <div className="super-gift-announcement-banner">
-                          <div className="super-gift-title">SUPER GIFT UNLEASHED!</div>
-                          <div className="super-gift-subtitle">
-                            <strong>{activeSuperGift.sender}</strong> gifted {activeSuperGift.icon} <strong>{activeSuperGift.name}</strong> to {activeSuperGift.creatorName}!
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 4. ACTIVE GIFT BANNER POPUP ANIMATION (TOP/CENTER) */}
-                    {activeGiftBanner && (
-                      <div className="live-active-gift-banner-flyin">
-                        <div className="gift-banner-avatar-wrap">
-                          <img src={myProfile.avatar} alt="Sender" className="gift-banner-sender-pic" />
-                        </div>
-                        <div className="gift-banner-text-wrap">
-                          <div className="gift-banner-sender-name">
-                            {activeGiftBanner.sender} <span className="gift-banner-sent-to">sent {activeGiftBanner.creatorName}</span>
-                          </div>
-                          <div className="gift-banner-gift-line">
-                            <span className="gift-banner-gift-name">{activeGiftBanner.giftName}</span>
-                            <span className="gift-banner-gift-icon">{activeGiftBanner.giftIcon}</span>
-                            <span className="gift-banner-gift-count">x {activeGiftBanner.count}</span>
-                          </div>
-                        </div>
-                        <div className="gift-banner-sparks-badge">+Boosted</div>
-                      </div>
-                    )}
+                    {/* PRIVITY ANIMATED VIRTUAL GIFT ENGINE OVERLAY */}
+                    <GiftAnimationPlayer isMuted={isLiveSoundMuted} />
 
                     {/* 5. FLOATING HEARTS ANIMATION LAYER */}
                     <div className="live-arena-floating-hearts-layer">
@@ -5388,61 +5350,19 @@ export function App() {
                       </button>
                     </div>
 
-                    {/* 8. FROSTED GLASS GIFT TRAY DRAWER */}
-                    {isGiftTrayOpen && (
-                      <div className="live-gift-tray-backdrop" onClick={() => setIsGiftTrayOpen(false)}>
-                        <div className="live-gift-tray-sheet" onClick={(e) => e.stopPropagation()}>
-                          <div className="gift-tray-header">
-                            <div className="gift-tray-title-row">
-                              <span className="gift-tray-title">Gift Gallery & Battle Boosters</span>
-                              <div className="gift-tray-balance-pill">
-                                <IconZap size={13} color="#f59e0b" />
-                                <span>{userSparksBalance.toLocaleString()} Sparks</span>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="gift-tray-close-btn"
-                              onClick={() => setIsGiftTrayOpen(false)}
-                            >
-                              <IconX size={16} />
-                            </button>
-                          </div>
-
-                          <div className="gift-tray-grid">
-                            {LIVE_GIFTS_CATALOG.map((gift) => (
-                              <div
-                                key={gift.id}
-                                className={`gift-tray-card ${selectedGiftId === gift.id ? 'selected' : ''}`}
-                                onClick={() => setSelectedGiftId(gift.id)}
-                              >
-                                <span className="gift-tray-tag">{gift.tag}</span>
-                                <div className="gift-tray-icon-box">{gift.icon}</div>
-                                <span className="gift-tray-name">{gift.name}</span>
-                                <div className="gift-tray-cost">
-                                  <IconZap size={11} color="#f59e0b" />
-                                  <span>{gift.sparksCost}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-
-                          <div className="gift-tray-footer">
-                            <button
-                              type="button"
-                              className="btn-send-gift-action"
-                              onClick={() => {
-                                const g = LIVE_GIFTS_CATALOG.find((item) => item.id === selectedGiftId) || LIVE_GIFTS_CATALOG[0];
-                                handleThrowGift(g);
-                              }}
-                            >
-                              <span>Throw {LIVE_GIFTS_CATALOG.find((item) => item.id === selectedGiftId)?.name || 'Gift'}</span>
-                              <span>{LIVE_GIFTS_CATALOG.find((item) => item.id === selectedGiftId)?.icon}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    {/* 8. ANIMATED VIRTUAL GIFT PICKER & ECONOMY DRAWER */}
+                    <GiftPickerModal
+                      isOpen={isGiftTrayOpen}
+                      onClose={() => setIsGiftTrayOpen(false)}
+                      userCoins={userSparksBalance}
+                      streamerName={currentLive.creatorName}
+                      catalog={giftsCatalog}
+                      onSendGift={handleSendAnimatedGift}
+                      onTopUpCoins={() => {
+                        setUserSparksBalance((prev) => prev + 5000);
+                        triggerToast('Added 5,000 Coins to wallet! 🪙');
+                      }}
+                    />
 
                     {/* 10. TOP LIKERS & CONTRIBUTORS LEADERBOARD MODAL */}
                     {isLikesLeaderboardOpen && (
@@ -8352,6 +8272,8 @@ export function App() {
                   className="live-video-media-feed"
                 />
                 <div className="live-video-overlay-gradient"></div>
+                {/* PRIVITY ANIMATED VIRTUAL GIFT ENGINE OVERLAY */}
+                <GiftAnimationPlayer isMuted={isLiveSoundMuted} />
 
                 {/* Floating Heart Bursts Layer */}
                 <div className="live-floating-hearts-layer">
@@ -8408,6 +8330,14 @@ export function App() {
                     value={liveChatInput}
                     onChange={(e) => setLiveChatInput(e.target.value)}
                   />
+                  <button
+                    type="button"
+                    className="live-heart-reaction-btn"
+                    onClick={() => setIsGiftTrayOpen(true)}
+                    title="Send Virtual Gift"
+                  >
+                    <IconGift size={18} color="#fbbf24" />
+                  </button>
                   <button
                     type="button"
                     className="live-heart-reaction-btn"
@@ -9965,6 +9895,13 @@ export function App() {
               >
                 Terms & Manifesto
               </button>
+              <button
+                type="button"
+                className={`settings-nav-tab ${settingsSubTab === 'gifts' ? 'active' : ''}`}
+                onClick={() => setSettingsSubTab('gifts')}
+              >
+                Virtual Gifts 🎁
+              </button>
             </div>
 
             {/* Settings Content Pane */}
@@ -10453,6 +10390,17 @@ export function App() {
                       </button>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* TAB 6: VIRTUAL GIFTS & ENGINE MANAGEMENT */}
+              {settingsSubTab === 'gifts' && (
+                <div style={{ padding: '4px 0' }}>
+                  <AdminGiftManager
+                    catalog={giftsCatalog}
+                    onCatalogChange={setGiftsCatalog}
+                    triggerToast={triggerToast}
+                  />
                 </div>
               )}
             </div>

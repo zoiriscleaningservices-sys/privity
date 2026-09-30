@@ -7,3 +7,4 @@ export * from './feed';
 export * from './moderation';
 export * from './notification';
 export * from './auth';
+export * from './gift';

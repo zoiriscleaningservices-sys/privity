@@ -79,6 +79,7 @@ model User {
   suspendedUntil  DateTime?      @map("suspended_until")
   isBanned        Boolean        @default(false) @map("is_banned")
   pinnedPostId    String?        @map("pinned_post_id")
+  coins           Int            @default(50000) @map("coins")
   settings        Json?          @default("{\"pushEnabled\": true, \"likes\": true, \"comments\": true, \"follows\": true, \"mentions\": true}")
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")
@@ -110,6 +111,10 @@ model User {
   
   // Audit logs
   auditLogs       AuditLog[]     @relation("ActorAuditLogs")
+
+  // Virtual Gifts
+  sentGifts       GiftTransaction[] @relation("SenderTransactions")
+  receivedGifts   GiftTransaction[] @relation("RecipientTransactions")
 
   @@index([username])
   @@index([email])
@@ -301,4 +306,81 @@ model MediaProcessingJob {
   @@index([postId])
   @@index([status])
   @@map("media_processing_jobs")
+}
+
+enum GiftCategory {
+  love
+  premium
+  fantasy
+  fun
+  special
+}
+
+enum GiftRarity {
+  common
+  uncommon
+  rare
+  epic
+  legendary
+  special
+}
+
+model Gift {
+  id                String            @id
+  name              String
+  description       String?
+  iconUrl           String            @map("icon_url")
+  animationUrl      String            @map("animation_url")
+  webmUrl           String?           @map("webm_url")
+  previewUrl        String?           @map("preview_url")
+  coinCost          Int               @map("coin_cost")
+  category          GiftCategory      @default(special)
+  rarity            GiftRarity        @default(common)
+  animationDuration Int               @default(3000) @map("animation_duration")
+  enabled           Boolean           @default(true)
+  soundUrl          String?           @map("sound_url")
+  maxConcurrent     Int               @default(3) @map("max_concurrent")
+  priority          Int               @default(1)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  transactions      GiftTransaction[]
+
+  @@map("gifts")
+}
+
+model GiftTransaction {
+  id            String   @id @default(uuid())
+  giftId        String   @map("gift_id")
+  gift          Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  senderId      String   @map("sender_id")
+  sender        User     @relation("SenderTransactions", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId   String   @map("recipient_id")
+  recipient     User     @relation("RecipientTransactions", fields: [recipientId], references: [id], onDelete: Cascade)
+  livestreamId  String   @map("livestream_id")
+  quantity      Int      @default(1)
+  coinCost      Int      @map("coin_cost")
+  totalCoinCost Int      @map("total_coin_cost")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([senderId])
+  @@index([recipientId])
+  @@index([livestreamId])
+  @@index([createdAt])
+  @@map("gift_transactions")
+}
+
+model LivestreamGiftEvent {
+  id           String   @id @default(uuid())
+  livestreamId String   @map("livestream_id")
+  senderId     String   @map("sender_id")
+  recipientId  String   @map("recipient_id")
+  giftId       String   @map("gift_id")
+  quantity     Int      @default(1)
+  coinValue    Int      @map("coin_value")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([livestreamId])
+  @@index([createdAt])
+  @@map("livestream_gift_events")
 }
