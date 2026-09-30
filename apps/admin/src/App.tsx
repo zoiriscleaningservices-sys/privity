@@ -737,13 +737,12 @@ export interface LiveGuestSlot {
   role?: string;
   tag?: string;
   flag?: string;
-}
-
-export interface LiveBattleInfo {
+}export interface LiveBattleInfo {
   opponentName: string;
   opponentHandle: string;
   opponentAvatar: string;
   opponentVideoUrl: string;
+  opponentStreamUrl?: string;
   coHostName?: string;
   coHostVideoUrl?: string;
   hostScore: number;
@@ -768,8 +767,8 @@ export const LIVE_GIFTS_CATALOG: LiveGiftItem[] = [
   { id: 'gift-diamond', name: 'Sovereign Gem', icon: '💎', sparksCost: 10, effect: 'gem_shimmer', color: '#38bdf8', tag: 'VIP' },
   { id: 'gift-rocket', name: 'Falcon Rocket', icon: '🚀', sparksCost: 50, effect: 'rocket_launch', color: '#f97316', tag: 'Hype' },
   { id: 'gift-crown', name: 'Visionary Crown', icon: '👑', sparksCost: 100, effect: 'crown_rain', color: '#fbbf24', tag: 'Luxury' },
-  { id: 'gift-orbit', name: 'Galactic Orbit', icon: '🪐', sparksCost: 500, effect: 'orbit_supernova', color: '#a855f7', tag: 'Epic' },
-  { id: 'gift-quantum', name: 'Quantum Key', icon: '⚡', sparksCost: 1000, effect: 'quantum_laser', color: '#10b981', tag: 'Mythic' },
+  { id: 'gift-dragon', name: 'Celestial Dragon', icon: '🐉', sparksCost: 500, effect: 'dragon_supernova', color: '#f59e0b', tag: 'Godly' },
+  { id: 'gift-galaxy', name: 'Supernova Galaxy', icon: '🌌', sparksCost: 1000, effect: 'galaxy_spiral', color: '#c084fc', tag: 'Supreme' },
 ];
 
 export interface LiveStreamSession {
@@ -785,6 +784,7 @@ export interface LiveStreamSession {
   likesCount: number;
   dailyRank: string;
   previewUrl: string;
+  videoStreamUrl?: string;
   battleInfo: LiveBattleInfo;
   multiGuests: LiveGuestSlot[];
   participants: Array<{ name: string; avatar: string; role: string }>;
@@ -792,6 +792,36 @@ export interface LiveStreamSession {
 }
 
 export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
+  {
+    id: 'live-chloe-4',
+    creatorHandle: 'chloe_visuals',
+    creatorName: 'Chloe Vance',
+    creatorAvatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150',
+    isVerified: false,
+    category: 'Sound Artist',
+    title: 'Modular Synthesizer & Ambient Sound Lab Live',
+    description: 'Generative patches on Eurorack, exploring spatial audio fields and analog warmth.',
+    viewersCount: 520,
+    likesCount: 4891,
+    dailyRank: '🎵 Music Spotlight',
+    previewUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900',
+    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-talking-on-a-video-call-with-her-laptop-42998-large.mp4',
+    battleInfo: {
+      opponentName: 'Julian Thorne',
+      opponentHandle: 'julian_analogue',
+      opponentAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
+      opponentVideoUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
+      opponentStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4',
+      hostScore: 2150,
+      opponentScore: 2407,
+      timeLeft: '02:09',
+      isMatchActive: true,
+      matchTitle: 'Sound vs Light Duel',
+    },
+    multiGuests: [],
+    participants: [],
+    tags: ['Ambient', 'Modular', 'SoundDesign'],
+  },
   {
     id: 'live-elena-1',
     creatorHandle: 'elena_rodriguez',
@@ -805,11 +835,13 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
     likesCount: 14820,
     dailyRank: '🔥 Daily Ranking #2',
     previewUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
+    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-fashion-model-in-neon-lighting-39878-large.mp4',
     battleInfo: {
       opponentName: 'Marcus Vance',
       opponentHandle: 'marcus_dev',
       opponentAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
       opponentVideoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
+      opponentStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-dj-mixing-music-in-a-club-41712-large.mp4',
       coHostName: 'Julian Thorne',
       coHostVideoUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
       hostScore: 3840,
@@ -849,11 +881,13 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
     likesCount: 9840,
     dailyRank: '🔥 Daily Ranking #4',
     previewUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
+    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-dj-mixing-music-in-a-club-41712-large.mp4',
     battleInfo: {
       opponentName: 'Elena Rodriguez',
       opponentHandle: 'elena_rodriguez',
       opponentAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
       opponentVideoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
+      opponentStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-fashion-model-in-neon-lighting-39878-large.mp4',
       hostScore: 2940,
       opponentScore: 3100,
       timeLeft: '01:50',
@@ -884,11 +918,13 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
     likesCount: 6320,
     dailyRank: '⭐ Spotlight #7',
     previewUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
+    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4',
     battleInfo: {
       opponentName: 'Chloe Vance',
       opponentHandle: 'chloe_visuals',
       opponentAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
       opponentVideoUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=900',
+      opponentStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-talking-on-a-video-call-with-her-laptop-42998-large.mp4',
       hostScore: 1980,
       opponentScore: 1850,
       timeLeft: '03:10',
@@ -900,34 +936,6 @@ export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
       { name: 'Chloe Vance', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150', role: 'Listener' },
     ],
     tags: ['Analog', 'Photography', 'Tokyo'],
-  },
-  {
-    id: 'live-chloe-4',
-    creatorHandle: 'chloe_visuals',
-    creatorName: 'Chloe Vance',
-    creatorAvatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150',
-    isVerified: false,
-    category: 'Sound Artist',
-    title: 'Modular Synthesizer & Ambient Sound Lab Live',
-    description: 'Generative patches on Eurorack, exploring spatial audio fields and analog warmth.',
-    viewersCount: 520,
-    likesCount: 4890,
-    dailyRank: '🎵 Music Spotlight',
-    previewUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900',
-    battleInfo: {
-      opponentName: 'Julian Thorne',
-      opponentHandle: 'julian_analogue',
-      opponentAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
-      opponentVideoUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
-      hostScore: 2150,
-      opponentScore: 2300,
-      timeLeft: '02:00',
-      isMatchActive: true,
-      matchTitle: 'Sound vs Light Duel',
-    },
-    multiGuests: [],
-    participants: [],
-    tags: ['Ambient', 'Modular', 'SoundDesign'],
   },
 ];
 
@@ -1305,20 +1313,38 @@ export function App() {
   const [selectedGiftId, setSelectedGiftId] = useState<string>('gift-rocket');
   const [userSparksBalance, setUserSparksBalance] = useState(2450);
   const [activeGiftBanner, setActiveGiftBanner] = useState<{ id: string; sender: string; giftName: string; giftIcon: string; count: number; creatorName: string } | null>(null);
-  const [battleScoreHost, setBattleScoreHost] = useState(3840);
-  const [battleScoreOpponent, setBattleScoreOpponent] = useState(3260);
-  const [battleTimeSeconds, setBattleTimeSeconds] = useState(165);
+  const [battleScoreHost, setBattleScoreHost] = useState(2150);
+  const [battleScoreOpponent, setBattleScoreOpponent] = useState(2407);
+  const [battleTimeSeconds, setBattleTimeSeconds] = useState(129);
   const [isBattleMatchActive, setIsBattleMatchActive] = useState(true);
   const [followedCreators, setFollowedCreators] = useState<Record<string, boolean>>({
+    chloe_visuals: false,
+    julian_analogue: false,
     elena_rodriguez: false,
     marcus_dev: true,
   });
   const [hostLiveLikes, setHostLiveLikes] = useState<Record<string, number>>({
+    'live-chloe-4': 4891,
     'live-elena-1': 14820,
     'live-marcus-2': 9840,
     'live-julian-3': 6320,
-    'live-chloe-4': 4890,
   });
+
+  // AI Vision & Interactive Video Features
+  const [aiLensMode, setAiLensMode] = useState<'cyber' | 'elemental' | 'anime' | 'studio'>('cyber');
+  const [isLiveSoundMuted, setIsLiveSoundMuted] = useState(false);
+  const [pkComboCount, setPkComboCount] = useState(0);
+  const [isGloveClashing, setIsGloveClashing] = useState(false);
+  const [screenScoreFloaters, setScreenScoreFloaters] = useState<Array<{ id: number; text: string; x: number; y: number; side: 'host' | 'rival' }>>([]);
+  const [activeSuperGift, setActiveSuperGift] = useState<{
+    id: string;
+    type: 'rose_storm' | 'celestial_dragon' | 'starship_warp' | 'supernova_galaxy' | 'coronation_crown';
+    name: string;
+    icon: string;
+    sender: string;
+    creatorName: string;
+  } | null>(null);
+
   const [activeLiveStream, setActiveLiveStream] = useState<LiveStreamSession | null>(null);
   const [liveChatInput, setLiveChatInput] = useState('');
   const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; badge?: string; level?: number; isHost?: boolean; isJoin?: boolean; giftName?: string; giftIcon?: string }>>([
@@ -2697,6 +2723,110 @@ export function App() {
     }, 1900);
   };
 
+  const playLiveSoundFX = useCallback((type: 'punch' | 'cheer' | 'gift' | 'supergift') => {
+    if (isLiveSoundMuted || typeof window === 'undefined') return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      const now = ctx.currentTime;
+
+      if (type === 'punch') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.exponentialRampToValueAtTime(36, now + 0.16);
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.16);
+      } else if (type === 'cheer') {
+        [523.25, 659.25, 783.99].forEach((f, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(f, now + idx * 0.04);
+          gain.gain.setValueAtTime(0.12, now + idx * 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.04 + 0.3);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.04);
+          osc.stop(now + idx * 0.04 + 0.3);
+        });
+      } else if (type === 'supergift') {
+        const notes = [440, 554.37, 659.25, 880, 1108.73, 1318.51];
+        notes.forEach((f, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(f, now + idx * 0.07);
+          gain.gain.setValueAtTime(0.22, now + idx * 0.07);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.07 + 0.45);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.07);
+          osc.stop(now + idx * 0.07 + 0.45);
+        });
+      } else if (type === 'gift') {
+        [440, 659.25, 880].forEach((f, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(f, now + idx * 0.06);
+          gain.gain.setValueAtTime(0.15, now + idx * 0.06);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.06 + 0.35);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.06);
+          osc.stop(now + idx * 0.06 + 0.35);
+        });
+      }
+    } catch {
+      // Audio autoplay handled gracefully
+    }
+  }, [isLiveSoundMuted]);
+
+  const handleCreatorTap = (side: 'host' | 'rival', e: React.MouseEvent | React.TouchEvent) => {
+    let clientX = window.innerWidth / 2;
+    let clientY = window.innerHeight / 2;
+    if ('touches' in e && e.touches.length > 0) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else if ('clientX' in e) {
+      clientX = (e as React.MouseEvent).clientX;
+      clientY = (e as React.MouseEvent).clientY;
+    }
+
+    setIsGloveClashing(true);
+    setTimeout(() => setIsGloveClashing(false), 380);
+    playLiveSoundFX('punch');
+
+    setPkComboCount((prev) => prev + 1);
+    const comboMult = pkComboCount >= 10 ? 3 : pkComboCount >= 4 ? 2 : 1;
+    const pts = 15 * comboMult;
+
+    if (side === 'host') {
+      setBattleScoreHost((prev) => prev + pts);
+      handleLiveHeartBurst('#ff2b54');
+    } else {
+      setBattleScoreOpponent((prev) => prev + pts);
+      handleLiveHeartBurst('#00f2fe');
+    }
+
+    const floaterId = Date.now() + Math.random();
+    const floaterText = `+${pts}${comboMult > 1 ? ` 🔥 x${comboMult}` : ''}`;
+    setScreenScoreFloaters((prev) => [...prev, { id: floaterId, text: floaterText, x: clientX, y: clientY, side }]);
+    setTimeout(() => {
+      setScreenScoreFloaters((prev) => prev.filter((item) => item.id !== floaterId));
+    }, 1100);
+  };
+
   const handleThrowGift = (gift: LiveGiftItem) => {
     if (userSparksBalance < gift.sparksCost) {
       triggerToast(`Insufficient Sparks! Need ${gift.sparksCost} Sparks.`);
@@ -2706,7 +2836,7 @@ export function App() {
     setIsGiftTrayOpen(false);
 
     // Boost Host's Battle Points
-    const pts = gift.sparksCost * 15;
+    const pts = gift.sparksCost * 20;
     setBattleScoreHost((prev) => prev + pts);
 
     const currentStream = liveStreamsList[activeLiveIndex] || liveStreamsList[0];
@@ -2736,6 +2866,31 @@ export function App() {
         giftIcon: gift.icon,
       },
     ]);
+
+    // Check for 3D AI Super-Gift Celebrations
+    let superType: 'rose_storm' | 'celestial_dragon' | 'starship_warp' | 'supernova_galaxy' | 'coronation_crown' | null = null;
+    if (gift.id === 'gift-rose') superType = 'rose_storm';
+    else if (gift.id === 'gift-dragon') superType = 'celestial_dragon';
+    else if (gift.id === 'gift-rocket') superType = 'starship_warp';
+    else if (gift.id === 'gift-galaxy') superType = 'supernova_galaxy';
+    else if (gift.id === 'gift-crown') superType = 'coronation_crown';
+
+    if (superType) {
+      playLiveSoundFX('supergift');
+      setActiveSuperGift({
+        id: String(Date.now()),
+        type: superType,
+        name: gift.name,
+        icon: gift.icon,
+        sender: myProfile.name,
+        creatorName: currentStream.creatorName,
+      });
+      setTimeout(() => {
+        setActiveSuperGift(null);
+      }, 4200);
+    } else {
+      playLiveSoundFX('gift');
+    }
 
     // Burst hearts with gift color
     for (let i = 0; i < 6; i++) {
@@ -4623,6 +4778,20 @@ export function App() {
                           <span className="live-chevron-down">⌄</span>
                         </div>
 
+                        {/* Native Sound FX Mute Toggle */}
+                        <button
+                          type="button"
+                          className="live-sound-toggle-btn"
+                          onClick={() => {
+                            const next = !isLiveSoundMuted;
+                            setIsLiveSoundMuted(next);
+                            triggerToast(next ? 'Live Audio Muted 🔇' : 'Live Audio Unmuted 🔊');
+                          }}
+                          title={isLiveSoundMuted ? 'Unmute Live Audio' : 'Mute Live Audio'}
+                        >
+                          {isLiveSoundMuted ? '🔇' : '🔊'}
+                        </button>
+
                         <button
                           type="button"
                           className="live-close-btn"
@@ -4634,7 +4803,7 @@ export function App() {
                       </div>
                     </div>
 
-                    {/* SUB-HEADER: RANKING & GIFT GOALS (IMAGE 3) */}
+                    {/* SUB-HEADER: RANKING, AI LENS & GOALS */}
                     <div className="live-arena-sub-bar">
                       <div className="live-ranking-badge">
                         <span>{currentLive.dailyRank}</span>
@@ -4642,6 +4811,24 @@ export function App() {
                       <div className="live-gift-goal-pill" onClick={() => setIsGiftTrayOpen(true)} title="Task Goal">
                         <span>🎯 0/1</span>
                       </div>
+
+                      {/* Interactive AI Vision Lens Switcher */}
+                      <div
+                        className={`live-ai-lens-pill lens-${aiLensMode}`}
+                        onClick={() => {
+                          const modes: Array<'cyber' | 'elemental' | 'anime' | 'studio'> = ['cyber', 'elemental', 'anime', 'studio'];
+                          const nextIdx = (modes.indexOf(aiLensMode) + 1) % modes.length;
+                          const nextMode = modes[nextIdx];
+                          setAiLensMode(nextMode);
+                          playLiveSoundFX('cheer');
+                          triggerToast(`✨ AI Vision: ${nextMode.toUpperCase()} Filter Activated!`);
+                        }}
+                        title="Tap to cycle AI Video Lens"
+                      >
+                        <span className="ai-lens-sparkle">✨</span>
+                        <span className="ai-lens-label">AI {aiLensMode.toUpperCase()}</span>
+                      </div>
+
                       <div className="live-gallery-pill" onClick={() => { handleStartGoLive(); triggerToast('Now broadcasting live! 🎥'); }} title="Go Live as Host">
                         <span>Get Into Game... 🎟️</span>
                       </div>
@@ -4655,15 +4842,23 @@ export function App() {
                           <div
                             className="battle-bar-half host-half"
                             style={{ width: `${hostPct}%` }}
+                            onClick={(e) => handleCreatorTap('host', e)}
+                            title="Cheer Host"
                           >
                             <span className="battle-bar-score host-num">{battleScoreHost.toLocaleString()}</span>
                           </div>
-                          <div className="battle-bar-center-gloves">
+                          <div
+                            className={`battle-bar-center-gloves ${isGloveClashing ? 'clash-pulse' : ''}`}
+                            onClick={(e) => handleCreatorTap('host', e)}
+                            title="Tap to Clash!"
+                          >
                             <span className="battle-gloves-icon">🥊</span>
                           </div>
                           <div
                             className="battle-bar-half rival-half"
                             style={{ width: `${100 - hostPct}%` }}
+                            onClick={(e) => handleCreatorTap('rival', e)}
+                            title="Cheer Rival"
                           >
                             <span className="battle-bar-score rival-num">{battleScoreOpponent.toLocaleString()}</span>
                           </div>
@@ -4691,36 +4886,145 @@ export function App() {
                       </div>
                     )}
 
-                    {/* 3. DYNAMIC VIDEO STAGE */}
-                    <div className={`live-stage-surface mode-${liveLayoutMode}`}>
+                    {/* GIFTERS CIRCLES UNDER SCORE BAR (EXACT IMAGE 3 - TOP: 142px) */}
+                    {liveLayoutMode === 'battle' && (
+                      <div className="battle-supporters-under-cam-row">
+                        {/* Host Gifters Circles: 3, 2, 1 */}
+                        <div className="supporters-group host-group">
+                          <div className="supporter-avatar-circle rank-3" title="Top Gifter #3">
+                            <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=90" alt="Gifter 3" />
+                            <span className="supporter-rank-chip pink">3</span>
+                          </div>
+                          <div className="supporter-avatar-circle rank-2" title="Top Gifter #2">
+                            <img src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=90" alt="Gifter 2" />
+                            <span className="supporter-rank-chip pink">2</span>
+                          </div>
+                          <div className="supporter-avatar-circle rank-1" title="Top Gifter #1">
+                            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=90" alt="Gifter 1" />
+                            <span className="supporter-rank-chip pink">1</span>
+                          </div>
+                        </div>
+
+                        {/* Rival Gifters Circles: 1, 2, 3 */}
+                        <div className="supporters-group rival-group">
+                          <div className="supporter-avatar-circle rank-1" title="Rival Gifter #1">
+                            <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=90" alt="Rival Gifter 1" />
+                            <span className="supporter-rank-chip cyan">1</span>
+                          </div>
+                          <div className="supporter-avatar-circle rank-2" title="Rival Gifter #2">
+                            <img src="https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=90" alt="Rival Gifter 2" />
+                            <span className="supporter-rank-chip cyan">2</span>
+                          </div>
+                          <div className="supporter-avatar-circle rank-3" title="Rival Gifter #3">
+                            <img src="https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=90" alt="Rival Gifter 3" />
+                            <span className="supporter-rank-chip cyan">3</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. DYNAMIC FULL-SCREEN VIDEO STAGE (EDGE-TO-EDGE, NO BLACK SPOTS) */}
+                    <div className={`live-stage-surface mode-${liveLayoutMode} lens-${aiLensMode}`}>
+                      {/* Ambient high-blur backdrop ensuring 0 dead pixels */}
+                      <div
+                        className="live-fullscreen-ambient-backdrop"
+                        style={{ backgroundImage: `url(${currentLive.previewUrl})` }}
+                      />
+
                       {liveLayoutMode === 'battle' ? (
                         /* 1v1 MATCH (EXACT IMAGE 3) */
                         <div className="battle-exact-split-stage">
-                          {/* Left Half: Host */}
-                          <div className="battle-exact-cam-box host">
-                            <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="battle-exact-cam-img" />
+                          {/* Left Half: Host Chloe */}
+                          <div
+                            className="battle-exact-cam-box host"
+                            onClick={(e) => handleCreatorTap('host', e)}
+                          >
+                            <video
+                              className="battle-exact-cam-video"
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                              poster={currentLive.previewUrl}
+                              src={currentLive.videoStreamUrl || 'https://assets.mixkit.co/videos/preview/mixkit-woman-talking-on-a-video-call-with-her-laptop-42998-large.mp4'}
+                            />
+                            <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="battle-exact-cam-img fallback" />
                             <div className="battle-exact-cam-overlay" />
-                            <div className="battle-cam-tag host-tag">
-                              <span>👑 {currentLive.creatorName}</span>
-                            </div>
+
+                            {/* AI Video Lens Effect Overlay: Cyber Face Tracker */}
+                            {aiLensMode === 'cyber' && (
+                              <div className="ai-cyber-face-tracker host-hud">
+                                <div className="face-box-reticle">
+                                  <div className="reticle-corner tl" />
+                                  <div className="reticle-corner tr" />
+                                  <div className="reticle-corner bl" />
+                                  <div className="reticle-corner br" />
+                                  <div className="reticle-label">TARGET: CHLOE · 99.4%</div>
+                                </div>
+                                <div className="biometric-hud-pill">
+                                  <span className="hud-pulse-dot" />
+                                  <span>HR: 78 BPM · 432 Hz</span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* AI Video Lens Effect: Solar Fire Aura */}
+                            {aiLensMode === 'elemental' && (
+                              <div className="elemental-aura-host">
+                                <div className="elemental-fire-shimmer" />
+                                <div className="elemental-spark-particle p1">🔥</div>
+                                <div className="elemental-spark-particle p2">✨</div>
+                              </div>
+                            )}
                           </div>
 
-                          {/* Center Divider Line */}
-                          <div className="battle-exact-divider-line" />
+                          {/* Center Divider Energy Clash Beam */}
+                          <div className={`battle-exact-divider-line ${isGloveClashing ? 'clash-flash' : ''}`}>
+                            <div className="pk-clash-core-beam" />
+                          </div>
 
-                          {/* Right Half: Rival */}
-                          <div className="battle-exact-cam-box rival">
-                            <img src={currentLive.battleInfo.opponentVideoUrl} alt={currentLive.battleInfo.opponentName} className="battle-exact-cam-img" />
+                          {/* Right Half: Rival Julian */}
+                          <div
+                            className="battle-exact-cam-box rival"
+                            onClick={(e) => handleCreatorTap('rival', e)}
+                          >
+                            <video
+                              className="battle-exact-cam-video"
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                              poster={currentLive.battleInfo.opponentVideoUrl}
+                              src={currentLive.battleInfo.opponentStreamUrl || 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4'}
+                            />
+                            <img src={currentLive.battleInfo.opponentVideoUrl} alt={currentLive.battleInfo.opponentName} className="battle-exact-cam-img fallback" />
                             <div className="battle-exact-cam-overlay" />
-                            <div
-                              className="battle-cam-tag rival-tag"
-                              onClick={() => triggerToast(`Followed @${currentLive.battleInfo.opponentHandle}! ✨`)}
-                              title={`Follow @${currentLive.battleInfo.opponentHandle}`}
-                            >
-                              <span className="rival-heart">💚</span>
-                              <span className="rival-name">{currentLive.battleInfo.opponentName}</span>
-                              <span className="rival-plus-btn">+</span>
-                            </div>
+
+                            {/* AI Video Lens Effect Overlay: Cyber Face Tracker */}
+                            {aiLensMode === 'cyber' && (
+                              <div className="ai-cyber-face-tracker rival-hud">
+                                <div className="face-box-reticle">
+                                  <div className="reticle-corner tl" />
+                                  <div className="reticle-corner tr" />
+                                  <div className="reticle-corner bl" />
+                                  <div className="reticle-corner br" />
+                                  <div className="reticle-label">TARGET: JULIAN · 98.7%</div>
+                                </div>
+                                <div className="biometric-hud-pill">
+                                  <span className="hud-pulse-dot rival" />
+                                  <span>HR: 84 BPM · 35mm F1.4</span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* AI Video Lens Effect: Glacial Frost Aura */}
+                            {aiLensMode === 'elemental' && (
+                              <div className="elemental-aura-rival">
+                                <div className="elemental-ice-shimmer" />
+                                <div className="elemental-spark-particle p1">❄️</div>
+                                <div className="elemental-spark-particle p2">⚡</div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -4755,40 +5059,135 @@ export function App() {
                           </div>
                         </div>
                       )}
+
+                      {/* AI Video Scanline Effect for Cyber Mode */}
+                      {aiLensMode === 'cyber' && <div className="ai-cyber-scanline-beam" />}
+
+                      {/* AI Anime Speedburst Lines */}
+                      {aiLensMode === 'anime' && <div className="ai-anime-speedlines" />}
+
+                      {/* Studio Anamorphic Flare */}
+                      {aiLensMode === 'studio' && <div className="ai-studio-lens-flare" />}
+
+                      {/* Bottom Scrim ensuring comments are 100% readable over video */}
+                      <div className="live-stage-bottom-scrim" />
                     </div>
 
-                    {/* GIFTERS CIRCLES UNDER EACH VIDEO (EXACT IMAGE 3) */}
+                    {/* CREATOR NAME TAGS ROW (PINNED DIRECTLY ABOVE CHAT STREAM) */}
                     {liveLayoutMode === 'battle' && (
-                      <div className="battle-supporters-under-cam-row">
-                        {/* Host Gifters Circles: 3, 2, 1 */}
-                        <div className="supporters-group host-group">
-                          <div className="supporter-avatar-circle rank-3" title="Top Gifter #3">
-                            <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=90" alt="Gifter 3" />
-                            <span className="supporter-rank-chip pink">3</span>
-                          </div>
-                          <div className="supporter-avatar-circle rank-2" title="Top Gifter #2">
-                            <img src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=90" alt="Gifter 2" />
-                            <span className="supporter-rank-chip pink">2</span>
-                          </div>
-                          <div className="supporter-avatar-circle rank-1" title="Top Gifter #1">
-                            <img src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=90" alt="Gifter 1" />
-                            <span className="supporter-rank-chip pink">1</span>
-                          </div>
+                      <div className="battle-cam-footer-tags-row">
+                        <div
+                          className="battle-cam-tag host-tag"
+                          onClick={() => navigateToProfile(currentLive.creatorHandle)}
+                          title="Host Creator"
+                        >
+                          <span>👑 {currentLive.creatorName}</span>
                         </div>
 
-                        {/* Rival Gifters Circles: 1, 2, 3 */}
-                        <div className="supporters-group rival-group">
-                          <div className="supporter-avatar-circle rank-1" title="Rival Gifter #1">
-                            <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=90" alt="Rival Gifter 1" />
-                            <span className="supporter-rank-chip cyan">1</span>
+                        <div
+                          className="battle-cam-tag rival-tag"
+                          onClick={() => triggerToast(`Followed @${currentLive.battleInfo.opponentHandle}! ✨`)}
+                          title={`Follow @${currentLive.battleInfo.opponentHandle}`}
+                        >
+                          <span className="rival-heart">💚</span>
+                          <span className="rival-name">{currentLive.battleInfo.opponentName}</span>
+                          <span className="rival-plus-btn">+</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* INTERACTIVE BOXING GLOVE IMPACT CLASH ANIMATION */}
+                    {isGloveClashing && (
+                      <div className="pk-interactive-glove-clash-modal">
+                        <div className="clash-shockwave-ring" />
+                        <div className="clash-gloves-pair">
+                          <span className="clashing-glove left">🥊</span>
+                          <span className="clashing-spark">💥</span>
+                          <span className="clashing-glove right">🥊</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* FLOATING TAP SCORE FLOATERS */}
+                    {screenScoreFloaters.map((floater) => (
+                      <div
+                        key={floater.id}
+                        className={`screen-score-floater ${floater.side}`}
+                        style={{ left: `${floater.x}px`, top: `${floater.y - 40}px` }}
+                      >
+                        {floater.text}
+                      </div>
+                    ))}
+
+                    {/* PK COMBO STREAK BADGE */}
+                    {pkComboCount >= 3 && (
+                      <div className="pk-combo-streak-badge">
+                        <span>🔥 SPEED COMBO x{pkComboCount}!</span>
+                      </div>
+                    )}
+
+                    {/* FULL-SCREEN 3D AI SUPER-GIFT CINEMATIC CELEBRATIONS */}
+                    {activeSuperGift && (
+                      <div className={`super-gift-cinematic-overlay ${activeSuperGift.type}`}>
+                        {/* 1. Rose Storm / Tornado */}
+                        {activeSuperGift.type === 'rose_storm' && (
+                          <div className="rose-tornado-scene">
+                            {Array.from({ length: 24 }).map((_, idx) => (
+                              <div
+                                key={idx}
+                                className="rose-swirl-petal"
+                                style={{
+                                  left: `${(idx * 4.2) % 100}%`,
+                                  animationDelay: `${(idx * 0.12).toFixed(2)}s`,
+                                  fontSize: `${28 + (idx % 4) * 8}px`,
+                                }}
+                              >
+                                🌹
+                              </div>
+                            ))}
                           </div>
-                          <div className="supporter-avatar-circle rank-2" title="Rival Gifter #2">
-                            <img src="https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=90" alt="Rival Gifter 2" />
-                            <span className="supporter-rank-chip cyan">2</span>
+                        )}
+
+                        {/* 2. Celestial Golden Dragon */}
+                        {activeSuperGift.type === 'celestial_dragon' && (
+                          <div className="celestial-dragon-scene">
+                            <div className="dragon-cosmic-glow" />
+                            <div className="golden-dragon-avatar">🐉</div>
+                            <div className="dragon-lightning-arcs" />
                           </div>
-                          <div className="supporter-avatar-circle rank-3" title="Rival Gifter #3">
-                            <img src="https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=90" alt="Rival Gifter 3" />
-                            <span className="supporter-rank-chip cyan">3</span>
+                        )}
+
+                        {/* 3. Falcon Starship Warp */}
+                        {activeSuperGift.type === 'starship_warp' && (
+                          <div className="starship-launch-scene">
+                            <div className="warp-speed-stars" />
+                            <div className="falcon-rocket-body">🚀</div>
+                            <div className="rocket-exhaust-plume" />
+                          </div>
+                        )}
+
+                        {/* 4. Supernova Galaxy */}
+                        {activeSuperGift.type === 'supernova_galaxy' && (
+                          <div className="galaxy-nebula-scene">
+                            <div className="supernova-center-core">🌌</div>
+                            <div className="spiral-galaxy-arms" />
+                          </div>
+                        )}
+
+                        {/* 5. Coronation Crown */}
+                        {activeSuperGift.type === 'coronation_crown' && (
+                          <div className="diamond-crown-scene">
+                            <div className="regal-light-rays" />
+                            <div className="descending-crown">👑</div>
+                            <div className="coronation-sparkles">✨ 💎 ✨</div>
+                          </div>
+                        )}
+
+                        {/* Cinematic Super-Gift Banner */}
+                        <div className="super-gift-announcement-banner">
+                          <div className="super-gift-title">SUPER GIFT UNLEASHED!</div>
+                          <div className="super-gift-subtitle">
+                            <strong>{activeSuperGift.sender}</strong> gifted {activeSuperGift.icon} <strong>{activeSuperGift.name}</strong> to {activeSuperGift.creatorName}!
                           </div>
                         </div>
                       </div>

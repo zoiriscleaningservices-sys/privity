@@ -5956,6 +5956,29 @@ textarea::placeholder {
   margin-left: -2px;
 }
 
+.live-sound-toggle-btn {
+  background: rgba(10, 14, 26, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  cursor: pointer;
+  color: #fff;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.live-sound-toggle-btn:hover {
+  transform: scale(1.1);
+  background: rgba(255, 255, 255, 0.2);
+}
+
 /* 4. Sub-Bar: Ranking & Goals (Matching Image 3) */
 .live-arena-sub-bar {
   position: absolute;
@@ -5980,6 +6003,36 @@ textarea::placeholder {
   font-size: 10.5px;
   font-weight: 700;
   backdrop-filter: blur(12px);
+}
+
+.live-ai-lens-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.35) 0%, rgba(99, 102, 241, 0.35) 100%);
+  border: 1px solid rgba(192, 132, 252, 0.6);
+  color: #f3e8ff;
+  font-size: 10.5px;
+  font-weight: 800;
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: aiLensPulse 2.4s infinite ease-in-out;
+}
+
+.live-ai-lens-pill:hover {
+  transform: scale(1.06);
+  border-color: #e9d5ff;
+  box-shadow: 0 0 18px rgba(192, 132, 252, 0.7);
+}
+
+@keyframes aiLensPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(168, 85, 247, 0.3); }
+  50% { box-shadow: 0 0 18px rgba(168, 85, 247, 0.75), 0 0 6px rgba(255, 255, 255, 0.5); }
 }
 
 .live-gift-goal-pill,
@@ -6154,34 +6207,47 @@ textarea::placeholder {
   letter-spacing: 0.04em;
 }
 
-/* 6. Dynamic Video Stage Surface */
+/* 6. Dynamic Video Stage Surface - 100% True Full-Screen (Edge-to-Edge, Zero Black Gap) */
 .live-stage-surface {
   position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 20;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
+  overflow: hidden;
+  background: #000;
 }
 
-.live-stage-surface.mode-battle {
-  top: 140px;
-  height: min(44vh, 390px);
-  min-height: 280px;
-}
-
+.live-stage-surface.mode-battle,
 .live-stage-surface.mode-4way {
-  top: 92px;
-  height: min(49vh, 430px);
-  min-height: 300px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Ambient high-blur background reflection to eliminate any letterbox voids */
+.live-fullscreen-ambient-backdrop {
+  position: absolute;
+  inset: -20px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(48px) brightness(0.65) saturate(1.4);
+  transform: scale(1.15);
+  z-index: 1;
+  pointer-events: none;
 }
 
 /* 1v1 Battle Split Stage (Matching Image 3) */
 .battle-exact-split-stage {
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: flex;
   width: 100%;
   height: 100%;
-  background: #000;
+  z-index: 2;
   overflow: hidden;
+  background: #000;
 }
 
 .battle-exact-cam-box {
@@ -6189,6 +6255,17 @@ textarea::placeholder {
   flex: 1;
   height: 100%;
   overflow: hidden;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.battle-exact-cam-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 25%;
+  display: block;
 }
 
 .battle-exact-cam-img {
@@ -6198,147 +6275,294 @@ textarea::placeholder {
   display: block;
 }
 
+.battle-exact-cam-img.fallback {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+
 .battle-exact-cam-overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.35) 0%, transparent 25%, transparent 75%, rgba(0, 0, 0, 0.55) 100%);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.4) 0%, transparent 22%, transparent 60%, rgba(0, 0, 0, 0.65) 100%);
   pointer-events: none;
 }
 
+/* Center Divider Line with Neon Energy Clash Beam */
 .battle-exact-divider-line {
-  width: 1.5px;
+  position: relative;
+  width: 2.5px;
   height: 100%;
-  background: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 6px rgba(0, 0, 0, 0.8);
-  z-index: 10;
-}
-
-.battle-cam-tag {
-  position: absolute;
-  z-index: 15;
-  display: flex;
-  align-items: center;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-radius: 9999px;
-}
-
-.battle-cam-tag.host-tag {
-  bottom: 8px;
-  left: 8px;
-  background: rgba(10, 14, 26, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  padding: 3px 8px;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.battle-cam-tag.rival-tag {
-  bottom: 8px;
-  right: 8px;
-  background: rgba(10, 14, 26, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  padding: 2px 4px 2px 8px;
-  gap: 5px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.battle-cam-tag.rival-tag:hover {
-  background: rgba(10, 14, 26, 0.95);
-  border-color: rgba(255, 43, 84, 0.4);
-}
-
-.rival-heart {
-  font-size: 11px;
-}
-
-.rival-name {
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rival-plus-btn {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #ff2b54;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 900;
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.8), 0 0 24px rgba(0, 242, 254, 0.6);
+  z-index: 12;
   display: flex;
   align-items: center;
   justify-content: center;
-  line-height: 1;
-  transition: all 0.2s ease;
 }
 
-.rival-plus-btn:hover {
-  transform: scale(1.15);
-  background: #e02447;
+.battle-exact-divider-line.clash-flash {
+  box-shadow: 0 0 35px #ff2b54, 0 0 45px #00f2fe;
 }
 
-/* 4-Way 2x2 Grid Stage (Matching Image 2) */
-.fourway-grid-stage {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  gap: 2px;
-  width: 100%;
-  height: 100%;
-  background: #000;
-}
-
-.fourway-cell {
-  position: relative;
-  overflow: hidden;
-  background: #111;
-}
-
-.fourway-cam-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.fourway-tag {
+.pk-clash-core-beam {
   position: absolute;
-  bottom: 6px;
-  left: 6px;
-  background: rgba(10, 14, 26, 0.7);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  padding: 2px 6px;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  z-index: 10;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to bottom, #ff2b54, #fff, #00f2fe);
+  animation: clashCorePulse 1.8s infinite alternate ease-in-out;
 }
 
-/* 7. Supporters Facepile Circles Under Camera (Matching Image 3) */
+@keyframes clashCorePulse {
+  0% { opacity: 0.7; transform: scaleX(1); }
+  100% { opacity: 1; transform: scaleX(2.2); }
+}
+
+/* Bottom Scrim ensuring comments and controls are 100% readable over video */
+.live-stage-bottom-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.45) 0%,
+    transparent 16%,
+    transparent 42%,
+    rgba(0, 0, 0, 0.45) 62%,
+    rgba(0, 0, 0, 0.84) 82%,
+    rgba(0, 0, 0, 0.98) 100%
+  );
+}
+
+/* AI VIDEO LENS: CYBER FACE TRACKER & BIOMETRIC HUD */
+.ai-cyber-face-tracker {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+  animation: hudFadeIn 0.3s ease-out;
+}
+
+.ai-cyber-face-tracker.host-hud {
+  top: 32%;
+  left: 18%;
+  width: 140px;
+}
+
+.ai-cyber-face-tracker.rival-hud {
+  top: 30%;
+  left: 20%;
+  width: 140px;
+}
+
+@keyframes hudFadeIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.face-box-reticle {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border: 1px dashed rgba(0, 242, 254, 0.45);
+  border-radius: 8px;
+  animation: reticleGlow 2s infinite alternate;
+}
+
+.host-hud .face-box-reticle {
+  border-color: rgba(255, 43, 84, 0.55);
+}
+
+@keyframes reticleGlow {
+  0% { box-shadow: 0 0 6px rgba(0, 242, 254, 0.3); }
+  100% { box-shadow: 0 0 16px rgba(0, 242, 254, 0.7); }
+}
+
+.reticle-corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: #00f2fe;
+}
+
+.host-hud .reticle-corner {
+  border-color: #ff2b54;
+}
+
+.reticle-corner.tl { top: -2px; left: -2px; border-top: 2.5px solid; border-left: 2.5px solid; }
+.reticle-corner.tr { top: -2px; right: -2px; border-top: 2.5px solid; border-right: 2.5px solid; }
+.reticle-corner.bl { bottom: -2px; left: -2px; border-bottom: 2.5px solid; border-left: 2.5px solid; }
+.reticle-corner.br { bottom: -2px; right: -2px; border-bottom: 2.5px solid; border-right: 2.5px solid; }
+
+.reticle-label {
+  position: absolute;
+  top: -18px;
+  left: 0;
+  font-size: 8.5px;
+  font-family: monospace;
+  font-weight: 800;
+  color: #00f2fe;
+  letter-spacing: 0.06em;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.host-hud .reticle-label {
+  color: #ff2b54;
+}
+
+.biometric-hud-pill {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(10, 15, 30, 0.85);
+  border: 1px solid rgba(0, 242, 254, 0.3);
+  border-radius: 9999px;
+  padding: 2px 7px;
+  font-size: 8.5px;
+  font-family: monospace;
+  font-weight: 700;
+  color: #e2e8f0;
+  backdrop-filter: blur(8px);
+}
+
+.host-hud .biometric-hud-pill {
+  border-color: rgba(255, 43, 84, 0.35);
+}
+
+.hud-pulse-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ff2b54;
+  animation: hudPulse 0.9s infinite alternate;
+}
+
+.hud-pulse-dot.rival {
+  background: #00f2fe;
+}
+
+@keyframes hudPulse {
+  0% { transform: scale(0.8); opacity: 0.5; }
+  100% { transform: scale(1.3); opacity: 1; }
+}
+
+/* AI Cyber Scanline Laser */
+.ai-cyber-scanline-beam {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #00f2fe, #ff2b54, transparent);
+  box-shadow: 0 0 16px rgba(0, 242, 254, 0.9);
+  z-index: 9;
+  pointer-events: none;
+  animation: scanlineScan 3.5s infinite linear;
+}
+
+@keyframes scanlineScan {
+  0% { transform: translateY(0vh); opacity: 0; }
+  10% { opacity: 0.9; }
+  90% { opacity: 0.9; }
+  100% { transform: translateY(85vh); opacity: 0; }
+}
+
+/* AI ELEMENTAL AURA: SOLAR FIRE & GLACIAL FROST */
+.elemental-aura-host {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  box-shadow: inset 0 0 35px rgba(255, 43, 84, 0.45);
+}
+
+.elemental-aura-rival {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  box-shadow: inset 0 0 35px rgba(0, 242, 254, 0.45);
+}
+
+.elemental-fire-shimmer {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 60%, rgba(255, 77, 109, 0.15) 0%, transparent 70%);
+  animation: fireFlicker 1.4s infinite alternate;
+}
+
+.elemental-ice-shimmer {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 60%, rgba(0, 242, 254, 0.15) 0%, transparent 70%);
+  animation: fireFlicker 1.4s infinite alternate-reverse;
+}
+
+@keyframes fireFlicker {
+  0% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.elemental-spark-particle {
+  position: absolute;
+  font-size: 18px;
+  animation: sparkDrift 2.4s infinite ease-out;
+}
+
+.elemental-spark-particle.p1 { bottom: 35%; left: 30%; animation-delay: 0.3s; }
+.elemental-spark-particle.p2 { bottom: 45%; right: 25%; animation-delay: 1.1s; }
+
+@keyframes sparkDrift {
+  0% { transform: translateY(0) scale(0.6); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: translateY(-70px) scale(1.1); opacity: 0; }
+}
+
+/* AI Anime Speedburst Lines */
+.ai-anime-speedlines {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  background: radial-gradient(circle, transparent 40%, rgba(255, 255, 255, 0.08) 85%);
+  box-shadow: inset 0 0 50px rgba(168, 85, 247, 0.35);
+  animation: animeSpeedPulse 0.4s infinite alternate;
+}
+
+@keyframes animeSpeedPulse {
+  0% { opacity: 0.4; }
+  100% { opacity: 0.85; }
+}
+
+/* AI Studio Anamorphic Flare */
+.ai-studio-lens-flare {
+  position: absolute;
+  top: 28%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.7), rgba(251, 191, 36, 0.8), transparent);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.6);
+  z-index: 8;
+  pointer-events: none;
+}
+
+/* 7. Supporters Facepile Circles (Exact Image 3 - Positioned at Top 142px directly under PK sub-bar) */
 .battle-supporters-under-cam-row {
   position: absolute;
-  top: calc(140px + min(44vh, 390px) + 8px);
+  top: 142px;
   left: 0;
   right: 0;
   height: 38px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px;
-  z-index: 25;
+  padding: 0 12px;
+  z-index: 45;
   pointer-events: auto;
 }
 
@@ -6404,6 +6628,395 @@ textarea::placeholder {
 .supporter-rank-chip.cyan {
   background: #00d2ff;
   color: #000;
+}
+
+/* CREATOR NAME TAGS ROW - PINNED ABOVE CHAT */
+.battle-cam-footer-tags-row {
+  position: absolute;
+  bottom: 275px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 30;
+  pointer-events: auto;
+}
+
+.battle-cam-tag {
+  display: flex;
+  align-items: center;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 9999px;
+}
+
+.battle-cam-tag.host-tag {
+  background: rgba(10, 14, 26, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 4px 10px;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+.battle-cam-tag.rival-tag {
+  background: rgba(10, 14, 26, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 3px 5px 3px 9px;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  transition: all 0.2s ease;
+}
+
+.battle-cam-tag.rival-tag:hover {
+  background: rgba(10, 14, 26, 0.95);
+  border-color: rgba(255, 43, 84, 0.5);
+}
+
+.rival-heart {
+  font-size: 11px;
+}
+
+.rival-name {
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 700;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rival-plus-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ff2b54;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: all 0.2s ease;
+}
+
+.rival-plus-btn:hover {
+  transform: scale(1.15);
+  background: #e02447;
+}
+
+/* INTERACTIVE BOXING GLOVE IMPACT CLASH MODAL */
+.pk-interactive-glove-clash-modal {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clash-shockwave-ring {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 35px #ff2b54, 0 0 55px #00f2fe;
+  animation: shockwaveExpand 0.38s ease-out forwards;
+}
+
+@keyframes shockwaveExpand {
+  0% { transform: scale(0.2); opacity: 1; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.clash-gloves-pair {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  animation: glovesSlam 0.35s ease-out forwards;
+}
+
+@keyframes glovesSlam {
+  0% { transform: scale(0.4); }
+  50% { transform: scale(1.4); }
+  100% { transform: scale(1); }
+}
+
+.clashing-glove {
+  font-size: 42px;
+  filter: drop-shadow(0 0 15px rgba(255, 43, 84, 0.8));
+}
+
+.clashing-glove.right {
+  transform: scaleX(-1);
+  filter: drop-shadow(0 0 15px rgba(0, 242, 254, 0.8));
+}
+
+.clashing-spark {
+  font-size: 34px;
+  animation: sparkBurst 0.3s ease-out;
+}
+
+@keyframes sparkBurst {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.6); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* SCREEN SCORE FLOATERS */
+.screen-score-floater {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  font-size: 18px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+  animation: floaterFloatUp 1.1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.screen-score-floater.host {
+  color: #ff4d6d;
+  text-shadow: 0 0 14px rgba(255, 43, 84, 0.9);
+}
+
+.screen-score-floater.rival {
+  color: #00f2fe;
+  text-shadow: 0 0 14px rgba(0, 242, 254, 0.9);
+}
+
+@keyframes floaterFloatUp {
+  0% { transform: translateY(0) scale(0.7); opacity: 1; }
+  50% { transform: translateY(-35px) scale(1.25); opacity: 1; }
+  100% { transform: translateY(-75px) scale(1); opacity: 0; }
+}
+
+/* PK COMBO STREAK BADGE */
+.pk-combo-streak-badge {
+  position: absolute;
+  top: 185px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #ff2b54 0%, #ff8e3c 100%);
+  border: 1.5px solid #fff;
+  border-radius: 9999px;
+  padding: 4px 14px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 20px rgba(255, 43, 84, 0.6);
+  z-index: 46;
+  pointer-events: none;
+  animation: comboBadgePulse 0.6s infinite alternate;
+}
+
+@keyframes comboBadgePulse {
+  0% { transform: translateX(-50%) scale(1); }
+  100% { transform: translateX(-50%) scale(1.08); }
+}
+
+/* FULL-SCREEN 3D AI SUPER-GIFT CINEMATIC CELEBRATIONS */
+.super-gift-cinematic-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+  overflow: hidden;
+  animation: superGiftOverlayFade 4.2s ease-in-out forwards;
+}
+
+@keyframes superGiftOverlayFade {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* 1. Rose Storm / Tornado */
+.rose-tornado-scene {
+  position: absolute;
+  inset: 0;
+}
+
+.rose-swirl-petal {
+  position: absolute;
+  bottom: -40px;
+  animation: roseTornadoSpiral 3.4s ease-out forwards;
+}
+
+@keyframes roseTornadoSpiral {
+  0% {
+    transform: translateY(0) rotate(0deg) scale(0.6);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-50vh) rotate(360deg) scale(1.3);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateY(-110vh) rotate(720deg) scale(1);
+    opacity: 0;
+  }
+}
+
+/* 2. Celestial Golden Dragon */
+.celestial-dragon-scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dragon-cosmic-glow {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.6) 0%, rgba(234, 88, 12, 0.2) 50%, transparent 70%);
+  animation: dragonGlowPulse 1.2s infinite alternate;
+}
+
+@keyframes dragonGlowPulse {
+  0% { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(1.2); opacity: 1; }
+}
+
+.golden-dragon-avatar {
+  font-size: 96px;
+  filter: drop-shadow(0 0 35px #f59e0b) drop-shadow(0 0 60px #ea580c);
+  animation: dragonFlyAcross 3.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes dragonFlyAcross {
+  0% { transform: translate(-120px, 80px) rotate(-15deg) scale(0.4); opacity: 0; }
+  35% { transform: translate(0, -20px) rotate(5deg) scale(1.3); opacity: 1; }
+  75% { transform: translate(40px, -60px) rotate(-5deg) scale(1.1); opacity: 1; }
+  100% { transform: translate(140px, -140px) rotate(15deg) scale(0.5); opacity: 0; }
+}
+
+/* 3. Falcon Starship Warp */
+.starship-launch-scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.falcon-rocket-body {
+  font-size: 80px;
+  filter: drop-shadow(0 0 30px #f97316);
+  animation: rocketLaunchUp 3.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes rocketLaunchUp {
+  0% { transform: translateY(60vh) scale(0.5); opacity: 0; }
+  30% { transform: translateY(0vh) scale(1.3); opacity: 1; }
+  70% { transform: translateY(-20vh) scale(1.1); opacity: 1; }
+  100% { transform: translateY(-80vh) scale(0.4); opacity: 0; }
+}
+
+/* 4. Supernova Galaxy */
+.galaxy-nebula-scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.supernova-center-core {
+  font-size: 110px;
+  filter: drop-shadow(0 0 45px #c084fc) drop-shadow(0 0 80px #818cf8);
+  animation: galaxySpin 4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes galaxySpin {
+  0% { transform: rotate(0deg) scale(0.3); opacity: 0; }
+  40% { transform: rotate(180deg) scale(1.3); opacity: 1; }
+  80% { transform: rotate(360deg) scale(1.1); opacity: 1; }
+  100% { transform: rotate(540deg) scale(0.8); opacity: 0; }
+}
+
+/* 5. Coronation Crown */
+.diamond-crown-scene {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.descending-crown {
+  font-size: 90px;
+  filter: drop-shadow(0 0 35px #fbbf24) drop-shadow(0 0 65px #f59e0b);
+  animation: crownDescend 3.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes crownDescend {
+  0% { transform: translateY(-80px) scale(0.5); opacity: 0; }
+  30% { transform: translateY(0) scale(1.2); opacity: 1; }
+  75% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-20px) scale(0.8); opacity: 0; }
+}
+
+.coronation-sparkles {
+  font-size: 24px;
+  color: #fde047;
+  text-shadow: 0 0 15px rgba(251, 191, 36, 0.9);
+  animation: sparklesFlash 1.5s infinite alternate;
+}
+
+@keyframes sparklesFlash {
+  0% { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(1.2); opacity: 1; }
+}
+
+/* Super-Gift Announcement Banner */
+.super-gift-announcement-banner {
+  position: absolute;
+  top: 175px;
+  left: 14px;
+  right: 14px;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.92) 0%, rgba(244, 63, 94, 0.92) 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 8px 32px rgba(168, 85, 247, 0.65), 0 0 20px rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+  padding: 10px 16px;
+  text-align: center;
+  animation: bannerSlam 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes bannerSlam {
+  0% { transform: scale(0.5) translateY(-30px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.super-gift-title {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: #fde047;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  margin-bottom: 2px;
+}
+
+.super-gift-subtitle {
+  font-size: 12.5px;
+  color: #fff;
 }
 
 /* B. 9-Guest Boxes Layout (Screenshot 3) */
