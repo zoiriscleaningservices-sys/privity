@@ -1354,7 +1354,7 @@ export function App() {
     { id: '4', user: 'mlChAEL', text: 'joined the live', isJoin: true, level: 4 },
     { id: '5', user: 'marcus_dev', text: 'Keep throwing roses for the speed boost! 🥊', isHost: false, level: 29 },
   ]);
-  const [floatingHearts, setFloatingHearts] = useState<Array<{ id: number; left: number; color: string; size: number }>>([]);
+  const [floatingHearts, setFloatingHearts] = useState<Array<{ id: number; x: number; y: number; color: string; size: number; rot: number }>>([]);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
 
   // Top Likers & Contributors Leaderboard Modal State
@@ -1366,6 +1366,44 @@ export function App() {
     { id: '4', name: 'ELIKS', handle: 'eliks_fan', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120', likes: 1980, badge: 'Loyal Fan', level: 10 },
     { id: '5', name: 'mlChAEL', handle: 'michael_wave', avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=120', likes: 1340, badge: 'Supporter', level: 4 },
   ]);
+
+  // Live Viewers Roster Modal State (opened by clicking viewers pill)
+  const [isViewersModalOpen, setIsViewersModalOpen] = useState(false);
+  const [liveViewersSearch, setLiveViewersSearch] = useState('');
+  const [liveViewersList] = useState<Array<{
+    id: string;
+    name: string;
+    handle: string;
+    avatar: string;
+    isVerified?: boolean;
+    role: string;
+    level: number;
+    badge: string;
+  }>>([
+    { id: 'v1', name: 'Carlos Mendez', handle: 'carlos_m', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', role: 'Fan Club #19 · Top Gifter', level: 19, badge: '⭐ Fan #19' },
+    { id: 'v2', name: 'TRIPLE Beat', handle: 'triple_beat', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120', role: 'Sound Producer · Audio Critic', level: 26, badge: '🔥 VIP' },
+    { id: 'v3', name: 'Elena Rodriguez', handle: 'elena_rodriguez', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120', isVerified: true, role: 'Verified Creator · Systems Architect', level: 32, badge: '👑 Legend' },
+    { id: 'v4', name: 'Marcus Vance', handle: 'marcus_dev', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', isVerified: true, role: 'Rival Host · Security Lead', level: 29, badge: '🥊 Rival' },
+    { id: 'v5', name: 'Julian Thorne', handle: 'julian_analogue', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=120', isVerified: false, role: 'Co-Host · Film Photographer', level: 24, badge: '📸 Co-Host' },
+    { id: 'v6', name: 'ELIKS', handle: 'eliks_fan', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120', role: 'Loyal Fan · Rose Spammer', level: 10, badge: '🌹 Gifter' },
+    { id: 'v7', name: 'Sara Lin', handle: 'sara_lin', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=120', isVerified: true, role: 'Visual Designer · Tokyo', level: 18, badge: '✨ Close Friend' },
+    { id: 'v8', name: 'mlChAEL', handle: 'michael_wave', avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=120', role: 'Audiophile · Modular Explorer', level: 4, badge: '👋 Listener' },
+    { id: 'v9', name: 'Alex Miller', handle: 'alex_m', avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=120', role: 'Falcon Rocket Booster', level: 22, badge: '🚀 Booster' },
+    { id: 'v10', name: 'Linda Kim', handle: 'linda_k', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120', role: 'Film & Synth Enthusiast', level: 15, badge: '🌸 Supporter' },
+    { id: 'v11', name: 'Daniel Brooks', handle: 'daniel_b', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120', role: 'Spatial Audio Researcher', level: 12, badge: '⚡ Regular' },
+    { id: 'v12', name: 'Luciano', handle: 'luciano', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120', role: 'Sovereign Pass Genesis · You', level: 30, badge: '🥇 Top #1' },
+  ]);
+
+  const filteredLiveViewers = useMemo(() => {
+    if (!liveViewersSearch.trim()) return liveViewersList;
+    const query = liveViewersSearch.toLowerCase();
+    return liveViewersList.filter(
+      (v) =>
+        v.name.toLowerCase().includes(query) ||
+        v.handle.toLowerCase().includes(query) ||
+        v.role.toLowerCase().includes(query)
+    );
+  }, [liveViewersList, liveViewersSearch]);
 
   // Live Vertical Slide Direction & Navigation
   const [liveSlideDirection, setLiveSlideDirection] = useState<'down' | 'up' | null>(null);
@@ -1381,7 +1419,7 @@ export function App() {
       setBattleScoreOpponent(nextStream.battleInfo.opponentScore);
       return nextIdx;
     });
-    setTimeout(() => setLiveSlideDirection(null), 360);
+    setTimeout(() => setLiveSlideDirection(null), 420);
   }, [liveStreamsList]);
 
   const handlePrevLiveStream = useCallback(() => {
@@ -1393,12 +1431,17 @@ export function App() {
       setBattleScoreOpponent(prevStream.battleInfo.opponentScore);
       return prevIdx;
     });
-    setTimeout(() => setLiveSlideDirection(null), 360);
+    setTimeout(() => setLiveSlideDirection(null), 420);
   }, [liveStreamsList]);
 
   const handleLiveWheel = (e: React.WheelEvent) => {
+    // If wheel event originates from chat or modals, do not switch live stream
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest('.live-arena-chat-overlay, .live-arena-chat-scroll, .live-viewers-modal-overlay, .live-likes-modal-overlay, .live-gift-tray-backdrop')) {
+      return;
+    }
     const now = Date.now();
-    if (now - lastLiveWheelTime.current < 420) return;
+    if (now - lastLiveWheelTime.current < 450) return;
     if (e.deltaY > 30) {
       lastLiveWheelTime.current = now;
       handleNextLiveStream();
@@ -1409,14 +1452,22 @@ export function App() {
   };
 
   const handleLiveTouchStart = (e: React.TouchEvent) => {
+    // If the touch started inside the chat area, bottom controls, or modals, do NOT switch live creators
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest('.live-arena-chat-overlay, .live-arena-chat-scroll, .live-arena-bottom-controls-bar, .live-viewers-modal-overlay, .live-likes-modal-overlay, .live-gift-tray-backdrop, .battle-supporters-under-cam-row, .live-arena-top-bar, .live-arena-sub-bar')) {
+      liveTouchStartY.current = 0;
+      return;
+    }
     liveTouchStartY.current = e.touches[0].clientY;
   };
 
   const handleLiveTouchEnd = (e: React.TouchEvent) => {
+    if (!liveTouchStartY.current) return;
     const diff = liveTouchStartY.current - e.changedTouches[0].clientY;
-    if (diff > 45) {
+    liveTouchStartY.current = 0;
+    if (diff > 55) {
       handleNextLiveStream();
-    } else if (diff < -45) {
+    } else if (diff < -55) {
       handlePrevLiveStream();
     }
   };
@@ -2702,25 +2753,41 @@ export function App() {
     processFeedSwipeDelta(deltaX, deltaY);
   };
 
-  const handleLiveHeartBurst = (customColor?: string) => {
+  const handleLiveHeartBurst = (customColor?: string, x?: number, y?: number) => {
     const currentStream = liveStreamsList[activeLiveIndex] || liveStreamsList[0];
     setHostLiveLikes((prev) => ({
       ...prev,
-      [currentStream.id]: (prev[currentStream.id] || 14820) + 1,
+      [currentStream.id]: (prev[currentStream.id] || 4891) + 1,
     }));
 
     const colors = ['#f43f5e', '#ec4899', '#8b5cf6', '#06b6d4', '#e11d48', '#f59e0b', '#10b981'];
     const chosen = customColor || colors[Math.floor(Math.random() * colors.length)];
-    const newHeart = {
-      id: Date.now() + Math.random(),
-      left: 68 + Math.floor(Math.random() * 24),
-      color: chosen,
-      size: 22 + Math.floor(Math.random() * 16),
-    };
-    setFloatingHearts((prev) => [...prev, newHeart]);
-    setTimeout(() => {
-      setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
-    }, 1900);
+    
+    // Exact click/touch coordinates
+    const defaultX = typeof window !== 'undefined' ? window.innerWidth * 0.72 : 280;
+    const defaultY = typeof window !== 'undefined' ? window.innerHeight * 0.68 : 500;
+    const posX = typeof x === 'number' && !isNaN(x) ? x : defaultX;
+    const posY = typeof y === 'number' && !isNaN(y) ? y : defaultY;
+
+    // Spawn 1 to 2 micro floating hearts at the exact tap position
+    const burstCount = typeof x === 'number' ? 2 : 1;
+    for (let i = 0; i < burstCount; i++) {
+      const offsetX = (Math.random() - 0.5) * 32;
+      const offsetY = (Math.random() - 0.5) * 24;
+      const rot = (Math.random() - 0.5) * 44;
+      const newHeart = {
+        id: Date.now() + Math.random() + i,
+        x: posX + offsetX,
+        y: posY + offsetY,
+        color: chosen,
+        size: 26 + Math.floor(Math.random() * 12),
+        rot,
+      };
+      setFloatingHearts((prev) => [...prev, newHeart]);
+      setTimeout(() => {
+        setFloatingHearts((prev) => prev.filter((h) => h.id !== newHeart.id));
+      }, 1600);
+    }
   };
 
   const playLiveSoundFX = useCallback((type: 'punch' | 'cheer' | 'gift' | 'supergift') => {
@@ -2793,6 +2860,9 @@ export function App() {
   }, [isLiveSoundMuted]);
 
   const handleCreatorTap = (side: 'host' | 'rival', e: React.MouseEvent | React.TouchEvent) => {
+    if ('stopPropagation' in e && typeof e.stopPropagation === 'function') {
+      e.stopPropagation();
+    }
     let clientX = window.innerWidth / 2;
     let clientY = window.innerHeight / 2;
     if ('touches' in e && e.touches.length > 0) {
@@ -2813,10 +2883,10 @@ export function App() {
 
     if (side === 'host') {
       setBattleScoreHost((prev) => prev + pts);
-      handleLiveHeartBurst('#ff2b54');
+      handleLiveHeartBurst('#ff2b54', clientX, clientY);
     } else {
       setBattleScoreOpponent((prev) => prev + pts);
-      handleLiveHeartBurst('#00f2fe');
+      handleLiveHeartBurst('#00f2fe', clientX, clientY);
     }
 
     const floaterId = Date.now() + Math.random();
@@ -4719,7 +4789,13 @@ export function App() {
                     onWheel={handleLiveWheel}
                     onTouchStart={handleLiveTouchStart}
                     onTouchEnd={handleLiveTouchEnd}
-                    onDoubleClick={() => handleLiveHeartBurst()}
+                    onClick={(e) => {
+                      const target = e.target as HTMLElement | null;
+                      if (target && !target.closest('button, input, textarea, a, .live-arena-chat-overlay, .live-arena-bottom-controls-bar, .live-arena-top-bar, .live-arena-sub-bar, .live-gift-tray-backdrop, .live-likes-modal-overlay, .live-viewers-modal-overlay, .battle-supporters-under-cam-row, .battle-cam-tag, .battle-exact-cam-box')) {
+                        handleLiveHeartBurst(undefined, e.clientX, e.clientY);
+                      }
+                    }}
+                    onDoubleClick={(e) => handleLiveHeartBurst(undefined, e.clientX, e.clientY)}
                   >
                     {/* 1. TOP LIVE HEADER (OVERLAY) */}
                     <div className="live-arena-top-bar">
@@ -4772,7 +4848,12 @@ export function App() {
                           </div>
                         </div>
 
-                        <div className="live-viewers-count-pill" title="Current Viewers">
+                        {/* Clickable Viewers Count Pill (Opens Full Viewers Audience Modal) */}
+                        <div
+                          className="live-viewers-count-pill clickable"
+                          onClick={() => setIsViewersModalOpen(true)}
+                          title="Click to view all viewers in this live"
+                        >
                           <IconUser size={12} />
                           <span>{currentLive.viewersCount.toLocaleString()}</span>
                           <span className="live-chevron-down">⌄</span>
@@ -4951,23 +5032,6 @@ export function App() {
                             <img src={currentLive.previewUrl} alt={currentLive.creatorName} className="battle-exact-cam-img fallback" />
                             <div className="battle-exact-cam-overlay" />
 
-                            {/* AI Video Lens Effect Overlay: Cyber Face Tracker */}
-                            {aiLensMode === 'cyber' && (
-                              <div className="ai-cyber-face-tracker host-hud">
-                                <div className="face-box-reticle">
-                                  <div className="reticle-corner tl" />
-                                  <div className="reticle-corner tr" />
-                                  <div className="reticle-corner bl" />
-                                  <div className="reticle-corner br" />
-                                  <div className="reticle-label">TARGET: CHLOE · 99.4%</div>
-                                </div>
-                                <div className="biometric-hud-pill">
-                                  <span className="hud-pulse-dot" />
-                                  <span>HR: 78 BPM · 432 Hz</span>
-                                </div>
-                              </div>
-                            )}
-
                             {/* AI Video Lens Effect: Solar Fire Aura */}
                             {aiLensMode === 'elemental' && (
                               <div className="elemental-aura-host">
@@ -4999,23 +5063,6 @@ export function App() {
                             />
                             <img src={currentLive.battleInfo.opponentVideoUrl} alt={currentLive.battleInfo.opponentName} className="battle-exact-cam-img fallback" />
                             <div className="battle-exact-cam-overlay" />
-
-                            {/* AI Video Lens Effect Overlay: Cyber Face Tracker */}
-                            {aiLensMode === 'cyber' && (
-                              <div className="ai-cyber-face-tracker rival-hud">
-                                <div className="face-box-reticle">
-                                  <div className="reticle-corner tl" />
-                                  <div className="reticle-corner tr" />
-                                  <div className="reticle-corner bl" />
-                                  <div className="reticle-corner br" />
-                                  <div className="reticle-label">TARGET: JULIAN · 98.7%</div>
-                                </div>
-                                <div className="biometric-hud-pill">
-                                  <span className="hud-pulse-dot rival" />
-                                  <span>HR: 84 BPM · 35mm F1.4</span>
-                                </div>
-                              </div>
-                            )}
 
                             {/* AI Video Lens Effect: Glacial Frost Aura */}
                             {aiLensMode === 'elemental' && (
@@ -5059,9 +5106,6 @@ export function App() {
                           </div>
                         </div>
                       )}
-
-                      {/* AI Video Scanline Effect for Cyber Mode */}
-                      {aiLensMode === 'cyber' && <div className="ai-cyber-scanline-beam" />}
 
                       {/* AI Anime Speedburst Lines */}
                       {aiLensMode === 'anime' && <div className="ai-anime-speedlines" />}
@@ -5214,15 +5258,17 @@ export function App() {
                     )}
 
                     {/* 5. FLOATING HEARTS ANIMATION LAYER */}
-                    <div className="live-arena-floating-hearts-layer" onClick={() => handleLiveHeartBurst()}>
+                    <div className="live-arena-floating-hearts-layer">
                       {floatingHearts.map((heart) => (
                         <div
                           key={heart.id}
                           className="floating-heart-particle"
                           style={{
-                            left: `${heart.left}%`,
+                            left: `${heart.x}px`,
+                            top: `${heart.y}px`,
                             color: heart.color || '#f43f5e',
                             fontSize: `${heart.size || 26}px`,
+                            ['--rot' as any]: `${heart.rot || 0}deg`,
                           }}
                         >
                           ♥
@@ -5231,8 +5277,20 @@ export function App() {
                     </div>
 
                     {/* 6. TRANSPARENT OVERLAY LIVE CHAT STREAM (EXACT IMAGE 3 & 2) */}
-                    <div className="live-arena-chat-overlay">
-                      <div className="live-arena-chat-scroll">
+                    <div
+                      className="live-arena-chat-overlay"
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onTouchMove={(e) => e.stopPropagation()}
+                      onTouchEnd={(e) => e.stopPropagation()}
+                      onWheel={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        className="live-arena-chat-scroll"
+                        onTouchStart={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                        onTouchEnd={(e) => e.stopPropagation()}
+                        onWheel={(e) => e.stopPropagation()}
+                      >
                         {/* System LIVE Match Notice (Image 3) */}
                         <div className="live-chat-bubble-row system-match-banner">
                           <span className="system-tiktok-note">🎵</span>
@@ -5259,7 +5317,13 @@ export function App() {
                     </div>
 
                     {/* 7. FLOATING BOTTOM ACTION CONTROLS BAR (EXACT IMAGE 3 & 2) */}
-                    <div className="live-arena-bottom-controls-bar">
+                    <div
+                      className="live-arena-bottom-controls-bar"
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onTouchMove={(e) => e.stopPropagation()}
+                      onTouchEnd={(e) => e.stopPropagation()}
+                      onWheel={(e) => e.stopPropagation()}
+                    >
                       <form onSubmit={handleSendLiveComment} className="live-comment-input-pill">
                         <input
                           type="text"
@@ -5433,6 +5497,108 @@ export function App() {
                             >
                               <span>💖 Tap to send +15 Likes</span>
                             </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 11. LIVE VIEWERS AUDIENCE ROSTER MODAL */}
+                    {isViewersModalOpen && (
+                      <div className="live-viewers-modal-overlay" onClick={() => setIsViewersModalOpen(false)}>
+                        <div className="live-viewers-modal-card" onClick={(e) => e.stopPropagation()}>
+                          <div className="viewers-modal-header">
+                            <div className="viewers-modal-title-wrap">
+                              <div className="viewers-modal-title">Live Viewers</div>
+                              <span className="viewers-modal-count-badge">
+                                <IconUser size={12} /> {currentLive.viewersCount.toLocaleString()} watching
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className="viewers-modal-close-btn"
+                              onClick={() => setIsViewersModalOpen(false)}
+                              title="Close Viewers List"
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          <div className="viewers-modal-search-wrap">
+                            <span className="viewers-modal-search-icon">🔍</span>
+                            <input
+                              type="text"
+                              className="viewers-modal-search-input"
+                              placeholder="Search by name, handle, or role..."
+                              value={liveViewersSearch}
+                              onChange={(e) => setLiveViewersSearch(e.target.value)}
+                              autoFocus
+                            />
+                            {liveViewersSearch && (
+                              <button
+                                type="button"
+                                className="viewers-modal-search-clear"
+                                onClick={() => setLiveViewersSearch('')}
+                                title="Clear search"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="viewers-modal-list">
+                            {filteredLiveViewers.length === 0 ? (
+                              <div className="viewers-empty-state">
+                                <span className="viewers-empty-icon">👥</span>
+                                <p>No viewers found matching "{liveViewersSearch}"</p>
+                              </div>
+                            ) : (
+                              filteredLiveViewers.map((viewer) => {
+                                const isFollowed = !!followedCreators[viewer.handle];
+                                return (
+                                  <div
+                                    key={viewer.id}
+                                    className="viewer-person-row clickable"
+                                    onClick={() => {
+                                      navigateToProfile(viewer.handle);
+                                      setIsViewersModalOpen(false);
+                                    }}
+                                    title={`Click to view @${viewer.handle}'s profile`}
+                                  >
+                                    <div className="viewer-avatar-wrap">
+                                      <img src={viewer.avatar} alt={viewer.name} className="viewer-avatar-img" />
+                                      <span className="viewer-online-dot" />
+                                    </div>
+                                    <div className="viewer-info-col">
+                                      <div className="viewer-name-row">
+                                        <span className="viewer-name-text">{viewer.name}</span>
+                                        {viewer.isVerified && <IconVerifiedStar size={12} />}
+                                        {viewer.level && <span className="viewer-level-chip">💎 {viewer.level}</span>}
+                                      </div>
+                                      <div className="viewer-handle-role-row">
+                                        <span className="viewer-handle-text">@{viewer.handle}</span>
+                                        <span className="viewer-bullet-sep">•</span>
+                                        <span className="viewer-role-badge">{viewer.role}</span>
+                                      </div>
+                                    </div>
+                                    <div className="viewer-actions-col" onClick={(e) => e.stopPropagation()}>
+                                      <button
+                                        type="button"
+                                        className={`btn-viewer-follow-toggle ${isFollowed ? 'is-followed' : ''}`}
+                                        onClick={() => {
+                                          handleToggleFollowLiveHost(viewer.handle);
+                                        }}
+                                      >
+                                        {isFollowed ? 'Following' : '+ Follow'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+
+                          <div className="viewers-modal-footer">
+                            <span className="viewers-footer-hint">💡 Tap any viewer to open their full profile</span>
                           </div>
                         </div>
                       </div>
@@ -8193,9 +8359,13 @@ export function App() {
                     <div
                       key={heart.id}
                       className="floating-heart-burst"
-                      style={{ left: `${heart.left}%` }}
+                      style={{
+                        left: `${heart.x}px`,
+                        top: `${heart.y}px`,
+                        color: heart.color || '#f43f5e',
+                      }}
                     >
-                      <IconHeart size={28} color="#f43f5e" filled />
+                      <IconHeart size={28} color={heart.color || '#f43f5e'} filled />
                     </div>
                   ))}
                 </div>
