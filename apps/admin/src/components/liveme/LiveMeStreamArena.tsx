@@ -110,16 +110,22 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const bindHostVideoRef = useCallback((node: HTMLVideoElement | null) => {
     videoRef.current = node;
     if (node && localStreamRef.current) {
-      node.srcObject = localStreamRef.current;
+      if (node.srcObject !== localStreamRef.current) {
+        node.srcObject = localStreamRef.current;
+      }
       node.setAttribute('playsinline', 'true');
       node.setAttribute('webkit-playsinline', 'true');
       node.muted = true;
-      node.play().catch((err) => console.warn('Autoplay error on host bind:', err));
+      node.play().catch(() => {});
     }
   }, []);
 
   // Host Camera Hardware Controls
   const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
+  const [isMirrored, setIsMirrored] = useState(true);
+  const isAcquiringLiveCameraRef = useRef(false);
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [streamDurationSec, setStreamDurationSec] = useState(0);
@@ -212,7 +218,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [chatInput, setChatInput] = useState('');
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // 1. HARDWARE WEBCAM & MEDIA STREAM CONNECTION ENGINE (MOBILE COMPATIBLE)
+  // 1. HARDWARE WEBCAM & MEDIA STREAM CONNECTION ENGINE (MOBILE COMPATIBLE - NO FLICKER)
   useEffect(() => {
     if (!isHost) return;
 
@@ -222,14 +228,18 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     const bindStreamToVideos = (stream: MediaStream) => {
       localStreamRef.current = stream;
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        if (videoRef.current.srcObject !== stream) {
+          videoRef.current.srcObject = stream;
+        }
         videoRef.current.setAttribute('playsinline', 'true');
         videoRef.current.setAttribute('webkit-playsinline', 'true');
         videoRef.current.muted = true;
-        videoRef.current.play().catch((err) => console.warn('Host video play error:', err));
+        videoRef.current.play().catch(() => {});
       }
       if (ambientVideoRef.current) {
-        ambientVideoRef.current.srcObject = stream;
+        if (ambientVideoRef.current.srcObject !== stream) {
+          ambientVideoRef.current.srcObject = stream;
+        }
         ambientVideoRef.current.setAttribute('playsinline', 'true');
         ambientVideoRef.current.setAttribute('webkit-playsinline', 'true');
         ambientVideoRef.current.muted = true;
@@ -240,13 +250,16 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     if (activeStream && activeStream.active && activeStream.getVideoTracks().length > 0) {
       bindStreamToVideos(activeStream);
     } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      if (isAcquiringLiveCameraRef.current) return;
+      isAcquiringLiveCameraRef.current = true;
       didRequestCamera = true;
       const acquireStream = async () => {
         let stream: MediaStream | null = null;
         try {
+          // Tier 1: Soft facingMode constraint (front selfie or back)
           stream = await navigator.mediaDevices.getUserMedia({
             video: {
-              facingMode: cameraFacing,
+              facingMode: { ideal: cameraFacing },
               width: { ideal: 1280 },
               height: { ideal: 720 },
             },
@@ -257,27 +270,58 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           try {
             stream = await navigator.mediaDevices.getUserMedia({
               video: {
-                facingMode: cameraFacing,
+                facingMode: { ideal: cameraFacing },
               },
               audio: false,
             });
           } catch (tier2Err) {
-            console.warn('LiveMe Tier 2 failed, trying generic video:', tier2Err);
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: true,
-            });
+            console.warn('LiveMe Tier 2 failed, enumerating devices for front camera:', tier2Err);
+            try {
+              const devices = await navigator.mediaDevices.enumerateDevices();
+              const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+              const isTargetUser = cameraFacing === 'user';
+              const matchedDevice = videoInputs.find((d) => {
+                const label = (d.label || '').toLowerCase();
+                return isTargetUser
+                  ? label.includes('front') || label.includes('user') || label.includes('facetime') || label.includes('truedepth')
+                  : label.includes('back') || label.includes('rear') || label.includes('environment');
+              }) || videoInputs[0];
+
+              if (matchedDevice) {
+                stream = await navigator.mediaDevices.getUserMedia({
+                  video: { deviceId: { exact: matchedDevice.deviceId } },
+                  audio: false,
+                });
+              }
+            } catch (tier3Err) {
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+              });
+            }
           }
         }
 
         if (stream) {
+          // Detect actual camera facing mode from the acquired stream
+          const track = stream.getVideoTracks()[0];
+          if (track) {
+            const settings = track.getSettings?.();
+            if (settings?.facingMode) {
+              const actual = settings.facingMode as 'user' | 'environment';
+              setCameraFacing(actual);
+              setIsMirrored(actual === 'user');
+            }
+          }
           bindStreamToVideos(stream);
-          showToast('🔴 Live Camera & Mic Connected!');
+          showToastRef.current('🔴 Live Camera & Mic Connected!');
         }
       };
 
       acquireStream().catch((err) => {
         console.warn('Camera stream error:', err);
-        showToast('Broadcasting in live simulation mode');
+        showToastRef.current('Broadcasting in live simulation mode');
+      }).finally(() => {
+        isAcquiringLiveCameraRef.current = false;
       });
     }
 
@@ -286,7 +330,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         localStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [isHost, userMediaStream, cameraFacing, showToast]);
+  }, [isHost, userMediaStream, cameraFacing]);
 
   // 2. CROSS-TAB & CROSS-VIEWER BROADCAST CHANNEL SYNC
   useEffect(() => {
@@ -499,30 +543,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const handleFlipCamera = async () => {
     const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
     setCameraFacing(nextFacing);
-    showToast('Switching camera angle...');
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        if (localStreamRef.current) {
-          localStreamRef.current.getTracks().forEach((t) => t.stop());
-        }
-        const newStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: nextFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: true,
-        });
-        localStreamRef.current = newStream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = newStream;
-          videoRef.current.play().catch(() => {});
-        }
-        if (ambientVideoRef.current) {
-          ambientVideoRef.current.srcObject = newStream;
-          ambientVideoRef.current.play().catch(() => {});
-        }
-        showToast('Camera flipped');
-      }
-    } catch {
-      showToast('Could not access alternative camera');
-    }
+    setIsMirrored(nextFacing === 'user');
+    showToast(nextFacing === 'user' ? 'Front camera 🤳' : 'Back camera 📷');
+  };
+
+  // Host Controls: Toggle Mirror Angle Reflection
+  const handleToggleMirror = () => {
+    setIsMirrored((prev) => {
+      const next = !prev;
+      showToast(next ? 'Mirror angle ON 🪞 (Selfie reflection)' : 'True view ON (Standard angle)');
+      return next;
+    });
   };
 
   // Host Controls: Toggle Mic
@@ -810,7 +841,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   videoRef.current.play().catch(() => {});
                 }
               }}
-              className="liveme-video-canvas"
+              className={`liveme-video-canvas ${isMirrored ? 'mirrored' : ''}`}
             />
           ) : (
             <video
@@ -874,7 +905,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                         videoRef.current.play().catch(() => {});
                       }
                     }}
-                    className="liveme-pk-video-layer"
+                    className={`liveme-pk-video-layer ${isMirrored ? 'mirrored' : ''}`}
                   />
                 ) : (
                   <video
@@ -1117,9 +1148,18 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               type="button"
               className="liveme-host-btn"
               onClick={handleFlipCamera}
-              title="Flip Webcam"
+              title="Flip Webcam Front/Back"
             >
-              🔄 Flip
+              🔄 {cameraFacing === 'user' ? 'Front' : 'Back'}
+            </button>
+
+            <button
+              type="button"
+              className={`liveme-host-btn ${isMirrored ? 'active' : ''}`}
+              onClick={handleToggleMirror}
+              title="Toggle Mirror Reflection for Best Angle"
+            >
+              🪞 {isMirrored ? 'Mirrored' : 'True'}
             </button>
 
             <button

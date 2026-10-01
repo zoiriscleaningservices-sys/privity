@@ -54,6 +54,12 @@
   background: #000;
 }
 
+.liveme-video-canvas.mirrored,
+.liveme-pk-video-layer.mirrored,
+.liveme-ambient-video.mirrored {
+  transform: scaleX(-1);
+}
+
 .liveme-video-canvas {
   position: absolute;
   inset: 0;

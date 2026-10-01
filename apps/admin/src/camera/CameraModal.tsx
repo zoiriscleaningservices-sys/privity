@@ -84,6 +84,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
+  const [isMirrored, setIsMirrored] = useState<boolean>(true);
+  const isAcquiringCameraRef = useRef<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   // Tools & Overlays
@@ -159,55 +161,79 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     setIsCameraActive(false);
   }, []);
 
-  // Callback ref for camera video element to guarantee immediate stream binding
+  // Callback ref for camera video element to guarantee immediate stream binding without glitchy reloads
   const bindVideoRef = useCallback((node: HTMLVideoElement | null) => {
     videoRef.current = node;
     if (node && mediaStreamRef.current) {
-      node.srcObject = mediaStreamRef.current;
+      if (node.srcObject !== mediaStreamRef.current) {
+        node.srcObject = mediaStreamRef.current;
+      }
       node.setAttribute('playsinline', 'true');
       node.setAttribute('webkit-playsinline', 'true');
       node.muted = true;
-      node.play().catch((err) => console.warn('Autoplay error on bind:', err));
+      node.play().catch(() => {});
     }
   }, []);
 
   // Start real camera stream via getUserMedia with mobile-first multi-tier fallback
-  const startCameraStream = useCallback(async () => {
+  const startCameraStream = useCallback(async (targetFacing: 'user' | 'environment' = 'user') => {
+    if (isAcquiringCameraRef.current) return;
+    isAcquiringCameraRef.current = true;
     try {
       setCameraError(null);
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
       }
 
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         let stream: MediaStream | null = null;
 
-        // Tier 1: Ideal HD with audio
+        // Tier 1: Front / Target facing mode with video (audio false avoids iOS Safari permission blockage on preview)
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: {
-              facingMode: cameraFacing,
+              facingMode: { ideal: targetFacing },
               width: { ideal: 1280 },
               height: { ideal: 720 },
             },
-            audio: true,
+            audio: false,
           });
         } catch (tier1Err) {
-          console.warn('Tier 1 camera+mic failed, trying video only:', tier1Err);
+          console.warn('Tier 1 camera failed, trying soft facing constraint:', tier1Err);
           try {
-            // Tier 2: Video only (bypasses microphone permission restrictions on iOS Safari)
+            // Tier 2: Soft facingMode constraint without rigid aspect constraints
             stream = await navigator.mediaDevices.getUserMedia({
               video: {
-                facingMode: cameraFacing,
+                facingMode: { ideal: targetFacing },
               },
               audio: false,
             });
           } catch (tier2Err) {
-            console.warn('Tier 2 facingMode failed, trying generic video:', tier2Err);
-            // Tier 3: Basic generic video constraint
-            stream = await navigator.mediaDevices.getUserMedia({
-              video: true,
-            });
+            console.warn('Tier 2 facingMode failed, enumerating devices for front camera:', tier2Err);
+            try {
+              const devices = await navigator.mediaDevices.enumerateDevices();
+              const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+              const isTargetUser = targetFacing === 'user';
+              const matchedDevice = videoInputs.find((d) => {
+                const label = (d.label || '').toLowerCase();
+                return isTargetUser
+                  ? label.includes('front') || label.includes('user') || label.includes('facetime') || label.includes('truedepth')
+                  : label.includes('back') || label.includes('rear') || label.includes('environment');
+              }) || videoInputs[0];
+
+              if (matchedDevice) {
+                stream = await navigator.mediaDevices.getUserMedia({
+                  video: { deviceId: { exact: matchedDevice.deviceId } },
+                  audio: false,
+                });
+              }
+            } catch (tier3Err) {
+              console.warn('Tier 3 deviceId failed, falling back to generic video:', tier3Err);
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+              });
+            }
           }
         }
 
@@ -215,8 +241,21 @@ export const CameraModal: React.FC<CameraModalProps> = ({
           mediaStreamRef.current = stream;
           setIsCameraActive(true);
 
+          // Detect actual camera facing mode from the acquired stream
+          const track = stream.getVideoTracks()[0];
+          if (track) {
+            const settings = track.getSettings?.();
+            if (settings?.facingMode) {
+              const actual = settings.facingMode as 'user' | 'environment';
+              setCameraFacing(actual);
+              setIsMirrored(actual === 'user');
+            }
+          }
+
           if (videoRef.current) {
-            videoRef.current.srcObject = stream;
+            if (videoRef.current.srcObject !== stream) {
+              videoRef.current.srcObject = stream;
+            }
             videoRef.current.setAttribute('playsinline', 'true');
             videoRef.current.setAttribute('webkit-playsinline', 'true');
             videoRef.current.muted = true;
@@ -231,13 +270,15 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       console.warn('Camera access denied or unavailable:', err);
       setIsCameraActive(false);
       setCameraError('Camera permission needed. Tap to enable');
+    } finally {
+      isAcquiringCameraRef.current = false;
     }
-  }, [cameraFacing]);
+  }, []);
 
   // Manage camera lifecycle
   useEffect(() => {
     if (isOpen) {
-      startCameraStream();
+      startCameraStream(cameraFacing);
     } else {
       stopCameraStream();
       setCapturedMedia(null);
@@ -252,10 +293,22 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     };
   }, [isOpen, startCameraStream, stopCameraStream]);
 
-  // Flip Camera
+  // Flip Camera between Front & Back
   const handleFlipCamera = () => {
-    setCameraFacing((prev) => (prev === 'user' ? 'environment' : 'user'));
-    showToast('Camera flipped');
+    const nextFacing = cameraFacing === 'user' ? 'environment' : 'user';
+    setCameraFacing(nextFacing);
+    setIsMirrored(nextFacing === 'user');
+    startCameraStream(nextFacing);
+    showToast(nextFacing === 'user' ? 'Front camera 🤳' : 'Back camera 📷');
+  };
+
+  // Toggle Horizontal Mirror / Good Angle Reflection
+  const handleToggleMirror = () => {
+    setIsMirrored((prev) => {
+      const next = !prev;
+      showToast(next ? 'Mirror angle ON 🪞 (Selfie reflection)' : 'True view ON (Standard angle)');
+      return next;
+    });
   };
 
   // Flashbang animation
@@ -278,7 +331,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        if (cameraFacing === 'user') {
+        if (isMirrored) {
           ctx.translate(canvas.width, 0);
           ctx.scale(-1, 1);
         }
@@ -551,7 +604,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
           </div>
         )}
 
-        {/* 1. CAMERA VIDEO SURFACE (Hardware Camera or Alive Looping Motion Stream) */}
+        {/* 1. CAMERA VIDEO SURFACE (Hardware Camera with zero-flicker binding) */}
         <video
           ref={bindVideoRef}
           autoPlay
@@ -562,7 +615,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
               videoRef.current.play().catch(() => {});
             }
           }}
-          className={`camera-video-surface ${cameraFacing === 'user' ? 'mirrored' : ''}`}
+          className={`camera-video-surface ${isMirrored ? 'mirrored' : ''}`}
           style={{
             filter: FILTER_PRESETS.find((f) => f.id === activeFilter)?.filterStyle || 'none',
             display: isCameraActive ? 'block' : 'none',
@@ -570,22 +623,19 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         />
 
         {!isCameraActive && (
-          <div className="camera-simulated-layer">
-            <video
-              src="https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4"
-              autoPlay
-              loop
-              muted
-              playsInline
-              className={`camera-simulated-video ${cameraFacing === 'user' ? 'mirrored' : ''}`}
-              style={{
-                filter: FILTER_PRESETS.find((f) => f.id === activeFilter)?.filterStyle || 'none',
-              }}
-            />
-            <button className="camera-sim-badge" onClick={startCameraStream} title="Tap to start webcam">
-              <span className="camera-sim-dot" />
-              <span>{cameraError || '🔴 Tap to Enable Camera'}</span>
-            </button>
+          <div className="camera-viewfinder-backdrop">
+            <div className="camera-lens-aperture-pulse">
+              <IconDeviceCameraVideo size={42} color="rgba(255,255,255,0.7)" />
+              <div className="camera-loading-ring" />
+            </div>
+            {cameraError ? (
+              <button className="camera-sim-badge" onClick={() => startCameraStream(cameraFacing)} title="Tap to start camera">
+                <span className="camera-sim-dot" />
+                <span>{cameraError}</span>
+              </button>
+            ) : (
+              <div className="camera-init-text">Starting Camera...</div>
+            )}
           </div>
         )}
 
@@ -732,12 +782,24 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         {/* ================================================================ */}
         {activeTab !== 'LIVE' && (
           <aside className="camera-tools-rail">
-            {/* 1. Flip Camera */}
-            <button className="camera-tool-item" onClick={handleFlipCamera} title="Flip camera">
+            {/* 1. Flip Camera (Front / Back) */}
+            <button className="camera-tool-item" onClick={handleFlipCamera} title="Flip camera front/back">
               <div className="camera-tool-icon-circle">
                 <IconCameraFlip size={28} />
               </div>
-              <span className="camera-tool-label">Flip</span>
+              <span className="camera-tool-label">{cameraFacing === 'user' ? 'Front' : 'Back'}</span>
+            </button>
+
+            {/* 2. Mirror Angle Toggle (Facing My Good Angle) */}
+            <button
+              className={`camera-tool-item ${isMirrored ? 'active' : ''}`}
+              onClick={handleToggleMirror}
+              title="Toggle mirror reflection for best selfie angle"
+            >
+              <div className="camera-tool-icon-circle" style={{ transform: isMirrored ? 'scaleX(-1)' : 'none' }}>
+                <IconCameraFlip size={26} />
+              </div>
+              <span className="camera-tool-label">{isMirrored ? 'Mirrored' : 'True View'}</span>
             </button>
 
             {/* 2. Speed / Star */}

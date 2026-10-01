@@ -85,6 +85,55 @@
   filter: brightness(0.92) contrast(1.05);
 }
 
+/* Viewfinder Backdrop & Loading Animation (Smooth, dark, zero flicker) */
+.camera-viewfinder-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(circle at center, #111827 0%, #05070d 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.camera-lens-aperture-pulse {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 35px rgba(0, 240, 255, 0.12);
+}
+
+.camera-loading-ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: #00f0ff;
+  border-right-color: #ec4899;
+  animation: cameraRingSpin 1.4s linear infinite;
+}
+
+@keyframes cameraRingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.camera-init-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.65);
+  letter-spacing: 0.5px;
+}
+
 .camera-sim-badge {
   position: absolute;
   top: 72px;

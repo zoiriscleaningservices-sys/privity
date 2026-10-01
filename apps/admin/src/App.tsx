@@ -3448,10 +3448,10 @@ export function App() {
   const [actionType, setActionType] = useState<ModerationActionType>('remove_content');
   const [actionReason, setActionReason] = useState('');
 
-  const triggerToast = (msg: string) => {
+  const triggerToast = useCallback((msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3000);
-  };
+  }, []);
 
   const handleTogglePrivateAccount = (val: boolean) => {
     setIsPrivateAccount(val);
@@ -4617,6 +4617,14 @@ export function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     triggerToast(mediaType === 'video' ? 'Video dispatch published to feed!' : 'Photo dispatch published to feed!');
   };
+
+  const cameraCurrentUser = useMemo(() => ({
+    name: myProfile.name,
+    handle: myProfile.handle,
+    avatar: myProfile.avatar,
+    isVerified: myProfile.isVerified,
+    followersCount: (myProfile.followersList || []).length,
+  }), [myProfile.name, myProfile.handle, myProfile.avatar, myProfile.isVerified, myProfile.followersList]);
 
   const handleCameraGoLive = ({
     title,
@@ -8322,13 +8330,7 @@ export function App() {
       <CameraModal
         isOpen={isCameraOpen}
         onClose={() => setIsCameraOpen(false)}
-        currentUser={{
-          name: myProfile.name,
-          handle: myProfile.handle,
-          avatar: myProfile.avatar,
-          isVerified: myProfile.isVerified,
-          followersCount: (myProfile.followersList || []).length,
-        }}
+        currentUser={cameraCurrentUser}
         onPublishPost={handleCameraPublishPost}
         onGoLive={handleCameraGoLive}
       />
