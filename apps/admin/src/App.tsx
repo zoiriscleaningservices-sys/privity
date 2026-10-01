@@ -7669,18 +7669,6 @@ export function App() {
                   <IconArrowLeft size={20} color="#fff" />
                 </button>
 
-                <div className="profile-top-title">
-                  <span>@{profile.handle}</span>
-                  {profile.isVerified && (
-                    <VerifiedBadge
-                      authorName={profile.name}
-                      category={profile.verifiedCategory}
-                      since={profile.verifiedSince}
-                      proofId={profile.cryptoProofId}
-                    />
-                  )}
-                </div>
-
                 <button
                   type="button"
                   className={`profile-top-btn ${isProfileDrawerOpen ? 'active' : ''}`}
@@ -7701,7 +7689,7 @@ export function App() {
               {/* Profile Card Info */}
               <div className="profile-header-card">
                 <div className="profile-hero-row">
-                  <div style={{ position: 'relative' }}>
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
                     <img
                       src={profile.avatar}
                       alt={profile.name}
@@ -7717,6 +7705,95 @@ export function App() {
                       </button>
                     )}
                   </div>
+
+                  {/* Specular VisionOS Stats Shelf right next to profile picture */}
+                  {(() => {
+                    const dynamicFollowersCount = isOwnProfile
+                      ? (myProfile.followersList || profile.followersList || []).length
+                      : (profile.followersList || []).filter((h) => h !== 'luciano' && h !== myProfile.handle).length + (isFollowingThisUser ? 1 : 0);
+                    const dynamicFollowingCount = isOwnProfile
+                      ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano' && k !== myProfile.handle).length
+                      : (profile.followingList || []).length;
+                    const dynamicCirclesCount = isOwnProfile
+                      ? closeFriendsList.length
+                      : (profile.trustCirclesList || []).length;
+
+                    const totalLikesReceived = userDispatches.reduce(
+                      (sum, p) => sum + (p.likesCount || (p.likersList ? p.likersList.length : 0) || 0),
+                      0
+                    ) + (profile.mediaItems || []).reduce((sum, m) => {
+                      const baseKey = extractMediaBaseKey(m.url);
+                      const photoRec = photoLikesMap[m.url] || (baseKey ? photoLikesMap[baseKey] : undefined);
+                      return sum + (photoRec ? photoRec.count : (m.likes || 0));
+                    }, 0);
+
+                    return (
+                      <div className="profile-hero-stats-shelf">
+                        <div
+                          className="hero-stat-pill"
+                          onClick={() => setProfileSubTab('dispatches')}
+                          title="View all posts"
+                        >
+                          <div className="hero-stat-icon posts">
+                            <IconList size={13} color="var(--public-cyan)" />
+                          </div>
+                          <span className="hero-stat-val">{userDispatches.length}</span>
+                          <span className="hero-stat-lbl">Posts</span>
+                        </div>
+
+                        <div
+                          className="hero-stat-pill"
+                          onClick={() => openRoster(profile.handle, profile.name, 'followers')}
+                          title="View followers"
+                        >
+                          <div className="hero-stat-icon followers">
+                            <IconUsers size={13} color="#818cf8" />
+                          </div>
+                          <span className="hero-stat-val">{dynamicFollowersCount.toLocaleString()}</span>
+                          <span className="hero-stat-lbl">Followers</span>
+                        </div>
+
+                        <div
+                          className="hero-stat-pill"
+                          onClick={() => openRoster(profile.handle, profile.name, 'following')}
+                          title="View following"
+                        >
+                          <div className="hero-stat-icon following">
+                            <IconUserCheck size={13} color="#38bdf8" />
+                          </div>
+                          <span className="hero-stat-val">{dynamicFollowingCount.toLocaleString()}</span>
+                          <span className="hero-stat-lbl">Following</span>
+                        </div>
+
+                        <div
+                          className="hero-stat-pill"
+                          onClick={() => {
+                            setProfileSubTab('liked');
+                            triggerToast(`${profile.name} has received ${totalLikesReceived} total likes.`);
+                          }}
+                          title="View total likes"
+                        >
+                          <div className="hero-stat-icon likes">
+                            <IconHeart size={13} filled color="var(--heart-rose)" />
+                          </div>
+                          <span className="hero-stat-val">{totalLikesReceived.toLocaleString()}</span>
+                          <span className="hero-stat-lbl">Likes</span>
+                        </div>
+
+                        <div
+                          className="hero-stat-pill"
+                          onClick={() => openRoster(profile.handle, profile.name, 'circle')}
+                          title="View trust circles"
+                        >
+                          <div className="hero-stat-icon circles">
+                            <IconStarCloseFriends size={13} color="var(--cf-emerald)" />
+                          </div>
+                          <span className="hero-stat-val">{dynamicCirclesCount.toLocaleString()}</span>
+                          <span className="hero-stat-lbl">Circles</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Identity & Bio */}
@@ -7815,116 +7892,7 @@ export function App() {
                 )}
                 </div>
 
-                {/* Real Numerical Stats Bar - Apple VisionOS Complication Bar with Icons */}
-                {(() => {
-                  const dynamicFollowersCount = isOwnProfile
-                    ? (myProfile.followersList || profile.followersList || []).length
-                    : (profile.followersList || []).filter((h) => h !== 'luciano' && h !== myProfile.handle).length + (isFollowingThisUser ? 1 : 0);
-                  const dynamicFollowingCount = isOwnProfile
-                    ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano' && k !== myProfile.handle).length
-                    : (profile.followingList || []).length;
-                  const dynamicCirclesCount = isOwnProfile
-                    ? closeFriendsList.length
-                    : (profile.trustCirclesList || []).length;
 
-                  const totalLikesReceived = userDispatches.reduce(
-                    (sum, p) => sum + (p.likesCount || (p.likersList ? p.likersList.length : 0) || 0),
-                    0
-                  ) + (profile.mediaItems || []).reduce((sum, m) => {
-                    const baseKey = extractMediaBaseKey(m.url);
-                    const photoRec = photoLikesMap[m.url] || (baseKey ? photoLikesMap[baseKey] : undefined);
-                    return sum + (photoRec ? photoRec.count : (m.likes || 0));
-                  }, 0);
-
-                  return (
-                    <div className="profile-stats-bar">
-                      <div
-                        className="profile-stat-item stat-clickable"
-                        onClick={() => setProfileSubTab('dispatches')}
-                        title="Click to view all dispatches"
-                      >
-                        <div className="profile-stat-icon-wrapper dispatches">
-                          <IconList size={13} color="var(--public-cyan)" />
-                        </div>
-                        <span className="profile-stat-number">{userDispatches.length}</span>
-                        <span className="profile-stat-label">Dispatches</span>
-                      </div>
-
-                      <div
-                        className="profile-stat-item stat-clickable"
-                        onClick={() => {
-                          setProfileSubTab('liked');
-                          triggerToast(`${profile.name} has received ${totalLikesReceived} total likes across dispatches & studio.`);
-                        }}
-                        title="Total post & media likes received"
-                      >
-                        <div className="profile-stat-icon-wrapper likes">
-                          <IconHeart size={13} filled color="var(--heart-rose)" />
-                        </div>
-                        <span className="profile-stat-number">{totalLikesReceived.toLocaleString()}</span>
-                        <span className="profile-stat-label">Likes</span>
-                      </div>
-
-                      <div
-                        className="profile-stat-item stat-clickable"
-                        onClick={() => openRoster(profile.handle, profile.name, 'followers')}
-                        title={
-                          !isOwnProfile && profile.isPrivate && !isFollowingThisUser
-                            ? 'Private Account: Click to request access'
-                            : 'Click to view followers directory'
-                        }
-                      >
-                        <div className="profile-stat-icon-wrapper followers">
-                          <IconUsers size={13} color="#818cf8" />
-                        </div>
-                        <span className="profile-stat-number">
-                          {dynamicFollowersCount.toLocaleString()}
-                        </span>
-                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                          Followers {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={10} color="var(--cf-emerald)" />}
-                        </span>
-                      </div>
-
-                      <div
-                        className="profile-stat-item stat-clickable"
-                        onClick={() => openRoster(profile.handle, profile.name, 'following')}
-                        title={
-                          !isOwnProfile && profile.isPrivate && !isFollowingThisUser
-                            ? 'Private Account: Click to request access'
-                            : 'Click to view following directory'
-                        }
-                      >
-                        <div className="profile-stat-icon-wrapper following">
-                          <IconUserCheck size={13} color="#38bdf8" />
-                        </div>
-                        <span className="profile-stat-number">
-                          {dynamicFollowingCount.toLocaleString()}
-                        </span>
-                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                          Following {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={10} color="var(--cf-emerald)" />}
-                        </span>
-                      </div>
-
-                      <div
-                        className="profile-stat-item stat-clickable"
-                        onClick={() => openRoster(profile.handle, profile.name, 'circle')}
-                        title={
-                          !isOwnProfile && profile.isPrivate && !isFollowingThisUser
-                            ? 'Private Account: Click to request access'
-                            : 'Click to view trust circles network'
-                        }
-                      >
-                        <div className="profile-stat-icon-wrapper circles">
-                          <IconStarCloseFriends size={13} color="var(--cf-emerald)" />
-                        </div>
-                        <span className="profile-stat-number">{dynamicCirclesCount.toLocaleString()}</span>
-                        <span className="profile-stat-label" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                          Circles {!isOwnProfile && profile.isPrivate && !isFollowingThisUser && <IconLock size={10} color="var(--cf-emerald)" />}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 {/* PRIVATE ACCOUNT LOCK PROTECTION (PRD PRIVACY RULE) */}
                 {!isOwnProfile && profile.isPrivate && !isFollowingThisUser ? (
