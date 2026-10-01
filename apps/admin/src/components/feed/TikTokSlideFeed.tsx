@@ -236,6 +236,9 @@ export interface TikTokSlideFeedProps {
   onStoryReplyToDM?: (creatorHandle: string, messageText: string) => void;
   onAddNewPost?: (newPost: Partial<PostItem>) => void;
   onRefreshFeeds?: () => void;
+  stories?: StoryItem[];
+  onAddStory?: (story: StoryItem) => void;
+  onDeleteStory?: (storyId: string) => void;
 }
 
 export interface StoryRailItem {
@@ -866,8 +869,8 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   onOpenLive,
   onOpenCreate: _onOpenCreate,
   onNavigateProfile,
-  onNavigateTab,
-  currentNavTab = 'feed',
+  onNavigateTab: _onNavigateTab,
+  currentNavTab: _currentNavTab = 'feed',
   activeFilter = 'foryou',
   onSelectFilter,
   onSwitchToCardView: _onSwitchToCardView,
@@ -875,6 +878,9 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   onStoryReplyToDM,
   onAddNewPost,
   onRefreshFeeds,
+  stories: propStories,
+  onAddStory,
+  onDeleteStory,
 }) => {
   // Channel Navigation: ['live', 'birdie', 'circles', 'following', 'foryou']
   const CHANNELS: SlideFeedChannel[] = ['live', 'birdie', 'circles', 'following', 'foryou'];
@@ -975,7 +981,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   const [isDraggingStory, setIsDraggingStory] = useState(false);
   const storyTouchStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const [stories, setStories] = useState<StoryItem[]>(() => {
+  const [localStories, setLocalStories] = useState<StoryItem[]>(() => {
     const saved = localStorage.getItem('privity_stories_v3');
     if (saved) {
       try {
@@ -986,6 +992,8 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     return INITIAL_STORIES_V3;
   });
 
+  const stories = propStories || localStories;
+  const setStories = setLocalStories;
   const [isAddStoryModalOpen, setIsAddStoryModalOpen] = useState(false);
   const [storyDraftMediaUrl, setStoryDraftMediaUrl] = useState<string>('https://images.unsplash.com/photo-1533105079780-92b9be482077?w=1200');
   const [storyDraftMediaType, setStoryDraftMediaType] = useState<'image' | 'video'>('image');
@@ -1595,11 +1603,15 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       isLiked: false,
     };
 
-    const nextStories = [newStory, ...stories];
-    setStories(nextStories);
-    try {
-      localStorage.setItem('privity_stories_v3', JSON.stringify(nextStories));
-    } catch (e) {}
+    if (onAddStory) {
+      onAddStory(newStory);
+    } else {
+      const nextStories = [newStory, ...stories];
+      setStories(nextStories);
+      try {
+        localStorage.setItem('privity_stories_v3', JSON.stringify(nextStories));
+      } catch (e) {}
+    }
     setIsAddStoryModalOpen(false);
     setStoryDraftCaption('');
     triggerSlideToast('Story shared to your circle! ⭕');
@@ -1607,17 +1619,21 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
   // Delete Story
   const handleDeleteStory = (storyId: string) => {
-    const nextStories = stories.filter((s) => s.id !== storyId);
-    setStories(nextStories);
-    try {
-      localStorage.setItem('privity_stories_v3', JSON.stringify(nextStories));
-    } catch (e) {}
+    const updatedStories = stories.filter((s) => s.id !== storyId);
+    if (onDeleteStory) {
+      onDeleteStory(storyId);
+    } else {
+      setStories(updatedStories);
+      try {
+        localStorage.setItem('privity_stories_v3', JSON.stringify(updatedStories));
+      } catch (e) {}
+    }
     triggerSlideToast('Story removed');
     if (activeStoryViewerIndex !== null) {
-      if (nextStories.length === 0) {
+      if (updatedStories.length === 0) {
         setActiveStoryViewerIndex(null);
-      } else if (activeStoryViewerIndex >= nextStories.length) {
-        setActiveStoryViewerIndex(nextStories.length - 1);
+      } else if (activeStoryViewerIndex >= updatedStories.length) {
+        setActiveStoryViewerIndex(updatedStories.length - 1);
       }
     }
   };
@@ -2440,104 +2456,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* 3. PRIVITY NATIVE BOTTOM NAVIGATION DOCK                 */}
-      {/* ======================================================== */}
-      <nav className="privity-slide-bottom-nav">
-        {/* 1. Feed */}
-        <button
-          type="button"
-          className={`privity-nav-tab-item ${currentNavTab === 'feed' ? 'active' : ''}`}
-          onClick={() => {
-            stopAllAudio();
-            onNavigateTab('feed');
-          }}
-          title="Home Feed"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill={currentNavTab === 'feed' ? '#ffffff' : 'none'} stroke={currentNavTab === 'feed' ? '#ffffff' : 'rgba(255,255,255,0.65)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            <polyline points="9 22 9 12 15 12 15 22" />
-          </svg>
-          <span className="privity-nav-tab-label">Feed</span>
-          {currentNavTab === 'feed' && <span className="privity-nav-active-dot" />}
-        </button>
-
-        {/* 2. Discover */}
-        <button
-          type="button"
-          className={`privity-nav-tab-item ${currentNavTab === 'discover' ? 'active' : ''}`}
-          onClick={() => {
-            stopAllAudio();
-            onNavigateTab('discover');
-          }}
-          title="Discover Creators"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={currentNavTab === 'discover' ? '#ffffff' : 'rgba(255,255,255,0.65)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill={currentNavTab === 'discover' ? '#ffffff' : 'none'} />
-          </svg>
-          <span className="privity-nav-tab-label">Discover</span>
-          {currentNavTab === 'discover' && <span className="privity-nav-active-dot" />}
-        </button>
-
-        {/* 3. Center Create (+) Orb */}
-        <button
-          type="button"
-          className="privity-nav-tab-create-btn"
-          onClick={() => {
-            stopAllAudio();
-            setCreatorMode('post');
-            setIsAddStoryModalOpen(true);
-          }}
-          title="Open Camera & Studio"
-          aria-label="Create Dispatch"
-        >
-          <div className="privity-nav-create-orb">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </div>
-        </button>
-
-        {/* 4. Messages */}
-        <button
-          type="button"
-          className={`privity-nav-tab-item ${currentNavTab === 'messages' ? 'active' : ''}`}
-          onClick={() => {
-            stopAllAudio();
-            onNavigateTab('messages');
-          }}
-          title="Encrypted Messages"
-        >
-          <div style={{ position: 'relative' }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={currentNavTab === 'messages' ? '#ffffff' : 'rgba(255,255,255,0.65)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-            </svg>
-            <span className="privity-nav-presence-dot" />
-          </div>
-          <span className="privity-nav-tab-label">Messages</span>
-          {currentNavTab === 'messages' && <span className="privity-nav-active-dot" />}
-        </button>
-
-        {/* 5. Profile */}
-        <button
-          type="button"
-          className={`privity-nav-tab-item ${currentNavTab === 'profile' ? 'active' : ''}`}
-          onClick={() => {
-            stopAllAudio();
-            onNavigateTab('profile');
-          }}
-          title="Your Profile"
-        >
-          <div className={`privity-nav-avatar-circle ${currentNavTab === 'profile' ? 'active' : ''}`}>
-            <img src={currentUser.avatar} alt={currentUser.name} className="privity-nav-avatar-img" />
-          </div>
-          <span className="privity-nav-tab-label">Profile</span>
-          {currentNavTab === 'profile' && <span className="privity-nav-active-dot" />}
-        </button>
-      </nav>
-
+      
       {/* ======================================================== */}
       {/* 6. SLIDE-UP COMMENTS DRAWER (TIKTOK STYLE)               */}
       {/* ======================================================== */}

@@ -78,6 +78,23 @@ const ALL_TEMPLATE_POSTS: PostItem[] = [
 ] as unknown as PostItem[];
 
 
+// 24-hour persistent story loader (strictly within stories)
+export const loadValidStories = (): StoryItem[] => {
+  try {
+    const saved = localStorage.getItem('privity_stories_v3');
+    if (saved) {
+      const parsed: StoryItem[] = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const now = Date.now();
+        // Retain stories within 24 hours (24 * 3600 * 1000 = 86400000 ms)
+        const valid = parsed.filter((s) => !s.createdAt || now - s.createdAt < 86400000);
+        return valid.length > 0 ? valid : INITIAL_STORIES_V3;
+      }
+    }
+  } catch (e) {}
+  return INITIAL_STORIES_V3;
+};
+
 // ==================== SETTINGS DATA MODEL ====================
 
 export interface UserSettings {
@@ -1661,6 +1678,29 @@ export function App() {
     const loaded = readStorage('privity_direct_messages_v5', INITIAL_DIRECT_MESSAGES);
     return sanitizeStoredDirectMessages(loaded);
   });
+  const [stories, setStories] = useState<StoryItem[]>(() => loadValidStories());
+
+  const handleAddStory = (newStory: StoryItem) => {
+    setStories((prev) => {
+      const filtered = prev.filter((s) => s.id !== newStory.id);
+      const next = [newStory, ...filtered];
+      try {
+        localStorage.setItem('privity_stories_v3', JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
+  const handleDeleteStory = (storyId: string) => {
+    setStories((prev) => {
+      const next = prev.filter((s) => s.id !== storyId);
+      try {
+        localStorage.setItem('privity_stories_v3', JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
   const [activeChatUser, setActiveChatUser] = useState<UserProfile | null>(null);
   const [dmActiveStoryIndex, setDmActiveStoryIndex] = useState<number | null>(null);
   const [dmStoryDragY, setDmStoryDragY] = useState(0);
@@ -5436,6 +5476,9 @@ export function App() {
                 onShare={(post) => handleShare(post.id)}
                 onOpenLive={() => handleSelectFeedTab('live')}
                 onOpenCreate={() => setIsCameraOpen(true)}
+                stories={stories}
+                onAddStory={handleAddStory}
+                onDeleteStory={handleDeleteStory}
                 onStoryReplyToDM={(creatorHandle, msg) => handleStoryReplyToDM(creatorHandle, msg)}
                 onAddNewPost={(newPost) => {
                   setPosts((prev) => {
@@ -6326,18 +6369,11 @@ export function App() {
               <div className="messages-roster-pane">
                 {/* Dedicated Stories Rail in Direct Messages */}
                 <div className="messages-stories-rail">
+                  {/* Your Story in Messages */}
                   <div
                     className="dm-story-bubble"
                     onClick={() => {
-                      const dmStories: StoryItem[] = (() => {
-                        try {
-                          const s = localStorage.getItem('privity_stories_v3');
-                          return s ? JSON.parse(s) : INITIAL_STORIES_V3;
-                        } catch (e) {
-                          return INITIAL_STORIES_V3;
-                        }
-                      })();
-                      const myIdx = dmStories.findIndex((st) => st.authorHandle === cleanMyHandle);
+                      const myIdx = stories.findIndex((st) => st.authorHandle === cleanMyHandle);
                       if (myIdx !== -1) {
                         setDmActiveStoryIndex(myIdx);
                       } else {
@@ -6346,47 +6382,37 @@ export function App() {
                     }}
                     title="Your Story"
                   >
-                    <div className="dm-story-avatar-ring add">
+                    <div className={`dm-story-avatar-ring ${stories.some((s) => s.authorHandle === cleanMyHandle) ? 'cf active-story' : 'add'}`}>
                       <img src={myProfile.avatar} alt="You" className="dm-story-avatar-img" />
                       <span className="dm-story-plus-icon">+</span>
                     </div>
                     <span className="dm-story-name">Your Story</span>
                   </div>
 
-                  {(() => {
-                    const dmStories: StoryItem[] = (() => {
-                      try {
-                        const s = localStorage.getItem('privity_stories_v3');
-                        return s ? JSON.parse(s) : INITIAL_STORIES_V3;
-                      } catch (e) {
-                        return INITIAL_STORIES_V3;
-                      }
-                    })();
+                  {/* Other Stories in Messages */}
+                  {stories
+                    .filter((st) => st.authorHandle !== cleanMyHandle)
+                    .map((st) => {
+                      const isCF = st.privacy === 'close_friends';
+                      const isFollowers = st.privacy === 'followers';
+                      const ringClass = isCF ? 'cf' : isFollowers ? 'followers' : 'public';
+                      const idx = stories.findIndex((x) => x.id === st.id);
 
-                    return dmStories
-                      .filter((st) => st.authorHandle !== cleanMyHandle)
-                      .map((st) => {
-                        const isCF = st.privacy === 'close_friends';
-                        const isFollowers = st.privacy === 'followers';
-                        const ringClass = isCF ? 'cf' : isFollowers ? 'followers' : 'public';
-                        const idx = dmStories.findIndex((x) => x.id === st.id);
-
-                        return (
-                          <div
-                            key={st.id}
-                            className="dm-story-bubble"
-                            onClick={() => setDmActiveStoryIndex(idx)}
-                            title={`View @${st.authorHandle}'s story`}
-                          >
-                            <div className={`dm-story-avatar-ring ${ringClass}`}>
-                              <img src={st.authorAvatar} alt={st.authorName} className="dm-story-avatar-img" />
-                              <span className="dm-story-online-dot" />
-                            </div>
-                            <span className="dm-story-name">{st.authorName.split(' ')[0]}</span>
+                      return (
+                        <div
+                          key={st.id}
+                          className="dm-story-bubble"
+                          onClick={() => setDmActiveStoryIndex(idx)}
+                          title={`View @${st.authorHandle}'s story`}
+                        >
+                          <div className={`dm-story-avatar-ring ${ringClass}`}>
+                            <img src={st.authorAvatar} alt={st.authorName} className="dm-story-avatar-img" />
+                            <span className="dm-story-online-dot" />
                           </div>
-                        );
-                      });
-                  })()}
+                          <span className="dm-story-name">{st.authorName.split(' ')[0]}</span>
+                        </div>
+                      );
+                    })}
                 </div>
 
                 <div className="messages-roster-header">
@@ -7076,15 +7102,7 @@ export function App() {
             
               {/* Fullscreen Story Viewer from DM Rail (Slide Down to Dismiss) */}
               {dmActiveStoryIndex !== null && (() => {
-                const dmStories: StoryItem[] = (() => {
-                  try {
-                    const s = localStorage.getItem('privity_stories_v3');
-                    return s ? JSON.parse(s) : INITIAL_STORIES_V3;
-                  } catch (e) {
-                    return INITIAL_STORIES_V3;
-                  }
-                })();
-                const curStory = dmStories[dmActiveStoryIndex];
+                const curStory = stories[dmActiveStoryIndex];
                 if (!curStory) return null;
 
                 return (
@@ -10595,7 +10613,7 @@ export function App() {
       )}
 
       {/* 5. MOBILE BOTTOM NAVIGATION (<= 768px) */}
-      {!(activeTab === 'messages' && activeChatUser) && !(activeTab === 'feed' && (feedFilter === 'live' || feedViewMode === 'slide')) && (
+      {!(activeTab === 'messages' && activeChatUser) && !(activeTab === 'feed' && feedFilter === 'live') && (
         <nav className="mobile-bottom-nav">
           <button
             type="button"
