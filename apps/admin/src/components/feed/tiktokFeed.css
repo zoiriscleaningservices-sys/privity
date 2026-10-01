@@ -216,79 +216,29 @@
   gap: 8px;
 }
 
-.tiktok-view-toggle-btn {
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  color: #fff;
-  width: 28px;
-  height: 28px;
+/* Birdie Tab with Icon */
+.birdie-tab .birdie-tab-inner {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.18s ease;
+  gap: 5px;
 }
 
-.tiktok-view-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+.birdie-tab .birdie-nav-svg {
+  transition: transform 0.18s ease;
 }
 
-.tiktok-volume-btn {
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.18s ease;
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6));
+.birdie-tab:hover .birdie-nav-svg {
+  transform: scale(1.1) rotate(-5deg);
 }
 
-.tiktok-volume-btn:hover {
-  transform: scale(1.1);
-  background: rgba(255, 255, 255, 0.15);
+.birdie-tab.active {
+  color: #38bdf8;
+  text-shadow: 0 0 12px rgba(56, 189, 248, 0.6);
 }
 
-.tiktok-volume-btn.unmuted {
-  border-color: #20d5ec;
-  box-shadow: 0 0 12px rgba(32, 213, 236, 0.4);
-}
-
-.tiktok-sound-hint-banner {
-  position: absolute;
-  top: calc(max(8px, env(safe-area-inset-top, 8px)) + 52px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(18, 19, 29, 0.88);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 9999px;
-  padding: 6px 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #ffffff;
-  font-size: 12.5px;
-  font-weight: 700;
-  z-index: 55;
-  cursor: pointer;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7);
-  animation: tiktok-float-hint 2s ease-in-out infinite;
-}
-
-@keyframes tiktok-float-hint {
-  0%, 100% { transform: translateX(-50%) translateY(0); }
-  50% { transform: translateX(-50%) translateY(-4px); }
+.birdie-tab.active .birdie-indicator {
+  background: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
 }
 
 .sound-hint-wave {
@@ -640,86 +590,83 @@
 }
 
 /* ========================================================================== */
-/* 4. BOTTOM NAVIGATION BAR (100% FAITHFUL TO TIKTOK SPEC)                   */
+/* 4. PRIVITY NATIVE SLIDE BOTTOM NAVIGATION DOCK (MATCHING SCREENSHOT 2)    */
 /* ========================================================================== */
 
-.tiktok-bottom-nav {
+.privity-slide-bottom-nav {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   max-width: 440px;
   margin: 0 auto;
-  height: calc(52px + env(safe-area-inset-bottom, 0px));
+  height: calc(58px + env(safe-area-inset-bottom, 0px));
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  background: #000000;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(7, 10, 18, 0.94);
+  backdrop-filter: blur(32px) saturate(200%);
+  -webkit-backdrop-filter: blur(32px) saturate(200%);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: space-around;
-  z-index: 60;
+  z-index: 70;
+  box-shadow: 0 -6px 28px rgba(0, 0, 0, 0.7);
   pointer-events: auto;
 }
 
-.tiktok-nav-item {
-  background: none;
-  border: none;
+.privity-nav-tab-item {
+  flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  color: rgba(255, 255, 255, 0.7);
-  cursor: pointer;
-  padding: 4px 10px;
-  transition: all 0.18s ease;
-}
-
-.tiktok-nav-item.active {
-  color: #ffffff;
-}
-
-.tiktok-nav-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: -0.1px;
-}
-
-.tiktok-nav-icon-badge-wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
   justify-content: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  padding: 6px 0;
+  position: relative;
+  transition: color 0.18s ease;
 }
 
-.tiktok-nav-badge {
-  position: absolute;
-  top: -4px;
-  right: -8px;
-  background: #fe2c55;
+.privity-nav-tab-item:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.privity-nav-tab-item.active {
   color: #ffffff;
-  font-size: 9.5px;
-  font-weight: 800;
-  border-radius: 9999px;
-  padding: 1px 4.5px;
-  line-height: 1.2;
 }
 
-.tiktok-nav-avatar-wrap {
-  width: 22px;
-  height: 22px;
+.privity-nav-tab-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.privity-nav-active-dot {
+  position: absolute;
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  overflow: hidden;
-  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  background: #6366f1;
+  box-shadow: 0 0 8px #6366f1;
 }
 
-.tiktok-nav-avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.privity-nav-presence-dot {
+  position: absolute;
+  top: -1px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
 }
 
-/* Center Create (+) Button: Signature 3-Layer Design */
-.tiktok-nav-create-btn {
+.privity-nav-tab-create-btn {
   background: none;
   border: none;
   padding: 0;
@@ -730,55 +677,346 @@
   transition: transform 0.18s ease;
 }
 
-.tiktok-nav-create-btn:hover {
+.privity-nav-tab-create-btn:hover {
+  transform: scale(1.06);
+}
+
+.privity-nav-create-orb {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #d946ef);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 18px rgba(99, 102, 241, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  transform: translateY(-8px);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.privity-nav-create-orb:active {
+  transform: translateY(-6px) scale(0.92);
+}
+
+.privity-nav-avatar-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1.5px solid rgba(255, 255, 255, 0.6);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.privity-nav-avatar-circle.active {
+  border-color: #6366f1;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.5);
+}
+
+.privity-nav-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ========================================================================== */
+/* BIRDIE TEXT-FIRST FEED (100% SPEC MATCHING SCREENSHOT 2)                   */
+/* ========================================================================== */
+
+.birdie-feed-scroll-container {
+  width: 100%;
+  max-width: 440px;
+  height: 100%;
+  height: 100dvh;
+  margin: 0 auto;
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  position: relative;
+  background: #080a10;
+  padding: calc(max(8px, env(safe-area-inset-top, 8px)) + 52px) 14px calc(max(10px, env(safe-area-inset-bottom, 10px)) + 74px);
+  box-sizing: border-box;
+}
+
+.birdie-feed-scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
+.birdie-post-card {
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+  background: rgba(16, 21, 35, 0.88);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 18px 16px 14px;
+  margin-bottom: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+  user-select: text;
+  cursor: pointer;
+}
+
+.birdie-post-card:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.birdie-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.birdie-author-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.birdie-author-avatar:hover {
+  transform: scale(1.05);
+}
+
+.birdie-author-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.birdie-meta-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.birdie-author-name-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.birdie-author-display-name {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.birdie-blue-badge {
+  background: #38bdf8;
+  color: #000;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 8.5px;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.birdie-privacy-badge {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 9999px;
+  padding: 3px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.birdie-privacy-badge.followers {
+  background: rgba(30, 41, 59, 0.85);
+  color: #93c5fd;
+  border: 1px solid rgba(147, 197, 253, 0.22);
+}
+
+.birdie-privacy-badge.close_friends {
+  background: rgba(6, 78, 59, 0.7);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.28);
+}
+
+.birdie-privacy-badge.public {
+  background: rgba(55, 65, 81, 0.7);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.birdie-handle-timestamp {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+}
+
+.birdie-post-body {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #f1f5f9;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 14px;
+}
+
+.birdie-hashtag-link {
+  color: #60a5fa;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.birdie-hashtag-link:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.birdie-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.birdie-action-btn {
+  background: none;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px;
+  transition: all 0.15s ease;
+}
+
+.birdie-action-btn:hover {
+  color: #ffffff;
   transform: scale(1.08);
 }
 
-.tiktok-create-btn-base {
-  position: relative;
-  width: 45px;
-  height: 30px;
+.birdie-action-btn.liked {
+  color: #fe2c55;
+}
+
+.birdie-action-btn.saved {
+  color: #face15;
+}
+
+.birdie-social-proof-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  padding: 10px 2px 12px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.65);
 }
 
-.tiktok-create-cyan-bg {
-  position: absolute;
-  left: 0;
-  width: 38px;
-  height: 30px;
-  background: #20d5ec;
-  border-radius: 8px;
-}
-
-.tiktok-create-pink-bg {
-  position: absolute;
-  right: 0;
-  width: 38px;
-  height: 30px;
-  background: #fe2c55;
-  border-radius: 8px;
-}
-
-.tiktok-create-center-pill {
-  position: relative;
-  width: 38px;
-  height: 30px;
-  background: #ffffff;
-  border-radius: 8px;
+.birdie-overlapping-avatars {
   display: flex;
   align-items: center;
-  justify-content: center;
-  z-index: 2;
 }
 
-.tiktok-create-plus {
-  color: #000000;
-  font-size: 21px;
-  font-weight: 900;
-  line-height: 1;
-  margin-top: -1px;
+.birdie-proof-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid #101523;
+  margin-left: -5px;
+}
+
+.birdie-proof-avatar:first-child {
+  margin-left: 0;
+}
+
+.birdie-proof-text strong {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.birdie-reply-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.birdie-reply-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.2px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.birdie-reply-form {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  padding: 3px 4px 3px 14px;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.birdie-reply-form:focus-within {
+  border-color: rgba(99, 102, 241, 0.6);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.birdie-reply-input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+}
+
+.birdie-reply-input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.birdie-send-btn {
+  background: linear-gradient(135deg, #6366f1, #d946ef);
+  border: none;
+  border-radius: 9999px;
+  padding: 6px 14px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.birdie-send-btn:hover {
+  transform: scale(1.04);
+}
+
+.birdie-send-btn:active {
+  transform: scale(0.96);
 }
 
 /* ========================================================================== */

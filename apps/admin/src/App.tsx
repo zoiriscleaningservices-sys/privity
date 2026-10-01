@@ -297,8 +297,8 @@ const SAMPLE_POSTS: PostItem[] = [
     caption: 'The fundamental flaw of 2010s social media was measuring human connection through infinite reach metrics (followers, impressions, virality). When you make distribution algorithmic, creators are forced to perform for the machine.\n\nPrivity restores human agency: explicit audience circles, zero recommendation tampering, and transparent privacy.',
     tags: ['privacy', 'software', 'social', 'manifesto'],
     privacy: 'followers',
-    likesCount: 3,
-    likersList: ['elena_rodriguez', 'sara_architecture', 'julian_analogue'],
+    likesCount: 4,
+    likersList: ['luciano', 'elena_rodriguez', 'sara_architecture', 'julian_analogue'],
     commentsCount: 1,
     sharesCount: 16,
     savesCount: 42,
@@ -808,8 +808,8 @@ const INITIAL_PROFILES_REGISTRY: Record<string, UserProfile> = {
 };
 
 // ==================== LIVE ENCRYPTED STREAMS MODEL ====================
-export type FeedFilterTab = 'live' | 'feed' | 'all' | 'close_friends' | 'followers';
-export const FEED_TABS: FeedFilterTab[] = ['live', 'feed', 'all', 'close_friends', 'followers'];
+export type FeedFilterTab = 'live' | 'feed' | 'all' | 'close_friends' | 'followers' | 'birdie';
+export const FEED_TABS: FeedFilterTab[] = ['live', 'birdie', 'close_friends', 'followers', 'feed', 'all'];
 
 export interface LiveGuestSlot {
   id: string;
@@ -4939,7 +4939,7 @@ export function App() {
                 feedFilter === 'live' ? 'Live Broadcasts' :
                 feedFilter === 'feed' ? 'Chronological Feed' :
                 feedFilter === 'close_friends' ? 'Close Friends' :
-                feedFilter === 'followers' ? 'Followers' : 'All Circles'
+                feedFilter === 'followers' ? 'Followers' : feedFilter === 'birdie' ? 'Birdie Feed' : 'All Circles'
               )}
               {activeTab === 'discover' && 'Discover'}
               {activeTab === 'activity' && 'Activity'}
@@ -5222,6 +5222,8 @@ export function App() {
                   handle: myProfile.handle,
                   avatar: myProfile.avatar,
                 }}
+                followingMap={followingMap}
+                closeFriendsList={closeFriendsList}
                 onLike={(postId) => handleLike(postId)}
                 onSave={(postId) => handleSave(postId)}
                 onAddComment={(postId, text) => handleAddComment(postId, text)}
@@ -5236,10 +5238,16 @@ export function App() {
                   else setActiveTab('feed');
                 }}
                 currentNavTab={activeTab === 'feed' ? 'feed' : activeTab === 'discover' ? 'discover' : activeTab === 'messages' ? 'messages' : 'profile'}
-                activeFilter={feedFilter === 'close_friends' ? 'circles' : feedFilter === 'followers' ? 'following' : 'foryou'}
+                activeFilter={
+                  feedFilter === 'close_friends' ? 'circles' :
+                  feedFilter === 'followers' ? 'following' :
+                  feedFilter === 'birdie' ? 'birdie' : 'foryou'
+                }
                 onSelectFilter={(f) => {
                   if (f === 'circles') handleSelectFeedTab('close_friends');
                   else if (f === 'following') handleSelectFeedTab('followers');
+                  else if (f === 'birdie') handleSelectFeedTab('birdie');
+                  else if (f === 'live') handleSelectFeedTab('live');
                   else handleSelectFeedTab('feed');
                 }}
                 onSwitchToCardView={() => setFeedViewMode('cards')}

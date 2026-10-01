@@ -108,6 +108,8 @@ export const DEFAULT_ITUNES_TRACKS: ItunesTrack[] = [
   },
 ];
 
+export type SlideFeedChannel = 'live' | 'birdie' | 'circles' | 'following' | 'foryou';
+
 export interface TikTokSlideFeedProps {
   posts: PostItem[];
   currentUser: {
@@ -115,6 +117,8 @@ export interface TikTokSlideFeedProps {
     handle: string;
     avatar: string;
   };
+  followingMap?: Record<string, boolean>;
+  closeFriendsList?: string[];
   onLike: (postId: string, photoUrl?: string) => void;
   onSave: (postId: string) => void;
   onAddComment: (postId: string, text: string) => void;
@@ -124,8 +128,8 @@ export interface TikTokSlideFeedProps {
   onNavigateProfile: (handle: string) => void;
   onNavigateTab: (tab: 'feed' | 'discover' | 'messages' | 'profile') => void;
   currentNavTab?: 'feed' | 'discover' | 'messages' | 'profile';
-  activeFilter?: 'foryou' | 'following' | 'circles';
-  onSelectFilter?: (filter: 'foryou' | 'following' | 'circles') => void;
+  activeFilter?: 'foryou' | 'following' | 'circles' | 'birdie' | 'live';
+  onSelectFilter?: (filter: 'foryou' | 'following' | 'circles' | 'birdie' | 'live') => void;
   onSwitchToCardView?: () => void;
   onUpdatePostSound?: (postId: string, sound: { name: string; artist: string; previewUrl: string; coverUrl?: string }) => void;
 }
@@ -133,6 +137,8 @@ export interface TikTokSlideFeedProps {
 export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   posts,
   currentUser,
+  followingMap,
+  closeFriendsList,
   onLike,
   onSave,
   onAddComment,
@@ -144,9 +150,79 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   currentNavTab = 'feed',
   activeFilter = 'foryou',
   onSelectFilter,
-  onSwitchToCardView,
+  onSwitchToCardView: _onSwitchToCardView,
   onUpdatePostSound,
 }) => {
+  // Channel Navigation: ['live', 'birdie', 'circles', 'following', 'foryou']
+  const CHANNELS: SlideFeedChannel[] = ['live', 'birdie', 'circles', 'following', 'foryou'];
+
+  const [activeChannel, setActiveChannel] = useState<SlideFeedChannel>(() => {
+    if (activeFilter === 'circles') return 'circles';
+    if (activeFilter === 'following') return 'following';
+    if (activeFilter === 'birdie') return 'birdie';
+    if (activeFilter === 'live') return 'live';
+    return 'foryou';
+  });
+
+  useEffect(() => {
+    if (activeFilter) {
+      if (activeFilter === 'circles') setActiveChannel('circles');
+      else if (activeFilter === 'following') setActiveChannel('following');
+      else if (activeFilter === 'birdie') setActiveChannel('birdie');
+      else if (activeFilter === 'live') setActiveChannel('live');
+      else setActiveChannel('foryou');
+    }
+  }, [activeFilter]);
+
+  const handleSelectChannel = (channel: SlideFeedChannel) => {
+    setActiveChannel(channel);
+    setActiveSlideIndex(0);
+    if (channel === 'live') {
+      onOpenLive();
+      return;
+    }
+    onSelectFilter?.(channel);
+  };
+
+  // Followed creators map (clicking '+' button)
+  const [followedMap, setFollowedMap] = useState<Record<string, boolean>>({});
+
+  // Filtered posts strictly according to user circles & following rules
+  const displayPosts = React.useMemo(() => {
+    if (activeChannel === 'circles') {
+      const list = posts.filter(
+        (p) =>
+          p.privacy === 'close_friends' ||
+          (closeFriendsList && closeFriendsList.includes(p.authorHandle.replace(/^@/, '')))
+      );
+      return list.length > 0 ? list : posts.filter((p) => p.privacy === 'close_friends');
+    }
+
+    if (activeChannel === 'following') {
+      const list = posts.filter(
+        (p) =>
+          (followingMap && followingMap[p.authorHandle.replace(/^@/, '')]) ||
+          followedMap[p.authorHandle] ||
+          p.authorHandle === 'nicole_spicy'
+      );
+      return list.length > 0 ? list : posts;
+    }
+
+    if (activeChannel === 'birdie') {
+      const textPosts = posts.filter(
+        (p) =>
+          p.type === 'text' ||
+          p.caption.length > 50 ||
+          p.authorHandle === 'marcus_dev' ||
+          p.authorHandle === 'julian_analogue'
+      );
+      return textPosts.length > 0 ? textPosts : posts;
+    }
+
+    // Default: 'foryou' (all posts)
+    return posts;
+  }, [posts, activeChannel, followingMap, followedMap, closeFriendsList]);
+
   // Active slide index tracked via IntersectionObserver / scroll position
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
 
@@ -155,19 +231,27 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
 
   // Real Audio Playback Engine
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
   const bgAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Floating heart burst particles on double-tap
   const [burstHearts, setBurstHearts] = useState<Array<{ id: number; x: number; y: number; rot: number }>>([]);
 
-  // Followed creators map (clicking the red '+' button)
-  const [followedMap, setFollowedMap] = useState<Record<string, boolean>>({});
-
   // Slide-up comments drawer
   const [activeCommentsPostId, setActiveCommentsPostId] = useState<string | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
+
+  // Inline quick-replies for Birdie cards
+  const [inlineReplyTexts, setInlineReplyTexts] = useState<Record<string, string>>({});
+
+  const handleInlineReplySubmit = (e: React.FormEvent, postId: string) => {
+    e.preventDefault();
+    const text = (inlineReplyTexts[postId] || '').trim();
+    if (!text) return;
+    onAddComment(postId, text);
+    setInlineReplyTexts((prev) => ({ ...prev, [postId]: '' }));
+  };
 
   // Search overlay state
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -180,9 +264,71 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   const [isLoadingSounds, setIsLoadingSounds] = useState(false);
   const [previewingTrackId, setPreviewingTrackId] = useState<string | number | null>(null);
 
-  // Active post for comments drawer
-  const activeCommentPost = posts.find((p) => p.id === activeCommentsPostId);
-  const activeCurrentPost = posts[activeSlideIndex] || posts[0];
+  // Active post for comments drawer & active slide
+  const activeCommentPost = displayPosts.find((p) => p.id === activeCommentsPostId) || posts.find((p) => p.id === activeCommentsPostId);
+  const activeCurrentPost = displayPosts[activeSlideIndex] || displayPosts[0] || posts[0];
+
+  // ========================================================
+  // SWIPE GESTURE CONTROLLER (TOUCH & MOUSE DRAG)
+  // Left: Go to author's profile
+  // Right: Step backwards through channels (For You -> Following -> Circles -> Birdie -> Live)
+  // ========================================================
+  const touchStartPos = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
+  const mouseStartPos = useRef<{ x: number; y: number; time: number; isDown: boolean }>({ x: 0, y: 0, time: 0, isDown: false });
+
+  const onTouchStartHandler = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStartPos.current = { x: t.clientX, y: t.clientY, time: Date.now() };
+  };
+
+  const onTouchEndHandler = (e: React.TouchEvent, authorHandle?: string) => {
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartPos.current.x;
+    const dy = t.clientY - touchStartPos.current.y;
+
+    if (Math.abs(dx) > 46 && Math.abs(dx) > Math.abs(dy) * 1.08) {
+      if (dx < -50) {
+        // SWIPE LEFT (←): Open Creator Profile
+        const handle = authorHandle || displayPosts[activeSlideIndex]?.authorHandle || activeCurrentPost?.authorHandle;
+        if (handle) {
+          onNavigateProfile(handle);
+        }
+      } else if (dx > 50) {
+        // SWIPE RIGHT (→): Slide right to Following, Circles, Birdie, Live
+        const currentIdx = CHANNELS.indexOf(activeChannel);
+        if (currentIdx > 0) {
+          handleSelectChannel(CHANNELS[currentIdx - 1]);
+        }
+      }
+    }
+  };
+
+  const onMouseDownHandler = (e: React.MouseEvent) => {
+    mouseStartPos.current = { x: e.clientX, y: e.clientY, time: Date.now(), isDown: true };
+  };
+
+  const onMouseUpHandler = (e: React.MouseEvent, authorHandle?: string) => {
+    if (!mouseStartPos.current.isDown) return;
+    mouseStartPos.current.isDown = false;
+    const dx = e.clientX - mouseStartPos.current.x;
+    const dy = e.clientY - mouseStartPos.current.y;
+
+    if (Math.abs(dx) > 52 && Math.abs(dx) > Math.abs(dy) * 1.08) {
+      if (dx < -52) {
+        // SWIPE LEFT (←): Open Creator Profile
+        const handle = authorHandle || displayPosts[activeSlideIndex]?.authorHandle || activeCurrentPost?.authorHandle;
+        if (handle) {
+          onNavigateProfile(handle);
+        }
+      } else if (dx > 52) {
+        // SWIPE RIGHT (→): Slide right to Following, Circles, Birdie, Live
+        const currentIdx = CHANNELS.indexOf(activeChannel);
+        if (currentIdx > 0) {
+          handleSelectChannel(CHANNELS[currentIdx - 1]);
+        }
+      }
+    }
+  };
 
   // Video and audio sync intersection observer
   const containerRef = useRef<HTMLDivElement>(null);
@@ -201,7 +347,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
         if (entry.isIntersecting) {
           if (postId) {
-            const index = posts.findIndex((p) => p.id === postId);
+            const index = displayPosts.findIndex((p) => p.id === postId);
             if (index !== -1) setActiveSlideIndex(index);
           }
           if (videoEl && !pausedMap[postId || '']) {
@@ -220,11 +366,11 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     });
 
     return () => observer.disconnect();
-  }, [posts, pausedMap]);
+  }, [displayPosts, pausedMap]);
 
   // Synchronize Background Music with Active Slide & Mute state
   useEffect(() => {
-    const post = posts[activeSlideIndex];
+    const post = displayPosts[activeSlideIndex];
     const bgAudio = bgAudioRef.current;
     if (!bgAudio) return;
 
@@ -243,7 +389,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     } else {
       bgAudio.pause();
     }
-  }, [activeSlideIndex, posts, isMuted, pausedMap]);
+  }, [activeSlideIndex, displayPosts, isMuted, pausedMap]);
 
   // Keyboard Up / Down arrows for desktop snap navigation
   useEffect(() => {
@@ -471,14 +617,14 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       <audio ref={previewAudioRef} preload="auto" onEnded={() => setPreviewingTrackId(null)} />
 
       {/* ======================================================== */}
-      {/* 1. TOP FLOATING NAVIGATION BAR (EXACT TIKTOK SPEC)      */}
+      {/* 1. TOP FLOATING NAVIGATION BAR (CLEAN, ICON-FIRST TABS) */}
       {/* ======================================================== */}
       <header className="tiktok-top-header">
         {/* Left: TV LIVE Button */}
         <button
           type="button"
-          className="tiktok-top-live-btn"
-          onClick={onOpenLive}
+          className={`tiktok-top-live-btn ${activeChannel === 'live' ? 'active' : ''}`}
+          onClick={() => handleSelectChannel('live')}
           title="Open LIVE Rooms & Arena"
           aria-label="LIVE Stream"
         >
@@ -501,72 +647,61 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           </svg>
         </button>
 
-        {/* Center Tabs: Circles / Following / For You */}
+        {/* Center Tabs: Birdie (🐦) | Circles | Following | For You */}
         <div className="tiktok-top-tabs">
+          {/* 1. Birdie with sleek bird icon */}
           <button
             type="button"
-            className={`tiktok-top-tab ${activeFilter === 'circles' ? 'active' : ''}`}
-            onClick={() => onSelectFilter?.('circles')}
+            className={`tiktok-top-tab birdie-tab ${activeChannel === 'birdie' ? 'active' : ''}`}
+            onClick={() => handleSelectChannel('birdie')}
+            title="Birdie · Thought & Text Feed"
+            aria-label="Birdie"
+          >
+            <span className="birdie-tab-inner">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" className="birdie-nav-svg">
+                <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z" />
+              </svg>
+              <span className="birdie-text-label">Birdie</span>
+            </span>
+            {activeChannel === 'birdie' && <span className="tiktok-tab-indicator birdie-indicator" />}
+          </button>
+
+          {/* 2. Circles */}
+          <button
+            type="button"
+            className={`tiktok-top-tab ${activeChannel === 'circles' ? 'active' : ''}`}
+            onClick={() => handleSelectChannel('circles')}
+            title="Close Friends Circle"
           >
             Circles
-            {activeFilter === 'circles' && <span className="tiktok-tab-indicator" />}
+            {activeChannel === 'circles' && <span className="tiktok-tab-indicator" />}
           </button>
 
+          {/* 3. Following */}
           <button
             type="button"
-            className={`tiktok-top-tab ${activeFilter === 'following' ? 'active' : ''}`}
-            onClick={() => onSelectFilter?.('following')}
+            className={`tiktok-top-tab ${activeChannel === 'following' ? 'active' : ''}`}
+            onClick={() => handleSelectChannel('following')}
+            title="Creators You Follow"
           >
             Following
-            {activeFilter === 'following' && <span className="tiktok-tab-indicator" />}
+            {activeChannel === 'following' && <span className="tiktok-tab-indicator" />}
           </button>
 
+          {/* 4. For You */}
           <button
             type="button"
-            className={`tiktok-top-tab ${activeFilter === 'foryou' ? 'active' : ''}`}
-            onClick={() => onSelectFilter?.('foryou')}
+            className={`tiktok-top-tab ${activeChannel === 'foryou' ? 'active' : ''}`}
+            onClick={() => handleSelectChannel('foryou')}
+            title="For You Feed"
           >
             For You
-            {activeFilter === 'foryou' && <span className="tiktok-tab-indicator" />}
+            {activeChannel === 'foryou' && <span className="tiktok-tab-indicator" />}
           </button>
         </div>
 
-        {/* Right: Speaker 🔊, Search 🔍, and Card view switcher */}
+        {/* Right: Search 🔍 Button ONLY (volume button & grid box completely removed) */}
         <div className="tiktok-top-right-actions">
-          {/* Sound / Volume Toggle */}
-          <button
-            type="button"
-            className={`tiktok-volume-btn ${!isMuted ? 'unmuted' : 'muted'}`}
-            onClick={toggleSound}
-            title={isMuted ? 'Unmute Real Music (🔊)' : 'Mute Music (🔇)'}
-            aria-label="Toggle Sound"
-          >
-            {isMuted ? (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <line x1="23" y1="9" x2="17" y2="15" />
-                <line x1="17" y1="9" x2="23" y2="15" />
-              </svg>
-            ) : (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 5" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-              </svg>
-            )}
-          </button>
-
-          {onSwitchToCardView && (
-            <button
-              type="button"
-              className="tiktok-view-toggle-btn"
-              onClick={onSwitchToCardView}
-              title="Switch to Card Grid View"
-            >
-              ☷
-            </button>
-          )}
-
           <button
             type="button"
             className="tiktok-top-search-btn"
@@ -582,346 +717,555 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         </div>
       </header>
 
-      {/* Subtle "Tap for sound 🔊" hint banner when muted */}
-      {isMuted && (
-        <div className="tiktok-sound-hint-banner" onClick={toggleSound} title="Click to play real soundtrack">
-          <span className="sound-hint-wave">🔊</span>
-          <span>Tap to unmute real music</span>
-        </div>
-      )}
-
       {/* ======================================================== */}
-      {/* 2. FULLSCREEN VERTICAL SNAP-SCROLL SLIDE CONTAINER       */}
+      {/* 2. CHANNEL VIEWS: BIRDIE (TEXT-FIRST) vs SLIDE FEED     */}
       {/* ======================================================== */}
-      <div className="tiktok-slides-container" ref={containerRef}>
-        {posts.map((post) => {
-          const isVideo = post.type === 'video' || !!post.videoUrl;
-          const mediaUrl = post.videoUrl || post.contentUrl || post.thumbnailUrl || './nicole-spicy.jpg';
-          const isPaused = !!pausedMap[post.id];
-          const isFollowed = !!followedMap[post.authorHandle];
+      {activeChannel === 'birdie' ? (
+        /* BIRDIE MICROBLOGGING FEED (MATCHING SCREENSHOT 2) */
+        <div
+          className="birdie-feed-scroll-container"
+          onTouchStart={onTouchStartHandler}
+          onTouchEnd={(e) => onTouchEndHandler(e)}
+          onMouseDown={onMouseDownHandler}
+          onMouseUp={(e) => onMouseUpHandler(e)}
+        >
+          {displayPosts.map((post) => {
+            const isLiked = !!post.isLiked;
+            const isSaved = !!post.isSaved;
+            const replyText = inlineReplyTexts[post.id] || '';
 
-          return (
-            <div
-              key={post.id}
-              className="tiktok-slide-item"
-              data-post-id={post.id}
-              ref={(el) => { slideRefs.current[post.id] = el; }}
-            >
-              {/* Media Container (Video or Photo) with Double-Tap to Like */}
-              <div
-                className="tiktok-media-viewport"
-                onClick={(e) => handleMediaTap(e, post)}
+            return (
+              <article
+                key={post.id}
+                className="birdie-post-card"
+                onTouchStart={onTouchStartHandler}
+                onTouchEnd={(e) => onTouchEndHandler(e, post.authorHandle)}
+                onMouseDown={onMouseDownHandler}
+                onMouseUp={(e) => onMouseUpHandler(e, post.authorHandle)}
               >
-                {isVideo ? (
-                  <video
-                    ref={(el) => { videoRefs.current[post.id] = el; }}
-                    src={mediaUrl}
-                    poster={post.thumbnailUrl || post.contentUrl}
-                    className="tiktok-video-player"
-                    loop
-                    playsInline
-                    webkit-playsinline="true"
-                    muted={true}
-                  />
-                ) : (
-                  <img
-                    src={mediaUrl}
-                    alt={post.caption}
-                    className="tiktok-photo-player"
-                  />
-                )}
-
-                {/* Cinematic Top & Bottom Vignette Tint Scrim */}
-                <div className="tiktok-scrim-overlay" />
-
-                {/* Pause Indicator overlay (when video is paused by single tap) */}
-                {isPaused && (
-                  <div className="tiktok-pause-indicator">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)">
-                      <polygon points="5 3 19 12 5 21 5 3" />
-                    </svg>
-                  </div>
-                )}
-
-                {/* Floating Double-Tap Hearts */}
-                {burstHearts.map((heart) => (
-                  <div
-                    key={heart.id}
-                    className="tiktok-burst-heart"
-                    style={{
-                      left: `${heart.x}px`,
-                      top: `${heart.y}px`,
-                      transform: `translate(-50%, -50%) rotate(${heart.rot}deg)`,
-                    }}
-                  >
-                    <svg width="76" height="76" viewBox="0 0 24 24" fill="#fe2c55">
-                      <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                    </svg>
-                  </div>
-                ))}
-              </div>
-
-              {/* ==================================================== */}
-              {/* 3. RIGHT ACTION RAIL (100% FAITHFUL TO TIKTOK SPEC) */}
-              {/* ==================================================== */}
-              <div className="tiktok-right-rail" onClick={(e) => e.stopPropagation()}>
-                {/* 1. Creator Avatar with Centered Red Plus (+) Button */}
-                <div
-                  className="tiktok-rail-avatar-container"
-                  onClick={() => onNavigateProfile(post.authorHandle)}
-                  title={`View @${post.authorHandle}`}
-                >
+                {/* Author Header Row */}
+                <div className="birdie-card-header">
                   <img
                     src={post.authorAvatar}
                     alt={post.authorName}
-                    className="tiktok-rail-avatar-img"
+                    className="birdie-author-avatar"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNavigateProfile(post.authorHandle);
+                    }}
+                    title={`View @${post.authorHandle}`}
                   />
-                  {!isFollowed && (
-                    <button
-                      type="button"
-                      className="tiktok-rail-plus-btn"
-                      onClick={(e) => handleFollowClick(e, post.authorHandle)}
-                      title={`Follow ${post.authorName}`}
-                      aria-label="Follow"
-                    >
-                      <span className="tiktok-plus-sign">+</span>
-                    </button>
-                  )}
-                  {isFollowed && (
-                    <span className="tiktok-rail-followed-badge">✓</span>
-                  )}
+                  <div className="birdie-author-meta">
+                    <div className="birdie-meta-top-row">
+                      <div
+                        className="birdie-author-name-group"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNavigateProfile(post.authorHandle);
+                        }}
+                      >
+                        <span className="birdie-author-display-name">{post.authorName}</span>
+                        {post.isVerified && (
+                          <span className="birdie-blue-badge" title="Verified Creator">
+                            ✓
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Audience Badge */}
+                      <span
+                        className={`birdie-privacy-badge ${
+                          post.privacy === 'close_friends' ? 'close_friends' : post.privacy === 'followers' ? 'followers' : 'public'
+                        }`}
+                      >
+                        {post.privacy === 'close_friends' ? (
+                          <>★ Close Friends</>
+                        ) : post.privacy === 'followers' ? (
+                          <>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                              <circle cx="9" cy="7" r="4" />
+                              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                            </svg>
+                            Followers Only
+                          </>
+                        ) : (
+                          <>🌐 Public</>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="birdie-handle-timestamp">
+                      @{post.authorHandle} · {post.timeAgo}
+                    </div>
+                  </div>
                 </div>
 
-                {/* 2. Heart / Like Button */}
-                <button
-                  type="button"
-                  className={`tiktok-rail-btn like ${post.isLiked ? 'liked' : ''}`}
-                  onClick={() => onLike(post.id, post.contentUrl || post.videoUrl)}
-                  title={post.isLiked ? 'Unlike' : 'Like'}
-                  aria-label="Like"
-                >
-                  <div className="tiktok-icon-wrap">
-                    <svg width="34" height="34" viewBox="0 0 24 24" fill={post.isLiked ? "#fe2c55" : "#ffffff"} className="tiktok-rail-icon">
-                      <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                    </svg>
-                  </div>
-                  <span className="tiktok-rail-count">
-                    {post.likesCount >= 1000 ? `${(post.likesCount / 1000).toFixed(1)}k` : post.likesCount}
-                  </span>
-                </button>
-
-                {/* 3. Comment Speech Bubble Button */}
-                <button
-                  type="button"
-                  className="tiktok-rail-btn comment"
-                  onClick={() => setActiveCommentsPostId(post.id)}
-                  title="View comments"
-                  aria-label="Comments"
-                >
-                  <div className="tiktok-icon-wrap">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="#ffffff" className="tiktok-rail-icon">
-                      <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
-                      <circle cx="8" cy="10" r="1.5" fill="#12131e" />
-                      <circle cx="12" cy="10" r="1.5" fill="#12131e" />
-                      <circle cx="16" cy="10" r="1.5" fill="#12131e" />
-                    </svg>
-                  </div>
-                  <span className="tiktok-rail-count">
-                    {post.commentsCount >= 1000 ? `${(post.commentsCount / 1000).toFixed(1)}k` : post.commentsCount}
-                  </span>
-                </button>
-
-                {/* 4. Bookmark / Favorite Button */}
-                <button
-                  type="button"
-                  className={`tiktok-rail-btn bookmark ${post.isSaved ? 'saved' : ''}`}
-                  onClick={() => onSave(post.id)}
-                  title={post.isSaved ? 'Remove from favorites' : 'Add to favorites'}
-                  aria-label="Bookmark"
-                >
-                  <div className="tiktok-icon-wrap">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill={post.isSaved ? "#face15" : "#ffffff"} className="tiktok-rail-icon">
-                      <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
-                    </svg>
-                  </div>
-                  <span className="tiktok-rail-count">
-                    {post.savesCount >= 1000 ? `${(post.savesCount / 1000).toFixed(1)}k` : post.savesCount}
-                  </span>
-                </button>
-
-                {/* 5. Curved Share Arrow Button */}
-                <button
-                  type="button"
-                  className="tiktok-rail-btn share"
-                  onClick={() => onShare(post)}
-                  title="Share post"
-                  aria-label="Share"
-                >
-                  <div className="tiktok-icon-wrap">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="#ffffff" className="tiktok-rail-icon">
-                      <path d="M14 5v4C7 10 4 15 3 20c2.5-3.5 6-5.1 11-5.1V19l8-7-8-7z"/>
-                    </svg>
-                  </div>
-                  <span className="tiktok-rail-count">
-                    {post.sharesCount >= 1000 ? `${(post.sharesCount / 1000).toFixed(1)}k` : post.sharesCount}
-                  </span>
-                </button>
-
-                {/* 6. Rotating Vinyl Sound Record with Grooves and Center Album Art */}
-                <div
-                  className={`tiktok-rail-sound-disc ${isPaused || isMuted ? 'paused' : 'spinning'}`}
-                  title={`Sound: ${post.soundName || 'Original Sound'} · Click for Sound Hub`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsSoundHubOpen(true);
-                  }}
-                >
-                  <div className="tiktok-vinyl-ring-outer">
-                    <img
-                      src={post.soundCover || post.authorAvatar}
-                      alt="Sound Cover"
-                      className="tiktok-vinyl-album-cover"
-                    />
-                  </div>
-                  {/* Floating music note particles */}
-                  <span className="tiktok-floating-music-note note-1">♪</span>
-                  <span className="tiktok-floating-music-note note-2">♫</span>
-                </div>
-              </div>
-
-              {/* ==================================================== */}
-              {/* 4. BOTTOM LEFT CREATOR & CAPTION OVERLAY             */}
-              {/* ==================================================== */}
-              <div className="tiktok-bottom-left-info" onClick={(e) => e.stopPropagation()}>
-                {/* Author Handle & Name */}
-                <div
-                  className="tiktok-author-heading"
-                  onClick={() => onNavigateProfile(post.authorHandle)}
-                >
-                  <span className="tiktok-author-name">{post.authorName}</span>
-                  {post.isVerified && (
-                    <span className="tiktok-verified-badge" title="Verified Creator">
-                      ✓
-                    </span>
-                  )}
-                  {post.privacy !== 'public' && (
-                    <span className="tiktok-privacy-tag">
-                      {post.privacy === 'close_friends' ? '⭐ Close Friends' : '🔒 Followers'}
-                    </span>
-                  )}
-                </div>
-
-                {/* Post Narrative / Caption with Inline Hashtags */}
-                <p className="tiktok-caption-paragraph">
+                {/* Post Body Narrative with Hashtags */}
+                <div className="birdie-post-body">
                   {post.caption.split(/(\s+)/).map((segment, sIdx) => {
                     if (segment.startsWith('#')) {
                       return (
-                        <span key={sIdx} className="tiktok-inline-hashtag">
+                        <span key={sIdx} className="birdie-hashtag-link" onClick={(e) => e.stopPropagation()}>
                           {segment}
                         </span>
                       );
                     }
                     return segment;
                   })}
-                </p>
+                </div>
 
-                {/* Interactive Search / Sound Marquee Pill */}
-                <div
-                  className="tiktok-sound-pill"
-                  onClick={() => setIsSoundHubOpen(true)}
-                  title="Search audio on Apple Music / iTunes and change sound"
-                >
-                  <span className="tiktok-sound-icon">🎵</span>
-                  <div className="tiktok-sound-ticker-wrap">
-                    <span className="tiktok-sound-ticker-text">
-                      {post.soundName ? `${post.soundName} ${post.soundArtist ? `· ${post.soundArtist}` : ''}` : 'Brazilian Phonk · Miami Night Pulse'}
-                    </span>
+                {/* Action Buttons Row */}
+                <div className="birdie-actions-bar" onClick={(e) => e.stopPropagation()}>
+                  {/* Like Button */}
+                  <button
+                    type="button"
+                    className={`birdie-action-btn ${isLiked ? 'liked' : ''}`}
+                    onClick={() => onLike(post.id, post.contentUrl || post.videoUrl)}
+                    title={isLiked ? 'Unlike' : 'Like'}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? '#fe2c55' : 'none'} stroke={isLiked ? '#fe2c55' : 'currentColor'} strokeWidth="2">
+                      <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                    </svg>
+                    <span>{post.likesCount}</span>
+                  </button>
+
+                  {/* Comment Button */}
+                  <button
+                    type="button"
+                    className="birdie-action-btn"
+                    onClick={() => setActiveCommentsPostId(post.id)}
+                    title="View Comments"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <span>{post.commentsCount}</span>
+                  </button>
+
+                  {/* Repost Button */}
+                  <button
+                    type="button"
+                    className="birdie-action-btn"
+                    onClick={() => onShare(post)}
+                    title="Share Dispatch"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="17 1 21 5 17 9" />
+                      <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                      <polyline points="7 23 3 19 7 15" />
+                      <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                    </svg>
+                  </button>
+
+                  {/* Bookmark Button */}
+                  <button
+                    type="button"
+                    className={`birdie-action-btn ${isSaved ? 'saved' : ''}`}
+                    onClick={() => onSave(post.id)}
+                    title={isSaved ? 'Remove Bookmark' : 'Bookmark'}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill={isSaved ? '#face15' : 'none'} stroke={isSaved ? '#face15' : 'currentColor'} strokeWidth="2">
+                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                    </svg>
+                  </button>
+
+                  {/* More Options Button */}
+                  <button
+                    type="button"
+                    className="birdie-action-btn"
+                    onClick={() => {}}
+                    title="More Options"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <circle cx="12" cy="12" r="1.5"/>
+                      <circle cx="19" cy="12" r="1.5"/>
+                      <circle cx="5" cy="12" r="1.5"/>
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Social Proof Bar */}
+                <div className="birdie-social-proof-bar" onClick={(e) => e.stopPropagation()}>
+                  <div className="birdie-overlapping-avatars">
+                    <img src={currentUser.avatar} alt="Luciano" className="birdie-proof-avatar" />
+                    <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150" alt="Elena" className="birdie-proof-avatar" />
                   </div>
-                  <span className="tiktok-sound-chevron">&gt;</span>
+                  <div className="birdie-proof-text">
+                    Liked by <strong>{currentUser.name}</strong>, <strong>Elena Rodriguez</strong> and <strong>2 others</strong>
+                  </div>
+                </div>
+
+                {/* Inline Thoughtful Reply Form (Signature Privity Spec) */}
+                <div className="birdie-reply-section" onClick={(e) => e.stopPropagation()}>
+                  <img src={currentUser.avatar} alt={currentUser.name} className="birdie-reply-user-avatar" />
+                  <form className="birdie-reply-form" onSubmit={(e) => handleInlineReplySubmit(e, post.id)}>
+                    <input
+                      type="text"
+                      className="birdie-reply-input"
+                      placeholder="Add a thoughtful reply..."
+                      value={replyText}
+                      onChange={(e) => setInlineReplyTexts((prev) => ({ ...prev, [post.id]: e.target.value }))}
+                    />
+                    <button type="submit" className="birdie-send-btn" disabled={!replyText.trim()}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13"/>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                      </svg>
+                      Send
+                    </button>
+                  </form>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        /* FULLSCREEN VERTICAL SNAP-SCROLL SLIDES CONTAINER (FOR YOU / FOLLOWING / CIRCLES) */
+        <div
+          className="tiktok-slides-container"
+          ref={containerRef}
+          onTouchStart={onTouchStartHandler}
+          onTouchEnd={(e) => onTouchEndHandler(e)}
+          onMouseDown={onMouseDownHandler}
+          onMouseUp={(e) => onMouseUpHandler(e)}
+        >
+          {displayPosts.map((post) => {
+            const isVideo = post.type === 'video' || !!post.videoUrl;
+            const mediaUrl = post.videoUrl || post.contentUrl || post.thumbnailUrl || './nicole-spicy.jpg';
+            const isPaused = !!pausedMap[post.id];
+            const isFollowed = !!followedMap[post.authorHandle];
+
+            return (
+              <div
+                key={post.id}
+                className="tiktok-slide-item"
+                data-post-id={post.id}
+                ref={(el) => { slideRefs.current[post.id] = el; }}
+                onTouchStart={onTouchStartHandler}
+                onTouchEnd={(e) => onTouchEndHandler(e, post.authorHandle)}
+                onMouseDown={onMouseDownHandler}
+                onMouseUp={(e) => onMouseUpHandler(e, post.authorHandle)}
+              >
+                {/* Media Container (Video or Photo) with Double-Tap to Like */}
+                <div
+                  className="tiktok-media-viewport"
+                  onClick={(e) => handleMediaTap(e, post)}
+                >
+                  {isVideo ? (
+                    <video
+                      ref={(el) => { videoRefs.current[post.id] = el; }}
+                      src={mediaUrl}
+                      poster={post.thumbnailUrl || post.contentUrl}
+                      className="tiktok-video-player"
+                      loop
+                      playsInline
+                      webkit-playsinline="true"
+                      muted={false}
+                    />
+                  ) : (
+                    <img
+                      src={mediaUrl}
+                      alt={post.caption}
+                      className="tiktok-photo-player"
+                    />
+                  )}
+
+                  {/* Cinematic Top & Bottom Vignette Tint Scrim */}
+                  <div className="tiktok-scrim-overlay" />
+
+                  {/* Pause Indicator overlay (when video is paused by single tap) */}
+                  {isPaused && (
+                    <div className="tiktok-pause-indicator">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                    </div>
+                  )}
+
+                  {/* Floating Double-Tap Hearts */}
+                  {burstHearts.map((heart) => (
+                    <div
+                      key={heart.id}
+                      className="tiktok-burst-heart"
+                      style={{
+                        left: `${heart.x}px`,
+                        top: `${heart.y}px`,
+                        transform: `translate(-50%, -50%) rotate(${heart.rot}deg)`,
+                      }}
+                    >
+                      <svg width="76" height="76" viewBox="0 0 24 24" fill="#fe2c55">
+                        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                      </svg>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ==================================================== */}
+                {/* RIGHT ACTION RAIL                                    */}
+                {/* ==================================================== */}
+                <div className="tiktok-right-rail" onClick={(e) => e.stopPropagation()}>
+                  {/* 1. Creator Avatar with Centered Red Plus (+) Button */}
+                  <div
+                    className="tiktok-rail-avatar-container"
+                    onClick={() => onNavigateProfile(post.authorHandle)}
+                    title={`View @${post.authorHandle}`}
+                  >
+                    <img
+                      src={post.authorAvatar}
+                      alt={post.authorName}
+                      className="tiktok-rail-avatar-img"
+                    />
+                    {!isFollowed && (
+                      <button
+                        type="button"
+                        className="tiktok-rail-plus-btn"
+                        onClick={(e) => handleFollowClick(e, post.authorHandle)}
+                        title={`Follow ${post.authorName}`}
+                        aria-label="Follow"
+                      >
+                        <span className="tiktok-plus-sign">+</span>
+                      </button>
+                    )}
+                    {isFollowed && (
+                      <span className="tiktok-rail-followed-badge">✓</span>
+                    )}
+                  </div>
+
+                  {/* 2. Heart / Like Button */}
+                  <button
+                    type="button"
+                    className={`tiktok-rail-btn like ${post.isLiked ? 'liked' : ''}`}
+                    onClick={() => onLike(post.id, post.contentUrl || post.videoUrl)}
+                    title={post.isLiked ? 'Unlike' : 'Like'}
+                    aria-label="Like"
+                  >
+                    <div className="tiktok-icon-wrap">
+                      <svg width="34" height="34" viewBox="0 0 24 24" fill={post.isLiked ? "#fe2c55" : "#ffffff"} className="tiktok-rail-icon">
+                        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                      </svg>
+                    </div>
+                    <span className="tiktok-rail-count">
+                      {post.likesCount >= 1000 ? `${(post.likesCount / 1000).toFixed(1)}k` : post.likesCount}
+                    </span>
+                  </button>
+
+                  {/* 3. Comment Speech Bubble Button */}
+                  <button
+                    type="button"
+                    className="tiktok-rail-btn comment"
+                    onClick={() => setActiveCommentsPostId(post.id)}
+                    title="View comments"
+                    aria-label="Comments"
+                  >
+                    <div className="tiktok-icon-wrap">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="#ffffff" className="tiktok-rail-icon">
+                        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+                        <circle cx="8" cy="10" r="1.5" fill="#12131e" />
+                        <circle cx="12" cy="10" r="1.5" fill="#12131e" />
+                        <circle cx="16" cy="10" r="1.5" fill="#12131e" />
+                      </svg>
+                    </div>
+                    <span className="tiktok-rail-count">
+                      {post.commentsCount >= 1000 ? `${(post.commentsCount / 1000).toFixed(1)}k` : post.commentsCount}
+                    </span>
+                  </button>
+
+                  {/* 4. Bookmark / Favorite Button */}
+                  <button
+                    type="button"
+                    className={`tiktok-rail-btn bookmark ${post.isSaved ? 'saved' : ''}`}
+                    onClick={() => onSave(post.id)}
+                    title={post.isSaved ? 'Remove from favorites' : 'Add to favorites'}
+                    aria-label="Bookmark"
+                  >
+                    <div className="tiktok-icon-wrap">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill={post.isSaved ? "#face15" : "#ffffff"} className="tiktok-rail-icon">
+                        <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
+                      </svg>
+                    </div>
+                    <span className="tiktok-rail-count">
+                      {post.savesCount >= 1000 ? `${(post.savesCount / 1000).toFixed(1)}k` : post.savesCount}
+                    </span>
+                  </button>
+
+                  {/* 5. Curved Share Arrow Button */}
+                  <button
+                    type="button"
+                    className="tiktok-rail-btn share"
+                    onClick={() => onShare(post)}
+                    title="Share post"
+                    aria-label="Share"
+                  >
+                    <div className="tiktok-icon-wrap">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="#ffffff" className="tiktok-rail-icon">
+                        <path d="M14 5v4C7 10 4 15 3 20c2.5-3.5 6-5.1 11-5.1V19l8-7-8-7z"/>
+                      </svg>
+                    </div>
+                    <span className="tiktok-rail-count">
+                      {post.sharesCount >= 1000 ? `${(post.sharesCount / 1000).toFixed(1)}k` : post.sharesCount}
+                    </span>
+                  </button>
+
+                  {/* 6. Rotating Vinyl Sound Record */}
+                  <div
+                    className={`tiktok-rail-sound-disc ${isPaused ? 'paused' : 'spinning'}`}
+                    title={`Sound: ${post.soundName || 'Original Sound'} · Click for Sound Hub`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsSoundHubOpen(true);
+                    }}
+                  >
+                    <div className="tiktok-vinyl-ring-outer">
+                      <img
+                        src={post.soundCover || post.authorAvatar}
+                        alt="Sound Cover"
+                        className="tiktok-vinyl-album-cover"
+                      />
+                    </div>
+                    {/* Floating music note particles */}
+                    <span className="tiktok-floating-music-note note-1">♪</span>
+                    <span className="tiktok-floating-music-note note-2">♫</span>
+                  </div>
+                </div>
+
+                {/* ==================================================== */}
+                {/* BOTTOM LEFT CREATOR & CAPTION OVERLAY                */}
+                {/* ==================================================== */}
+                <div className="tiktok-bottom-left-info" onClick={(e) => e.stopPropagation()}>
+                  {/* Author Handle & Name */}
+                  <div
+                    className="tiktok-author-heading"
+                    onClick={() => onNavigateProfile(post.authorHandle)}
+                  >
+                    <span className="tiktok-author-name">{post.authorName}</span>
+                    {post.isVerified && (
+                      <span className="tiktok-verified-badge" title="Verified Creator">
+                        ✓
+                      </span>
+                    )}
+                    {post.privacy !== 'public' && (
+                      <span className="tiktok-privacy-tag">
+                        {post.privacy === 'close_friends' ? '⭐ Close Friends' : '🔒 Followers'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Post Narrative / Caption with Inline Hashtags */}
+                  <p className="tiktok-caption-paragraph">
+                    {post.caption.split(/(\s+)/).map((segment, sIdx) => {
+                      if (segment.startsWith('#')) {
+                        return (
+                          <span key={sIdx} className="tiktok-inline-hashtag">
+                            {segment}
+                          </span>
+                        );
+                      }
+                      return segment;
+                    })}
+                  </p>
+
+                  {/* Interactive Sound Marquee Pill */}
+                  <div
+                    className="tiktok-sound-pill"
+                    onClick={() => setIsSoundHubOpen(true)}
+                    title="Search audio on Apple Music / iTunes and change sound"
+                  >
+                    <span className="tiktok-sound-icon">🎵</span>
+                    <div className="tiktok-sound-ticker-wrap">
+                      <span className="tiktok-sound-ticker-text">
+                        {post.soundName ? `${post.soundName} ${post.soundArtist ? `· ${post.soundArtist}` : ''}` : 'Brazilian Phonk · Miami Night Pulse'}
+                      </span>
+                    </div>
+                    <span className="tiktok-sound-chevron">&gt;</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* ======================================================== */}
-      {/* 5. BOTTOM NAVIGATION BAR (100% FAITHFUL TO TIKTOK SPEC) */}
+      {/* 3. PRIVITY NATIVE BOTTOM NAVIGATION DOCK                 */}
       {/* ======================================================== */}
-      <nav className="tiktok-bottom-nav">
-        {/* 1. Home */}
+      <nav className="privity-slide-bottom-nav">
+        {/* 1. Feed */}
         <button
           type="button"
-          className={`tiktok-nav-item ${currentNavTab === 'feed' ? 'active' : ''}`}
+          className={`privity-nav-tab-item ${currentNavTab === 'feed' ? 'active' : ''}`}
           onClick={() => onNavigateTab('feed')}
+          title="Home Feed"
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill={currentNavTab === 'feed' ? '#ffffff' : 'none'} stroke={currentNavTab === 'feed' ? '#ffffff' : 'rgba(255,255,255,0.7)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill={currentNavTab === 'feed' ? '#ffffff' : 'none'} stroke={currentNavTab === 'feed' ? '#ffffff' : 'rgba(255,255,255,0.65)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
             <polyline points="9 22 9 12 15 12 15 22" />
           </svg>
-          <span className="tiktok-nav-label">Home</span>
+          <span className="privity-nav-tab-label">Feed</span>
+          {currentNavTab === 'feed' && <span className="privity-nav-active-dot" />}
         </button>
 
-        {/* 2. Friends (Circles / Discover) with red count badge */}
+        {/* 2. Discover */}
         <button
           type="button"
-          className={`tiktok-nav-item ${currentNavTab === 'discover' ? 'active' : ''}`}
+          className={`privity-nav-tab-item ${currentNavTab === 'discover' ? 'active' : ''}`}
           onClick={() => onNavigateTab('discover')}
+          title="Discover Creators"
         >
-          <div className="tiktok-nav-icon-badge-wrap">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-            <span className="tiktok-nav-badge">83</span>
-          </div>
-          <span className="tiktok-nav-label">Friends</span>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={currentNavTab === 'discover' ? '#ffffff' : 'rgba(255,255,255,0.65)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill={currentNavTab === 'discover' ? '#ffffff' : 'none'} />
+          </svg>
+          <span className="privity-nav-tab-label">Discover</span>
+          {currentNavTab === 'discover' && <span className="privity-nav-active-dot" />}
         </button>
 
-        {/* 3. Center Create (+) Button (Signature 3-Layer Design) */}
+        {/* 3. Center Create (+) Orb */}
         <button
           type="button"
-          className="tiktok-nav-create-btn"
+          className="privity-nav-tab-create-btn"
           onClick={onOpenCreate}
-          title="Create post or Go Live"
-          aria-label="Create Post"
+          title="Open Camera & Studio"
+          aria-label="Create Dispatch"
         >
-          <div className="tiktok-create-btn-base">
-            <div className="tiktok-create-cyan-bg" />
-            <div className="tiktok-create-pink-bg" />
-            <div className="tiktok-create-center-pill">
-              <span className="tiktok-create-plus">+</span>
-            </div>
+          <div className="privity-nav-create-orb">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
           </div>
         </button>
 
-        {/* 4. Inbox (Messages) with red count badge */}
+        {/* 4. Messages */}
         <button
           type="button"
-          className={`tiktok-nav-item ${currentNavTab === 'messages' ? 'active' : ''}`}
+          className={`privity-nav-tab-item ${currentNavTab === 'messages' ? 'active' : ''}`}
           onClick={() => onNavigateTab('messages')}
+          title="Encrypted Messages"
         >
-          <div className="tiktok-nav-icon-badge-wrap">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <div style={{ position: 'relative' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={currentNavTab === 'messages' ? '#ffffff' : 'rgba(255,255,255,0.65)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
             </svg>
-            <span className="tiktok-nav-badge">74</span>
+            <span className="privity-nav-presence-dot" />
           </div>
-          <span className="tiktok-nav-label">Inbox</span>
+          <span className="privity-nav-tab-label">Messages</span>
+          {currentNavTab === 'messages' && <span className="privity-nav-active-dot" />}
         </button>
 
         {/* 5. Profile */}
         <button
           type="button"
-          className={`tiktok-nav-item ${currentNavTab === 'profile' ? 'active' : ''}`}
+          className={`privity-nav-tab-item ${currentNavTab === 'profile' ? 'active' : ''}`}
           onClick={() => onNavigateTab('profile')}
+          title="Your Profile"
         >
-          <div className="tiktok-nav-avatar-wrap">
-            <img src={currentUser.avatar} alt={currentUser.name} className="tiktok-nav-avatar-img" />
+          <div className={`privity-nav-avatar-circle ${currentNavTab === 'profile' ? 'active' : ''}`}>
+            <img src={currentUser.avatar} alt={currentUser.name} className="privity-nav-avatar-img" />
           </div>
-          <span className="tiktok-nav-label">Profile</span>
+          <span className="privity-nav-tab-label">Profile</span>
+          {currentNavTab === 'profile' && <span className="privity-nav-active-dot" />}
         </button>
       </nav>
 
