@@ -138,15 +138,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   // PK Battle Duel State (Default false: Stream starts in full-screen solo mode!)
   const [isPkBattleActive, setIsPkBattleActive] = useState(false);
   const [isPkMatchModalOpen, setIsPkMatchModalOpen] = useState(false);
-  const [hostPkScore, setHostPkScore] = useState(1850);
-  const [rivalPkScore, setRivalPkScore] = useState(1420);
-  const [battleRoundTimer, setBattleRoundTimer] = useState(60);
+  const [hostPkScore, setHostPkScore] = useState(3);
+  const [rivalPkScore, setRivalPkScore] = useState(4);
+  const [battleRoundTimer, setBattleRoundTimer] = useState(121);
   const [battleWinner, setBattleWinner] = useState<'host' | 'rival' | 'draw' | null>(null);
   const [pkDamageFloating, setPkDamageFloating] = useState<Array<{ id: number; text: string; color: string }>>([]);
 
-  // Dynamic Rival Streamer in PK Battle
+  const formatBattleTimer = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // Dynamic Rival Streamer in PK Battle (defaults to mel<3... from TikTok reference)
   const [pkRival, setPkRival] = useState<LiveMeStreamer>(() => {
-    return LIVEME_STREAMERS.find((s) => s.handle === 'elena_rodriguez') || LIVEME_STREAMERS[0];
+    return LIVEME_STREAMERS.find((s) => s.handle.includes('mel')) || LIVEME_STREAMERS[0];
   });
 
   // Followed creators map
@@ -805,7 +811,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
       {/* 3. CENTRAL 9:16 LIVE STREAM STAGE */}
       <div
-        className="liveme-center-stage"
+        className={`liveme-center-stage ${isPkBattleActive ? 'is-pk-active' : ''}`}
         ref={stageRef}
         onClick={(e) => {
           const target = e.target as HTMLElement | null;
@@ -830,6 +836,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               autoPlay
               playsInline
               muted={true}
+              poster={currentUser.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900'}
+              src={!localStreamRef.current ? 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4' : undefined}
+              loop={!localStreamRef.current}
               onLoadedMetadata={() => {
                 if (videoRef.current) {
                   videoRef.current.play().catch(() => {});
@@ -851,29 +860,34 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         )}
 
         {/* ================================================================ */}
-        {/* PK BATTLE DUAL SPLIT-SCREEN (100% MATCH TO REAL LIVEME ROOM)     */}
+        {/* PK BATTLE DUAL SPLIT-SCREEN (100% EXACT TIKTOK LIVE SPEC)        */}
         {/* ================================================================ */}
         {isPkBattleActive && (
           <div className="liveme-pk-stage-wrap">
-            {/* Split Tug-of-War Progress Bar */}
+            {/* Split Tug-of-War Score Bar (Edge-to-Edge) */}
             <div className="liveme-pk-tug-bar-dock">
               <div className="liveme-pk-bar-track">
+                {/* Host Pink Half */}
                 <div className="liveme-pk-bar-host" style={{ width: `${hostPkPercentage}%` }}>
-                  <span>{hostPkScore.toLocaleString()}</span>
+                  <span className="liveme-pk-score-large">{hostPkScore}</span>
                 </div>
 
+                {/* Center Collision & Timer Badge */}
                 <div className="liveme-pk-center-badge">
-                  <span>🥊</span>
-                  <span>{battleRoundTimer > 0 ? `Battle round: ${battleRoundTimer}s` : 'ROUND END'}</span>
+                  <span className="liveme-pk-clash-icon">🥊</span>
+                  <span className="liveme-pk-timer-digits">
+                    {formatBattleTimer(battleRoundTimer)}
+                  </span>
                 </div>
 
+                {/* Rival Cyan Half */}
                 <div className="liveme-pk-bar-rival" style={{ width: `${100 - hostPkPercentage}%` }}>
-                  <span>{rivalPkScore.toLocaleString()}</span>
+                  <span className="liveme-pk-score-large">{rivalPkScore}</span>
                 </div>
               </div>
             </div>
 
-            {/* Split Video Stage: Left Host (50%) & Right Rival (50%) */}
+            {/* Split Video Stage: Edge-to-Edge (Left 50% & Right 50%) */}
             <div className="liveme-pk-split-grid">
               {/* Left Half Box: Host */}
               <div
@@ -881,10 +895,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 onClick={handleCheerHost}
                 title="Tap to Cheer Host! +5 Points"
               >
-                {/* Header */}
-                <div className="liveme-pk-half-header">
-                  <span className="liveme-pk-badge-pill host">Host: {currentUser.name.split(' ')[0]}</span>
-                  <span className="liveme-pk-score-num">🪙 {hostPkScore.toLocaleString()}</span>
+                {/* Top Corner Win Streak Badge */}
+                <div className="liveme-pk-win-badge left">
+                  <span>WIN x 0</span>
                 </div>
 
                 {/* Host Video Stream (Webcam or Video) */}
@@ -894,6 +907,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                     autoPlay
                     playsInline
                     muted={true}
+                    poster={currentUser.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900'}
+                    src={!localStreamRef.current ? 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4' : undefined}
+                    loop={!localStreamRef.current}
                     onLoadedMetadata={() => {
                       if (videoRef.current) {
                         videoRef.current.play().catch(() => {});
@@ -913,14 +929,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   />
                 )}
 
-                {/* Contributor Chairs under Host */}
-                <div className="liveme-pk-chairs-row">
-                  {currentStreamer.topContributors.slice(0, 3).map((c, i) => (
-                    <div key={c.id || i} className="liveme-pk-chair-circle" title={`#${i + 1} Contributor: ${c.name}`}>
-                      <img src={c.avatar} alt={c.name} />
-                      <span className="liveme-pk-chair-rank">{i === 0 ? '👑' : i + 1}</span>
-                    </div>
-                  ))}
+                {/* Bottom Left Streamer Tag */}
+                <div className="liveme-pk-streamer-tag left">
+                  <span>@{currentUser.handle}</span>
                 </div>
 
                 {/* Floating Damage Cheer Numbers */}
@@ -933,10 +944,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
               {/* Right Half Box: Rival Streamer */}
               <div className="liveme-pk-half-box rival">
-                {/* Header */}
-                <div className="liveme-pk-half-header">
-                  <span className="liveme-pk-badge-pill rival">Rival: {pkRival.name.split(' ')[0]}</span>
-                  <span className="liveme-pk-score-num">🪙 {rivalPkScore.toLocaleString()}</span>
+                {/* Top Corner Win Streak Badge */}
+                <div className="liveme-pk-win-badge right">
+                  <span>WIN x 4</span>
                 </div>
 
                 {/* Rival Video Stream */}
@@ -950,15 +960,44 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   className="liveme-pk-video-layer"
                 />
 
-                {/* Contributor Chairs under Rival */}
-                <div className="liveme-pk-chairs-row">
-                  {(pkRival.topContributors || []).slice(0, 3).map((chair, i) => (
-                    <div key={chair.id || i} className="liveme-pk-chair-circle" title={`#${i + 1} Rival Gifter`}>
-                      <img src={chair.avatar} alt="Rival Gifter" />
-                      <span className="liveme-pk-chair-rank">{i === 0 ? '👑' : i + 1}</span>
-                    </div>
-                  ))}
+                {/* Bottom Right Streamer Tag with Follow Pill */}
+                <div className="liveme-pk-streamer-tag right">
+                  <span>@{pkRival.handle}</span>
+                  <button
+                    type="button"
+                    className="liveme-pk-follow-plus"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      showToast(`Followed @${pkRival.handle}!`);
+                    }}
+                  >
+                    +
+                  </button>
                 </div>
+              </div>
+            </div>
+
+            {/* Contributor Chairs Row directly under the two boxes (Exact TikTok LIVE Spec) */}
+            <div className="liveme-pk-dual-chairs-bar">
+              {/* Host Chairs (Left 50%) */}
+              <div className="liveme-pk-chairs-half left">
+                <div className="liveme-pk-chair-slot empty" title="Empty chair">🪑</div>
+                <div className="liveme-pk-chair-slot empty" title="Empty chair">🪑</div>
+                <div className="liveme-pk-chair-slot rank-1" title="Top Gifter">
+                  <img src={currentUser.avatar} alt="Top Gifter" />
+                  <span className="liveme-chair-crown">👑1</span>
+                </div>
+              </div>
+
+              {/* Rival Chairs (Right 50%) */}
+              <div className="liveme-pk-chairs-half right">
+                {(pkRival.topContributors || []).slice(0, 2).map((c, i) => (
+                  <div key={c.id || i} className={`liveme-pk-chair-slot rank-${i + 1}`} title={`#${i + 1} Gifter`}>
+                    <img src={c.avatar} alt={c.name} />
+                    <span className="liveme-chair-crown">{i === 0 ? '👑1' : '👑2'}</span>
+                  </div>
+                ))}
+                <div className="liveme-pk-chair-slot empty" title="Empty chair">🪑</div>
               </div>
             </div>
 
@@ -1028,25 +1067,26 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   className={`liveme-follow-btn ${isFollowing ? 'following' : ''}`}
                   onClick={handleToggleFollow}
                 >
-                  {isFollowing ? 'Following' : 'Follow'}
+                  {isFollowing ? 'Following' : '+ Join'}
                 </button>
               )}
             </div>
 
-            {/* Sub-stats for viewers (Clean top bar without overlapping red badge for host) */}
-            {!isHost && (
-              <div className="liveme-sub-stats-row">
-                <div className="liveme-stat-item">
-                  <span>👁️ Views:</span>
-                  <span>{currentStreamer.totalViews}</span>
-                </div>
-                <span className="liveme-stat-divider">|</span>
-                <div className="liveme-stat-item">
-                  <span>🔥 Pop:</span>
-                  <span>{currentStreamer.popularity}</span>
-                </div>
+            {/* Sub-pills row (Exact TikTok LIVE Spec: Daily Ranking, Goal, Gallery) */}
+            <div className="liveme-sub-pills-row">
+              <div className="liveme-sub-pill ranking">
+                <span>🔥</span>
+                <span>Daily Ranking</span>
               </div>
-            )}
+              <div className="liveme-sub-pill goal">
+                <span>🎆</span>
+                <span>0/1</span>
+              </div>
+              <div className="liveme-sub-pill gallery">
+                <span>Gift Gallery...</span>
+                <span>🏎️</span>
+              </div>
+            </div>
           </div>
 
           {/* Top-Right Contributors & Controls */}
@@ -1102,10 +1142,30 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         </div>
 
         {/* ================================================================ */}
-        {/* 5. FLOATING LIVE CHAT STREAM                                     */}
+        {/* 5. FLOATING LIVE CHAT STREAM (EXACT TIKTOK LIVE SPEC)            */}
         {/* ================================================================ */}
         <div className="liveme-chat-stream-layer">
           <div className="liveme-chat-scroll-box" ref={chatScrollRef}>
+            {/* TikTok LIVE Official Welcome & Match Banners */}
+            <div className="liveme-chat-system-banner">
+              <span className="liveme-tiktok-icon">🎵</span>
+              <p>Welcome to TikTok LIVE! Have fun interacting with others in real time. Creators must be 18 or older to go LIVE. Viewers must be 18 or older to recharge and send Gifts. Remember to follow our Community Guidelines.</p>
+            </div>
+
+            {isPkBattleActive && (
+              <div className="liveme-chat-system-banner match-start">
+                <span className="liveme-tiktok-icon">🎵</span>
+                <p>LIVE Match has started! Cheer on your creator, like the match, and send Gifts.</p>
+              </div>
+            )}
+
+            <div className="liveme-chat-join-row">
+              <span className="liveme-join-hand">👋</span>
+              <span className="liveme-join-gem">💎29</span>
+              <span className="liveme-join-name">{currentUser.name} 🇨🇺</span>
+              <span className="liveme-join-text">joined</span>
+            </div>
+
             {chatMessages.map((msg) => (
               <div
                 key={msg.id}
@@ -1131,22 +1191,24 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {/* 6. UNIFIED MODERN BOTTOM CONTROLS BAR                             */}
         {/* ================================================================ */}
         <div className="liveme-bottom-bar">
-          {/* Chat Input Form */}
+          {/* Chat Input Form (Type... with Smiley) */}
           <form onSubmit={handleSendChat} className="liveme-input-form">
-            <input
-              type="text"
-              className="liveme-chat-input"
-              placeholder={isHost ? "Say something to your room..." : "Say hi..."}
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="liveme-chat-send-btn"
-              disabled={!chatInput.trim()}
-            >
-              ➤
-            </button>
+            <div className="liveme-chat-input-wrap">
+              <input
+                type="text"
+                className="liveme-chat-input"
+                placeholder="Type..."
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+              />
+              <button
+                type="button"
+                className="liveme-chat-smiley-btn"
+                onClick={() => setChatInput((prev) => prev + ' 😊')}
+              >
+                😊
+              </button>
+            </div>
           </form>
 
           {/* Right Toolbar Action Icons */}
@@ -1418,18 +1480,18 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         onStartPkBattle={(rival) => {
           setPkRival(rival);
           setIsPkBattleActive(true);
-          setHostPkScore(150);
-          setRivalPkScore(120);
-          setBattleRoundTimer(60);
+          setHostPkScore(3);
+          setRivalPkScore(4);
+          setBattleRoundTimer(121);
           setBattleWinner(null);
         }}
         onEndPkBattle={() => {
           setIsPkBattleActive(false);
         }}
         onRematch={() => {
-          setHostPkScore(150);
-          setRivalPkScore(120);
-          setBattleRoundTimer(60);
+          setHostPkScore(3);
+          setRivalPkScore(4);
+          setBattleRoundTimer(121);
           setBattleWinner(null);
         }}
         showToast={showToast}

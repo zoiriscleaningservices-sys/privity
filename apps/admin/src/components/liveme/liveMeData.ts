@@ -2,6 +2,29 @@ import { LiveMeStreamer, LiveMeGiftItem, RechargeTier } from './types';
 
 export const LIVEME_STREAMERS: LiveMeStreamer[] = [
   {
+    id: 'liveme-mel-tiktok',
+    handle: 'mel<3...',
+    name: 'mel<3...',
+    avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500',
+    isVerified: true,
+    category: 'PK Battler ⚔️',
+    title: 'LIVE Match! Cheer on your creator! 💕',
+    description: 'PK battle round! Tap the screen, like the match, and send gifts!',
+    viewersCount: 4,
+    totalViews: '3.8K',
+    popularity: '4.2K',
+    diamonds: 4120900,
+    likesCount: 39500,
+    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-to-the-camera-42866-large.mp4',
+    posterUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900',
+    tags: ['PKMatch', 'TikTokLIVE', 'Battle'],
+    topContributors: [
+      { id: 'c-mel-1', name: 'KingGifter', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', rank: 1, contribution: 95000 },
+      { id: 'c-mel-2', name: 'QueenBee', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120', rank: 2, contribution: 64000 },
+      { id: 'c-mel-3', name: 'Supporter', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120', rank: 3, contribution: 32000 },
+    ],
+  },
+  {
     id: 'liveme-jasmine-54877736',
     handle: 'jasmine_live',
     name: 'Jasmine 💘',

@@ -505,30 +505,92 @@
   align-items: center;
   gap: 8px;
   flex: 1;
-  max-width: 250px;
+  max-width: 220px;
+}
+
+.liveme-chat-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 3px 6px 3px 14px;
 }
 
 .liveme-chat-input {
-  width: 100%;
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(14px);
-  border-radius: 9999px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  padding: 9px 18px;
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 6px 0;
   color: #ffffff;
-  font-size: 14px;
+  font-size: 13px;
   outline: none;
-  transition: all 0.2s ease;
 }
 
 .liveme-chat-input::placeholder {
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.55);
 }
 
-.liveme-chat-input:focus {
-  background: rgba(0, 0, 0, 0.6);
-  border-color: rgba(168, 85, 247, 0.8);
-  box-shadow: 0 0 14px rgba(168, 85, 247, 0.4);
+.liveme-chat-smiley-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.85;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.liveme-chat-smiley-btn:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+.liveme-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.liveme-tool-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 15px;
+  transition: all 0.18s ease;
+  padding: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.liveme-tool-btn:hover {
+  transform: scale(1.1);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.liveme-tool-btn.active {
+  background: rgba(168, 85, 247, 0.45);
+  border-color: #c084fc;
+}
+
+.liveme-tool-btn.danger {
+  background: rgba(239, 68, 68, 0.4);
+  border-color: #ef4444;
 }
 
 .liveme-chat-send-btn {
@@ -1676,62 +1738,64 @@
 }
 
 /* ========================================================================== */
-/* PK BATTLE DUAL SPLIT-SCREEN (100% MATCH TO LIVEME REAL ROOM)              */
+/* PK BATTLE DUAL SPLIT-SCREEN (100% EXACT TIKTOK LIVE SPEC)                  */
 /* ========================================================================== */
 .liveme-pk-stage-wrap {
   position: absolute;
-  top: 75px;
+  top: 112px;
   left: 0;
   right: 0;
-  bottom: 170px;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  z-index: 5;
-  pointer-events: none;
+  z-index: 10;
+  pointer-events: auto;
+  user-select: none;
 }
 
+/* 1. Split Tug-of-War Score Bar (Full Width Flush Above Videos) */
 .liveme-pk-tug-bar-dock {
-  width: calc(100% - 24px);
-  margin: 0 auto 8px auto;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   pointer-events: auto;
 }
 
 .liveme-pk-bar-track {
-  height: 22px;
-  background: #1e1e2f;
-  border-radius: 9999px;
+  height: 26px;
+  background: #161823;
   overflow: hidden;
   display: flex;
   position: relative;
-  border: 1.5px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.4);
 }
 
 .liveme-pk-bar-host {
   height: 100%;
-  background: linear-gradient(90deg, #ec4899 0%, #f43f5e 100%);
+  background: linear-gradient(90deg, #fe2c55 0%, #ff0050 100%);
   display: flex;
   align-items: center;
-  padding-left: 10px;
-  font-size: 11px;
-  font-weight: 800;
-  color: #fff;
+  padding-left: 14px;
   transition: width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
 .liveme-pk-bar-rival {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%);
+  background: linear-gradient(90deg, #00f2fe 0%, #00c6ff 100%);
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding-right: 10px;
-  font-size: 11px;
-  font-weight: 800;
-  color: #fff;
+  padding-right: 14px;
   transition: width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.liveme-pk-score-large {
+  font-size: 16px;
+  font-weight: 900;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  letter-spacing: -0.02em;
+  line-height: 1;
 }
 
 .liveme-pk-center-badge {
@@ -1739,51 +1803,52 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: #0f111a;
-  border: 2px solid #fbbf24;
+  background: #12141a;
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 9999px;
-  padding: 2px 10px;
+  padding: 2px 8px;
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  font-weight: 900;
-  color: #fbbf24;
-  box-shadow: 0 0 14px rgba(251, 191, 36, 0.6);
-  z-index: 4;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  z-index: 5;
   white-space: nowrap;
 }
 
-/* PK Split Video Grid: Left Host (50%) & Right Rival (50%) */
+.liveme-pk-clash-icon {
+  font-size: 11px;
+}
+
+.liveme-pk-timer-digits {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* 2. PK Split Video Grid: Left Host (50%) & Right Rival (50%) - Edge to Edge */
 .liveme-pk-split-grid {
-  flex: 1;
+  width: 100%;
+  height: 365px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 0 10px;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.22); /* 1px clean vertical divider */
+  margin: 0;
+  padding: 0;
   pointer-events: auto;
 }
 
 .liveme-pk-half-box {
   position: relative;
-  background: #000;
-  border-radius: 16px;
+  width: 100%;
+  height: 100%;
+  background: #050508;
   overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.liveme-pk-half-box.host {
-  border-color: rgba(236, 72, 153, 0.7);
-  box-shadow: 0 0 20px rgba(236, 72, 153, 0.3);
-}
-
-.liveme-pk-half-box.rival {
-  border-color: rgba(59, 130, 246, 0.7);
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
 }
 
 .liveme-pk-video-layer {
@@ -1792,81 +1857,142 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center 20%;
   z-index: 1;
 }
 
-.liveme-pk-half-header {
-  position: relative;
-  z-index: 2;
-  padding: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
+.liveme-pk-video-layer.mirrored {
+  transform: scaleX(-1);
 }
 
-.liveme-pk-badge-pill {
-  padding: 2px 8px;
-  border-radius: 9999px;
+/* Win Streak Corner Badge */
+.liveme-pk-win-badge {
+  position: absolute;
+  top: 8px;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(251, 191, 36, 0.65);
+  border-radius: 4px;
+  padding: 2px 6px;
   font-size: 10px;
-  font-weight: 800;
-  color: #fff;
-  text-transform: uppercase;
-}
-
-.liveme-pk-badge-pill.host {
-  background: #ec4899;
-}
-
-.liveme-pk-badge-pill.rival {
-  background: #3b82f6;
-}
-
-.liveme-pk-score-num {
-  font-size: 13px;
   font-weight: 900;
-  color: #fff;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+  color: #fbbf24;
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
-/* PK Contributor Chairs (under each split box) */
-.liveme-pk-chairs-row {
-  position: relative;
-  z-index: 2;
-  padding: 6px 8px;
+.liveme-pk-win-badge.left {
+  left: 8px;
+}
+
+.liveme-pk-win-badge.right {
+  right: 8px;
+}
+
+/* Streamer Tag Pill in Video Corner */
+.liveme-pk-streamer-tag {
+  position: absolute;
+  bottom: 8px;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 9999px;
+  padding: 3px 8px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  border: 0.5px solid rgba(255, 255, 255, 0.15);
 }
 
-.liveme-pk-chair-circle {
-  width: 26px;
-  height: 26px;
+.liveme-pk-streamer-tag.left {
+  left: 8px;
+}
+
+.liveme-pk-streamer-tag.right {
+  right: 8px;
+  padding-right: 4px;
+}
+
+.liveme-pk-follow-plus {
+  width: 17px;
+  height: 17px;
   border-radius: 50%;
-  border: 1.5px solid rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.15);
+  background: #fe2c55;
+  border: none;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.7);
-  overflow: hidden;
-  position: relative;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: transform 0.15s ease;
 }
 
-.liveme-pk-chair-circle img {
+.liveme-pk-follow-plus:hover {
+  transform: scale(1.15);
+}
+
+/* 3. Contributor Chairs Bar Directly Below Video Split (Exact TikTok Spec) */
+.liveme-pk-dual-chairs-bar {
+  width: 100%;
+  height: 40px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 4;
+}
+
+.liveme-pk-chairs-half {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 14px;
+}
+
+.liveme-pk-chair-slot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  position: relative;
+  overflow: hidden;
+}
+
+.liveme-pk-chair-slot.empty {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.liveme-pk-chair-slot img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.liveme-pk-chair-rank {
+.liveme-chair-crown {
   position: absolute;
-  bottom: -2px;
-  right: -2px;
-  font-size: 8px;
+  bottom: -1px;
+  right: -1px;
+  font-size: 9px;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 
 /* Floating Damage and Cheer Numbers in PK */
@@ -1888,6 +2014,115 @@
   0% { transform: translate(-50%, 0) scale(0.6); opacity: 0; }
   25% { transform: translate(-50%, -20px) scale(1.3); opacity: 1; }
   100% { transform: translate(-50%, -60px) scale(1); opacity: 0; }
+}
+
+/* Sub-pills row below streamer capsule (Daily Ranking, Goal, Gift Gallery) */
+.liveme-sub-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 2px;
+  margin-top: 3px;
+  pointer-events: auto;
+}
+
+.liveme-sub-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 9999px;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+}
+
+.liveme-sub-pill.ranking {
+  color: #fde047;
+  border-color: rgba(253, 224, 71, 0.25);
+}
+
+.liveme-sub-pill.goal {
+  color: #e0e7ff;
+}
+
+.liveme-sub-pill.gallery {
+  color: #f3f4f6;
+}
+
+/* TikTok LIVE System Notice Banners in Chat */
+.liveme-chat-system-banner {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  border-left: 3px solid #fe2c55;
+}
+
+.liveme-chat-system-banner.match-start {
+  border-left-color: #00f2fe;
+}
+
+.liveme-tiktok-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.liveme-chat-system-banner p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.liveme-chat-join-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #fff;
+  margin-bottom: 6px;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  width: fit-content;
+}
+
+.liveme-join-gem {
+  background: linear-gradient(135deg, #a855f7, #6366f1);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 9.5px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.liveme-join-name {
+  font-weight: 700;
+  color: #fff;
+}
+
+.liveme-join-text {
+  color: rgba(255, 255, 255, 0.65);
 }
 
 /* PK Victory Banner Overlay */
@@ -2042,18 +2277,34 @@
   }
 
   .liveme-pk-stage-wrap {
-    top: calc(max(8px, env(safe-area-inset-top, 8px)) + 52px);
-    height: 290px;
-    bottom: auto;
+    top: calc(max(8px, env(safe-area-inset-top, 8px)) + 98px);
+    height: auto;
+    width: 100%;
+    left: 0;
+    right: 0;
+  }
+
+  .liveme-pk-split-grid {
+    height: 365px;
+    width: 100%;
   }
 
   .liveme-bottom-bar {
-    padding: 8px 12px max(12px, env(safe-area-inset-bottom, 12px));
+    padding: 8px 10px max(12px, env(safe-area-inset-bottom, 12px));
   }
 
   .liveme-chat-stream-layer {
-    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 62px);
-    max-height: 190px;
+    top: auto;
+    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 58px);
+    max-height: 240px;
+    left: 10px;
+    width: calc(100% - 20px);
+  }
+
+  .liveme-center-stage.is-pk-active .liveme-chat-stream-layer {
+    top: calc(max(8px, env(safe-area-inset-top, 8px)) + 98px + 26px + 365px + 40px + 6px);
+    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 58px);
+    max-height: none;
     left: 8px;
     width: calc(100% - 16px);
   }
