@@ -134,6 +134,113 @@ export interface TikTokSlideFeedProps {
   onUpdatePostSound?: (postId: string, sound: { name: string; artist: string; previewUrl: string; coverUrl?: string }) => void;
 }
 
+export interface StoryRailItem {
+  id: string;
+  handle: string;
+  name: string;
+  avatar: string;
+  isAdd?: boolean;
+  ringType: 'cf' | 'followers' | 'public' | 'add';
+}
+
+export const STORIES_DATA: StoryRailItem[] = [
+  {
+    id: 'story-new',
+    handle: '',
+    name: 'New Circle',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+    isAdd: true,
+    ringType: 'add',
+  },
+  {
+    id: 'story-elena',
+    handle: 'elena_rodriguez',
+    name: 'Elena R.',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    ringType: 'cf',
+  },
+  {
+    id: 'story-marcus',
+    handle: 'marcus_dev',
+    name: 'Marcus',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+    ringType: 'followers',
+  },
+  {
+    id: 'story-julian',
+    handle: 'julian_analogue',
+    name: 'Julian',
+    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
+    ringType: 'cf',
+  },
+  {
+    id: 'story-chloe',
+    handle: 'chloe_visuals',
+    name: 'Chloe',
+    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
+    ringType: 'public',
+  },
+  {
+    id: 'story-sara',
+    handle: 'sara_architecture',
+    name: 'Sara',
+    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
+    ringType: 'cf',
+  },
+  {
+    id: 'story-oliver',
+    handle: 'oliver_wood',
+    name: 'Oliver',
+    avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150',
+    ringType: 'followers',
+  },
+];
+
+export const EXTRA_BIRDIE_DISPATCHES: PostItem[] = [
+  {
+    id: 'p-birdie-sara',
+    authorId: 'sc-1',
+    authorName: 'Sara Lin',
+    authorHandle: 'sara_architecture',
+    authorAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
+    isVerified: true,
+    verifiedCategory: 'Spatial & Minimal Architecture',
+    type: 'text',
+    caption: 'Space without noise is true luxury. We sculpt courtyards to invite silence, just as we design cryptographic protocols to protect human presence from algorithmic noise.\n\nPrivity restores that physical sanctuary online.',
+    tags: ['architecture', 'slowtech', 'privity', 'manifesto'],
+    privacy: 'close_friends',
+    likesCount: 18,
+    commentsCount: 2,
+    sharesCount: 5,
+    savesCount: 29,
+    isLiked: false,
+    isSaved: true,
+    timeAgo: '3h ago',
+    comments: [],
+  },
+  {
+    id: 'p-birdie-luciano',
+    authorId: 'usr-luciano',
+    authorName: 'Luciano',
+    authorHandle: 'luciano',
+    authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+    isVerified: true,
+    verifiedCategory: 'Founding Engineer',
+    type: 'text',
+    caption: 'Cryptographic sovereignty is non-negotiable: Ed25519 signatures, zero trackers, peer-to-peer verification. Privity is proving that social media doesn\'t have to be an ad-tech panopticon.\n\nOwn your keys. Own your circles.',
+    tags: ['buildinpublic', 'privacy', 'decentralized', 'ed25519'],
+    privacy: 'public',
+    likesCount: 34,
+    commentsCount: 4,
+    sharesCount: 12,
+    savesCount: 45,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '5h ago',
+    comments: [],
+  },
+];
+
 export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   posts,
   currentUser,
@@ -174,7 +281,32 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     }
   }, [activeFilter]);
 
+  // Real Audio Playback Engine
+  const [isMuted, setIsMuted] = useState(false);
+  const bgAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+
+  // Helper to completely stop and reset all media audio immediately
+  const stopAllAudio = () => {
+    if (bgAudioRef.current) {
+      bgAudioRef.current.pause();
+      bgAudioRef.current.currentTime = 0;
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current.currentTime = 0;
+      setPreviewingTrackId(null);
+    }
+    Object.values(videoRefs.current).forEach((vid) => {
+      if (vid) {
+        vid.pause();
+      }
+    });
+  };
+
   const handleSelectChannel = (channel: SlideFeedChannel) => {
+    stopAllAudio();
     setActiveChannel(channel);
     setActiveSlideIndex(0);
     if (channel === 'live') {
@@ -188,39 +320,91 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   const [followedMap, setFollowedMap] = useState<Record<string, boolean>>({});
 
   // Filtered posts strictly according to user circles & following rules
+  // Each channel features a completely distinct algorithm, lead creator, and curation!
   const displayPosts = React.useMemo(() => {
     if (activeChannel === 'circles') {
-      const list = posts.filter(
+      // 1. Circles Feed: Exclusively intimate Close Friends dispatches
+      // Lead: Elena Rodriguez studio window diffusion study [★ Close Friends]
+      const cfPosts = posts.filter(
         (p) =>
           p.privacy === 'close_friends' ||
           (closeFriendsList && closeFriendsList.includes(p.authorHandle.replace(/^@/, '')))
       );
-      return list.length > 0 ? list : posts.filter((p) => p.privacy === 'close_friends');
+      const list = cfPosts.length > 0 ? cfPosts : posts.filter((p) => p.privacy === 'close_friends');
+      return [...list].sort((a, b) => {
+        if (a.authorHandle === 'elena_rodriguez') return -1;
+        if (b.authorHandle === 'elena_rodriguez') return 1;
+        if (a.authorHandle === 'sam_arch') return -1;
+        if (b.authorHandle === 'sam_arch') return 1;
+        return 0;
+      });
     }
 
     if (activeChannel === 'following') {
-      const list = posts.filter(
+      // 2. Following Feed: Authentic feed from creators you follow
+      // Lead: Sara Lin Kyoto pavilion, Oliver Craft joinery, Jessica Vance 35mm
+      // Excludes Elena Rodriguez and Nicole from leading here to eliminate duplication!
+      const followedList = posts.filter(
         (p) =>
-          (followingMap && followingMap[p.authorHandle.replace(/^@/, '')]) ||
-          followedMap[p.authorHandle] ||
-          p.authorHandle === 'nicole_spicy'
+          ((followingMap && followingMap[p.authorHandle.replace(/^@/, '')]) ||
+           followedMap[p.authorHandle] ||
+           p.authorHandle === 'sara_architecture' ||
+           p.authorHandle === 'oliver_wood' ||
+           p.authorHandle === 'jess_film') &&
+          p.authorHandle !== 'elena_rodriguez' &&
+          p.authorHandle !== 'nicole_spicy'
       );
-      return list.length > 0 ? list : posts;
+      const list = followedList.length > 0 ? followedList : posts;
+      return [...list].sort((a, b) => {
+        if (a.authorHandle === 'sara_architecture') return -1;
+        if (b.authorHandle === 'sara_architecture') return 1;
+        if (a.authorHandle === 'oliver_wood') return -1;
+        if (b.authorHandle === 'oliver_wood') return 1;
+        if (a.authorHandle === 'jess_film') return -1;
+        if (b.authorHandle === 'jess_film') return 1;
+        return 0;
+      });
     }
 
     if (activeChannel === 'birdie') {
+      // 3. Birdie Feed: Pure thought, text & manifesto discussions!
+      // Lead: Marcus Vance's manifesto (Matching user screenshot!), Julian Thorne field notes, Sara Lin reflections, Luciano
+      // Excludes photo/video cards (Elena's photo study, Nicole's video, etc.)
       const textPosts = posts.filter(
         (p) =>
-          p.type === 'text' ||
-          p.caption.length > 50 ||
-          p.authorHandle === 'marcus_dev' ||
-          p.authorHandle === 'julian_analogue'
+          (p.type === 'text' || p.authorHandle === 'marcus_dev' || p.authorHandle === 'julian_analogue') &&
+          p.authorHandle !== 'elena_rodriguez' &&
+          p.authorHandle !== 'nicole_spicy'
       );
-      return textPosts.length > 0 ? textPosts : posts;
+      const merged = [...textPosts];
+      EXTRA_BIRDIE_DISPATCHES.forEach((extra) => {
+        if (!merged.some((p) => p.id === extra.id)) {
+          merged.push(extra);
+        }
+      });
+      return merged.sort((a, b) => {
+        if (a.authorHandle === 'marcus_dev') return -1;
+        if (b.authorHandle === 'marcus_dev') return 1;
+        if (a.authorHandle === 'julian_analogue') return -1;
+        if (b.authorHandle === 'julian_analogue') return 1;
+        if (a.authorHandle === 'sara_architecture') return -1;
+        if (b.authorHandle === 'sara_architecture') return 1;
+        return 0;
+      });
     }
 
-    // Default: 'foryou' (all posts)
-    return posts;
+    // 4. Default: 'foryou' (Viral Discovery stream)
+    // Lead: Nicole (#fyp #viral #miami #video) with Brazilian Phonk, Chloe Kim Tokyo neon video, Jessica Vance 35mm
+    const forYouPosts = posts.filter((p) => p.authorHandle !== 'marcus_dev');
+    return [...forYouPosts].sort((a, b) => {
+      if (a.authorHandle === 'nicole_spicy') return -1;
+      if (b.authorHandle === 'nicole_spicy') return 1;
+      if (a.authorHandle === 'chloe_visuals') return -1;
+      if (b.authorHandle === 'chloe_visuals') return 1;
+      if (a.authorHandle === 'jess_film') return -1;
+      if (b.authorHandle === 'jess_film') return 1;
+      return 0;
+    });
   }, [posts, activeChannel, followingMap, followedMap, closeFriendsList]);
 
   // Active slide index tracked via IntersectionObserver / scroll position
@@ -228,12 +412,6 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
   // Play / Pause per post media
   const [pausedMap, setPausedMap] = useState<Record<string, boolean>>({});
-  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
-
-  // Real Audio Playback Engine
-  const [isMuted, setIsMuted] = useState(false);
-  const bgAudioRef = useRef<HTMLAudioElement | null>(null);
-  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Floating heart burst particles on double-tap
   const [burstHearts, setBurstHearts] = useState<Array<{ id: number; x: number; y: number; rot: number }>>([]);
@@ -270,8 +448,9 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
   // ========================================================
   // SWIPE GESTURE CONTROLLER (TOUCH & MOUSE DRAG)
-  // Left: Go to author's profile
-  // Right: Step backwards through channels (For You -> Following -> Circles -> Birdie -> Live)
+  // Swiping Right (→): Step backwards through tabs (For You -> Following -> Circles -> Birdie -> Live)
+  // Swiping Left (←): Advance forwards (Live -> Birdie -> Circles -> Following -> For You)
+  // CRITICAL SPEC: Swiping left ONLY goes to Creator Profile when at the end at 'foryou'!
   // ========================================================
   const touchStartPos = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
   const mouseStartPos = useRef<{ x: number; y: number; time: number; isDown: boolean }>({ x: 0, y: 0, time: 0, isDown: false });
@@ -288,13 +467,23 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
     if (Math.abs(dx) > 46 && Math.abs(dx) > Math.abs(dy) * 1.08) {
       if (dx < -50) {
-        // SWIPE LEFT (←): Open Creator Profile
-        const handle = authorHandle || displayPosts[activeSlideIndex]?.authorHandle || activeCurrentPost?.authorHandle;
-        if (handle) {
-          onNavigateProfile(handle);
+        // SWIPE LEFT (←)
+        if (activeChannel === 'foryou') {
+          // ONLY at the very end on 'foryou' does swiping left open the creator's profile!
+          const handle = authorHandle || displayPosts[activeSlideIndex]?.authorHandle || activeCurrentPost?.authorHandle;
+          if (handle) {
+            stopAllAudio();
+            onNavigateProfile(handle);
+          }
+        } else {
+          // Advance rightwards in CHANNELS towards 'foryou'
+          const currentIdx = CHANNELS.indexOf(activeChannel);
+          if (currentIdx < CHANNELS.length - 1) {
+            handleSelectChannel(CHANNELS[currentIdx + 1]);
+          }
         }
       } else if (dx > 50) {
-        // SWIPE RIGHT (→): Slide right to Following, Circles, Birdie, Live
+        // SWIPE RIGHT (→): Slide backwards towards 'live'
         const currentIdx = CHANNELS.indexOf(activeChannel);
         if (currentIdx > 0) {
           handleSelectChannel(CHANNELS[currentIdx - 1]);
@@ -315,13 +504,23 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
     if (Math.abs(dx) > 52 && Math.abs(dx) > Math.abs(dy) * 1.08) {
       if (dx < -52) {
-        // SWIPE LEFT (←): Open Creator Profile
-        const handle = authorHandle || displayPosts[activeSlideIndex]?.authorHandle || activeCurrentPost?.authorHandle;
-        if (handle) {
-          onNavigateProfile(handle);
+        // SWIPE LEFT (←)
+        if (activeChannel === 'foryou') {
+          // ONLY at the very end on 'foryou' does swiping left open the creator's profile!
+          const handle = authorHandle || displayPosts[activeSlideIndex]?.authorHandle || activeCurrentPost?.authorHandle;
+          if (handle) {
+            stopAllAudio();
+            onNavigateProfile(handle);
+          }
+        } else {
+          // Advance rightwards in CHANNELS towards 'foryou'
+          const currentIdx = CHANNELS.indexOf(activeChannel);
+          if (currentIdx < CHANNELS.length - 1) {
+            handleSelectChannel(CHANNELS[currentIdx + 1]);
+          }
         }
       } else if (dx > 52) {
-        // SWIPE RIGHT (→): Slide right to Following, Circles, Birdie, Live
+        // SWIPE RIGHT (→): Slide backwards towards 'live'
         const currentIdx = CHANNELS.indexOf(activeChannel);
         if (currentIdx > 0) {
           handleSelectChannel(CHANNELS[currentIdx - 1]);
@@ -370,10 +569,17 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
   // Synchronize Background Music with Active Slide & Mute state
   useEffect(() => {
-    const post = displayPosts[activeSlideIndex];
     const bgAudio = bgAudioRef.current;
     if (!bgAudio) return;
 
+    // In Birdie or Live, NEVER play background feed audio
+    if (activeChannel === 'birdie' || activeChannel === 'live') {
+      bgAudio.pause();
+      bgAudio.currentTime = 0;
+      return;
+    }
+
+    const post = displayPosts[activeSlideIndex];
     if (post?.soundUrl) {
       if (bgAudio.src !== post.soundUrl) {
         bgAudio.src = post.soundUrl;
@@ -388,8 +594,20 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       }
     } else {
       bgAudio.pause();
+      bgAudio.currentTime = 0;
     }
-  }, [activeSlideIndex, displayPosts, isMuted, pausedMap]);
+
+    return () => {
+      bgAudio.pause();
+    };
+  }, [activeSlideIndex, displayPosts, isMuted, pausedMap, activeChannel]);
+
+  // Component unmount audio cleanup
+  useEffect(() => {
+    return () => {
+      stopAllAudio();
+    };
+  }, []);
 
   // Keyboard Up / Down arrows for desktop snap navigation
   useEffect(() => {
@@ -619,7 +837,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       {/* ======================================================== */}
       {/* 1. TOP FLOATING NAVIGATION BAR (CLEAN, ICON-FIRST TABS) */}
       {/* ======================================================== */}
-      <header className="tiktok-top-header">
+      <header className={`tiktok-top-header ${activeChannel === 'birdie' ? 'solid-header' : ''}`}>
         {/* Left: TV LIVE Button */}
         <button
           type="button"
@@ -658,7 +876,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             aria-label="Birdie"
           >
             <span className="birdie-tab-inner">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" className="birdie-nav-svg">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" className="birdie-nav-svg">
                 <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z" />
               </svg>
               <span className="birdie-text-label">Birdie</span>
@@ -673,7 +891,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             onClick={() => handleSelectChannel('circles')}
             title="Close Friends Circle"
           >
-            Circles
+            <span>Circles</span>
             {activeChannel === 'circles' && <span className="tiktok-tab-indicator" />}
           </button>
 
@@ -684,18 +902,18 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             onClick={() => handleSelectChannel('following')}
             title="Creators You Follow"
           >
-            Following
+            <span>Following</span>
             {activeChannel === 'following' && <span className="tiktok-tab-indicator" />}
           </button>
 
-          {/* 4. For You */}
+          {/* 4. For You (Strict single-line nowrap guarantee) */}
           <button
             type="button"
             className={`tiktok-top-tab ${activeChannel === 'foryou' ? 'active' : ''}`}
             onClick={() => handleSelectChannel('foryou')}
             title="For You Feed"
           >
-            For You
+            <span style={{ whiteSpace: 'nowrap' }}>For You</span>
             {activeChannel === 'foryou' && <span className="tiktok-tab-indicator" />}
           </button>
         </div>
@@ -729,6 +947,36 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           onMouseDown={onMouseDownHandler}
           onMouseUp={(e) => onMouseUpHandler(e)}
         >
+          {/* Integrated Stories & Circles Rail at top of Birdie */}
+          <div className="birdie-story-rail">
+            {STORIES_DATA.map((s) => (
+              <div
+                key={s.id}
+                className="birdie-story-unit"
+                onClick={() => {
+                  if (s.isAdd) {
+                    stopAllAudio();
+                    onOpenCreate();
+                  } else if (s.handle) {
+                    stopAllAudio();
+                    onNavigateProfile(s.handle);
+                  }
+                }}
+                title={s.isAdd ? 'Create Dispatch / Story' : `View @${s.handle}`}
+              >
+                <div className={`birdie-story-halo ${s.ringType}`}>
+                  <img src={s.avatar} alt={s.name} className="birdie-story-avatar" />
+                  {s.isAdd && (
+                    <div className="birdie-story-plus-badge">
+                      <span>+</span>
+                    </div>
+                  )}
+                </div>
+                <span className="birdie-story-name">{s.name}</span>
+              </div>
+            ))}
+          </div>
+
           {displayPosts.map((post) => {
             const isLiked = !!post.isLiked;
             const isSaved = !!post.isSaved;
@@ -1195,7 +1443,10 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         <button
           type="button"
           className={`privity-nav-tab-item ${currentNavTab === 'feed' ? 'active' : ''}`}
-          onClick={() => onNavigateTab('feed')}
+          onClick={() => {
+            stopAllAudio();
+            onNavigateTab('feed');
+          }}
           title="Home Feed"
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill={currentNavTab === 'feed' ? '#ffffff' : 'none'} stroke={currentNavTab === 'feed' ? '#ffffff' : 'rgba(255,255,255,0.65)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1210,7 +1461,10 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         <button
           type="button"
           className={`privity-nav-tab-item ${currentNavTab === 'discover' ? 'active' : ''}`}
-          onClick={() => onNavigateTab('discover')}
+          onClick={() => {
+            stopAllAudio();
+            onNavigateTab('discover');
+          }}
           title="Discover Creators"
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={currentNavTab === 'discover' ? '#ffffff' : 'rgba(255,255,255,0.65)'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1225,7 +1479,10 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         <button
           type="button"
           className="privity-nav-tab-create-btn"
-          onClick={onOpenCreate}
+          onClick={() => {
+            stopAllAudio();
+            onOpenCreate();
+          }}
           title="Open Camera & Studio"
           aria-label="Create Dispatch"
         >
@@ -1241,7 +1498,10 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         <button
           type="button"
           className={`privity-nav-tab-item ${currentNavTab === 'messages' ? 'active' : ''}`}
-          onClick={() => onNavigateTab('messages')}
+          onClick={() => {
+            stopAllAudio();
+            onNavigateTab('messages');
+          }}
           title="Encrypted Messages"
         >
           <div style={{ position: 'relative' }}>
@@ -1258,7 +1518,10 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         <button
           type="button"
           className={`privity-nav-tab-item ${currentNavTab === 'profile' ? 'active' : ''}`}
-          onClick={() => onNavigateTab('profile')}
+          onClick={() => {
+            stopAllAudio();
+            onNavigateTab('profile');
+          }}
           title="Your Profile"
         >
           <div className={`privity-nav-avatar-circle ${currentNavTab === 'profile' ? 'active' : ''}`}>
