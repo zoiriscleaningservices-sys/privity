@@ -48,6 +48,8 @@ import {
   IconSend,
   IconVideo,
   IconFeedStream,
+  IconUsersPlus,
+  IconMenu3Lines,
 } from './components/Icons';
 import {
   Gift,
@@ -1421,9 +1423,17 @@ export function App() {
   };
 
   // 0. Persistent Active Section / Tab (stays on current section upon refresh)
-  const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'messages' | 'activity' | 'profile' | 'safety'>(() =>
-    readStorage('privity_active_tab_v5', 'feed')
-  );
+  const getInitialActiveTab = (): 'feed' | 'discover' | 'messages' | 'activity' | 'profile' | 'safety' => {
+    try {
+      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (['feed', 'discover', 'messages', 'activity', 'profile', 'safety'].includes(hash)) {
+        return hash as any;
+      }
+    } catch (e) {}
+    return readStorage('privity_active_tab_v5', 'feed');
+  };
+
+  const [activeTab, setActiveTab] = useState<'feed' | 'discover' | 'messages' | 'activity' | 'profile' | 'safety'>(getInitialActiveTab);
   const [feedFilter, setFeedFilter] = useState<FeedFilterTab>('feed');
   const [feedViewMode, setFeedViewMode] = useState<'slide' | 'cards'>(() =>
     readStorage('privity_feed_view_mode_v1', 'slide')
@@ -1708,6 +1718,11 @@ export function App() {
   const [chatDraftText, setChatDraftText] = useState('');
   const [isRecipientTyping, setIsRecipientTyping] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [isDmSearchOpen, setIsDmSearchOpen] = useState(false);
+  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupSelectedMembers, setNewGroupSelectedMembers] = useState<string[]>([]);
+  const [isProfileDrawerOpen, setIsProfileDrawerOpen] = useState(false);
   const [chatChannelFilter, setChatChannelFilter] = useState<'all' | 'close_friends' | 'unread'>('all');
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [chatMediaAttachment, setChatMediaAttachment] = useState<string | null>(null);
@@ -1726,10 +1741,29 @@ export function App() {
     document.body.scrollTop = 0;
   }, []);
 
-  // Save active section across refreshes
+  // Save active section across refreshes and sync with URL hash
   useEffect(() => {
     safeSaveStorage('privity_active_tab_v5', activeTab);
+    try {
+      if (window.location.hash.replace(/^#\/?/, '').toLowerCase() !== activeTab) {
+        window.location.hash = activeTab;
+      }
+    } catch (e) {}
   }, [activeTab]);
+
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (['feed', 'discover', 'messages', 'activity', 'profile', 'safety'].includes(hash)) {
+        setActiveTab(hash as any);
+        if (hash === 'messages') {
+          setActiveChatUser(null);
+        }
+      }
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
 
   useEffect(() => {
     safeSaveStorage('privity_feed_view_mode_v1', feedViewMode);
@@ -3665,6 +3699,64 @@ export function App() {
     setTimeout(() => setToastMsg(null), 3000);
   }, []);
 
+  const handleCreateGroup = () => {
+    if (!newGroupName.trim()) {
+      triggerToast('Please enter a group name');
+      return;
+    }
+    const groupId = `group_${Date.now()}`;
+    const gName = newGroupName.trim();
+    const members = newGroupSelectedMembers.length > 0
+      ? newGroupSelectedMembers
+      : ['elena_rodriguez', 'marcus_dev'];
+
+    const groupAvatar = 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=400';
+
+    const newGroupProfile: UserProfile = {
+      id: groupId,
+      name: gName,
+      handle: groupId,
+      avatar: groupAvatar,
+      coverUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=1600',
+      isVerified: true,
+      verifiedCategory: 'Group Circle',
+      bio: `Encrypted group channel with ${members.length + 1} members.`,
+      location: 'Private Group',
+      joinedDate: 'Created 2026',
+      circleStatus: 'Close Friend',
+      isPrivate: true,
+      followersList: [...members, 'luciano'],
+      followingList: ['luciano'],
+      trustCirclesList: ['luciano'],
+      mediaItems: [],
+    };
+
+    setProfiles((prev) => ({
+      ...prev,
+      [groupId]: newGroupProfile,
+    }));
+
+    const welcomeMsg: DirectChatMessage = {
+      id: `msg-${Date.now()}`,
+      senderHandle: 'luciano',
+      recipientHandle: groupId,
+      text: `🎉 Group "${gName}" created with ${members.length} members. Start chatting!`,
+      timeAgo: 'Just now',
+      timestamp: Date.now(),
+    };
+
+    setDirectMessages((prev) => ({
+      [groupId]: [welcomeMsg],
+      ...prev,
+    }));
+
+    setNewGroupName('');
+    setNewGroupSelectedMembers([]);
+    setIsCreateGroupOpen(false);
+    setActiveChatUser(newGroupProfile);
+    triggerToast(`Group "${gName}" created!`);
+  };
+
   const handleTogglePrivateAccount = (val: boolean) => {
     setIsPrivateAccount(val);
     setUserSettings((prev) => ({ ...prev, isPrivateAccount: val }));
@@ -5254,9 +5346,7 @@ export function App() {
             className={`nav-link-btn ${activeTab === 'messages' ? 'active' : ''}`}
             onClick={() => {
               setActiveTab('messages');
-              if (!activeChatUser) {
-                setActiveChatUser(getUserProfile('elena_rodriguez'));
-              }
+              setActiveChatUser(null);
             }}
           >
             <span className="nav-icon-wrap"><IconChat size={21} /></span>
@@ -6367,6 +6457,62 @@ export function App() {
             <div className={`spatial-messages-container ${activeChatUser ? 'has-active-chat' : 'no-active-chat'}`}>
               {/* LEFT PANE: CONVERSATION CHANNELS ROSTER */}
               <div className="messages-roster-pane">
+                {/* Modern Native Header for Messages */}
+                <div className="dm-native-header">
+                  <button
+                    type="button"
+                    className="dm-header-icon-btn"
+                    onClick={() => setIsCreateGroupOpen(true)}
+                    title="Create New Group"
+                    aria-label="Create New Group"
+                  >
+                    <IconUsersPlus size={20} color="#fff" />
+                  </button>
+
+                  <div className="dm-native-title">
+                    <span>Messages</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    className={`dm-header-icon-btn ${isDmSearchOpen ? 'active' : ''}`}
+                    onClick={() => {
+                      setIsDmSearchOpen(!isDmSearchOpen);
+                      if (isDmSearchOpen) {
+                        setChatSearchQuery('');
+                      }
+                    }}
+                    title="Search Messages"
+                    aria-label="Search Messages"
+                  >
+                    {isDmSearchOpen ? <IconX size={18} color="#fff" /> : <IconSearch size={19} color="#fff" />}
+                  </button>
+                </div>
+
+                {/* Expandable Smooth Search Bar when toggled */}
+                {isDmSearchOpen && (
+                  <div className="dm-expandable-search-bar">
+                    <IconSearch size={15} color="var(--text-muted)" />
+                    <input
+                      type="text"
+                      placeholder="Search messages or people..."
+                      value={chatSearchQuery}
+                      autoFocus
+                      onChange={(e) => setChatSearchQuery(e.target.value)}
+                    />
+                    {chatSearchQuery && (
+                      <button
+                        type="button"
+                        className="dm-search-clear-btn"
+                        onClick={() => setChatSearchQuery('')}
+                        title="Clear search"
+                      >
+                        <IconX size={13} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {/* Dedicated Stories Rail in Direct Messages */}
                 <div className="messages-stories-rail">
                   {/* Your Story in Messages */}
@@ -6415,62 +6561,29 @@ export function App() {
                     })}
                 </div>
 
-                <div className="messages-roster-header">
-                  <div className="messages-roster-title-row">
-                    <div className="messages-roster-title">
-                      <IconChat size={20} color="var(--brand-cyan)" />
-                      <span>Direct Channels</span>
-                    </div>
-                    <span className="messages-secure-badge">
-                      <span className="live-green-orb" style={{ width: '6px', height: '6px' }} />
-                      P2P Synced
-                    </span>
-                  </div>
-
-                  {/* Search Bar */}
-                  <div className="messages-search-bar">
-                    <IconSearch size={14} color="var(--text-muted)" />
-                    <input
-                      type="text"
-                      placeholder="Filter conversations..."
-                      value={chatSearchQuery}
-                      onChange={(e) => setChatSearchQuery(e.target.value)}
-                    />
-                    {chatSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setChatSearchQuery('')}
-                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
-                      >
-                        <IconX size={13} />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Filter Pills */}
-                  <div className="messages-filter-pills">
-                    <button
-                      type="button"
-                      className={`messages-filter-pill ${chatChannelFilter === 'all' ? 'active' : ''}`}
-                      onClick={() => setChatChannelFilter('all')}
-                    >
-                      All Channels ({allPartnerHandles.length})
-                    </button>
-                    <button
-                      type="button"
-                      className={`messages-filter-pill ${chatChannelFilter === 'close_friends' ? 'active' : ''}`}
-                      onClick={() => setChatChannelFilter('close_friends')}
-                    >
-                      ★ Close Friends ({allPartnerHandles.filter((h) => closeFriendsList.includes(h)).length})
-                    </button>
-                    <button
-                      type="button"
-                      className={`messages-filter-pill ${chatChannelFilter === 'unread' ? 'active' : ''}`}
-                      onClick={() => setChatChannelFilter('unread')}
-                    >
-                      Active Now
-                    </button>
-                  </div>
+                {/* Filter Pills */}
+                <div className="messages-filter-pills-row">
+                  <button
+                    type="button"
+                    className={`messages-filter-pill ${chatChannelFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setChatChannelFilter('all')}
+                  >
+                    All ({allPartnerHandles.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`messages-filter-pill ${chatChannelFilter === 'close_friends' ? 'active' : ''}`}
+                    onClick={() => setChatChannelFilter('close_friends')}
+                  >
+                    ★ Close Friends ({allPartnerHandles.filter((h) => closeFriendsList.includes(h)).length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`messages-filter-pill ${chatChannelFilter === 'unread' ? 'active' : ''}`}
+                    onClick={() => setChatChannelFilter('unread')}
+                  >
+                    Active Now
+                  </button>
                 </div>
 
                 {/* Roster Channels List */}
@@ -7265,6 +7378,96 @@ export function App() {
                 );
               })()}
 
+              {/* Apple-style Group Creation Modal */}
+              {isCreateGroupOpen && (
+                <div className="group-create-backdrop" onClick={() => setIsCreateGroupOpen(false)}>
+                  <div className="group-create-modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="group-create-header">
+                      <div className="group-create-title">
+                        <IconUsersPlus size={20} color="var(--brand-cyan)" />
+                        <span>Create New Group</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="profile-drawer-close-btn"
+                        onClick={() => setIsCreateGroupOpen(false)}
+                      >
+                        <IconX size={16} />
+                      </button>
+                    </div>
+
+                    <div className="group-create-body">
+                      <div className="group-name-input-wrap">
+                        <label className="group-name-label">Group Name</label>
+                        <input
+                          type="text"
+                          className="group-name-input"
+                          placeholder="e.g. Design Circle, Studio Core..."
+                          value={newGroupName}
+                          autoFocus
+                          onChange={(e) => setNewGroupName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleCreateGroup();
+                          }}
+                        />
+                      </div>
+
+                      <div className="group-name-input-wrap">
+                        <label className="group-name-label">
+                          Select Members ({newGroupSelectedMembers.length} selected)
+                        </label>
+                        <div className="group-members-list">
+                          {['elena_rodriguez', 'marcus_dev', 'julian_analogue', 'chloe_paris', 'sara_architecture'].map((handle) => {
+                            const u = getUserProfile(handle);
+                            const isSelected = newGroupSelectedMembers.includes(handle);
+                            return (
+                              <div
+                                key={handle}
+                                className={`group-member-item ${isSelected ? 'selected' : ''}`}
+                                onClick={() => {
+                                  setNewGroupSelectedMembers((prev) =>
+                                    prev.includes(handle) ? prev.filter((h) => h !== handle) : [...prev, handle]
+                                  );
+                                }}
+                              >
+                                <div className="group-member-info">
+                                  <img src={u.avatar} alt={u.name} className="group-member-avatar" />
+                                  <div>
+                                    <div className="group-member-name">{u.name}</div>
+                                    <div className="group-member-handle">@{u.handle}</div>
+                                  </div>
+                                </div>
+                                <div className="group-member-checkbox">
+                                  {isSelected && <IconCheck size={13} color="#fff" />}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="group-create-footer">
+                      <button
+                        type="button"
+                        className="group-create-cancel-btn"
+                        onClick={() => setIsCreateGroupOpen(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="group-create-submit-btn"
+                        disabled={!newGroupName.trim()}
+                        onClick={handleCreateGroup}
+                      >
+                        Create Group ({newGroupSelectedMembers.length})
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
             </div>
           );
         })()}
@@ -7454,18 +7657,41 @@ export function App() {
                   }
                 }}
               >
-              {/* Sticky Frosted Header */}
-              {/* Ultra-Modern Fullscreen Profile: Floating Back Button */}
-              <button
-                type="button"
-                className="profile-fullscreen-back-btn"
-                onClick={handleProfileBack}
-                title="Back to Feed"
-              >
-                <IconArrowLeft size={20} />
-              </button>
+              {/* Native Apple-style Profile Top Bar */}
+              <div className="profile-native-top-bar">
+                <button
+                  type="button"
+                  className="profile-top-btn"
+                  onClick={handleProfileBack}
+                  title="Back"
+                  aria-label="Back"
+                >
+                  <IconArrowLeft size={20} color="#fff" />
+                </button>
 
-              {/* Cover Stage Banner */}
+                <div className="profile-top-title">
+                  <span>@{profile.handle}</span>
+                  {profile.isVerified && (
+                    <VerifiedBadge
+                      authorName={profile.name}
+                      category={profile.verifiedCategory}
+                      since={profile.verifiedSince}
+                      proofId={profile.cryptoProofId}
+                    />
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className={`profile-top-btn ${isProfileDrawerOpen ? 'active' : ''}`}
+                  onClick={() => setIsProfileDrawerOpen(!isProfileDrawerOpen)}
+                  title="Menu Options"
+                  aria-label="Menu Options"
+                >
+                  <IconMenu3Lines size={20} color="#fff" />
+                </button>
+              </div>
+
               {/* Cover Stage Banner */}
               <div
                 className="profile-cover-stage"
@@ -7546,80 +7772,47 @@ export function App() {
                   </div>
                 </div>
 
-                {/* Apple VisionOS Glassmorphism Profile Action Bar */}
-                <div className="apple-profile-actions-bar">
-                  {isOwnProfile ? (
-                    <>
-                      <button
-                        type="button"
-                        className="apple-glass-action-btn primary"
-                        onClick={handleOpenEditProfile}
-                        title="Edit Profile Information"
-                      >
-                        <IconEdit size={14} />
-                        <span>Edit Profile</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="apple-glass-action-btn"
-                        onClick={() => setIsSettingsOpen(true)}
-                        title="Account & Privacy Settings"
-                      >
-                        <IconSettings size={14} />
-                        <span>Settings</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="apple-glass-action-btn icon-only"
-                        onClick={() => {
-                          navigator.clipboard?.writeText(`https://privity.app/@${profile.handle}`);
-                          triggerToast(`Profile link copied: @${profile.handle}`);
-                        }}
-                        title="Share Profile Link"
-                      >
-                        <IconShare size={14} />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className={`apple-glass-action-btn ${isFollowingThisUser ? 'following' : 'primary'}`}
-                        onClick={() => toggleFollow(profile.handle, profile.name)}
-                      >
-                        {isFollowingThisUser ? (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                            <IconUserCheck size={14} /> Following
-                          </span>
-                        ) : (
-                          'Follow'
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="apple-glass-action-btn"
-                        style={{
-                          color: isInCloseFriends ? 'var(--cf-emerald)' : undefined,
-                          borderColor: isInCloseFriends ? 'rgba(16, 185, 129, 0.4)' : undefined,
-                        }}
-                        onClick={() => toggleCloseFriends(profile.handle)}
-                      >
-                        <IconStarCloseFriends size={14} color={isInCloseFriends ? 'var(--cf-emerald)' : 'currentColor'} />
-                        <span>{isInCloseFriends ? 'Close Friend' : 'Add to Circle'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="apple-glass-action-btn"
-                        onClick={() => {
-                          setActiveChatUser(profile);
-                          setActiveTab('messages');
-                        }}
-                      >
-                        <IconChat size={14} />
-                        <span>Message</span>
-                      </button>
-                    </>
-                  )}
+                {/* Profile Actions Bar: Only shown for other users since own profile actions are elevated in the top 3-lines menu */}
+                {!isOwnProfile && (
+                  <div className="apple-profile-actions-bar">
+                    <button
+                      type="button"
+                      className={`apple-glass-action-btn ${isFollowingThisUser ? 'following' : 'primary'}`}
+                      onClick={() => toggleFollow(profile.handle, profile.name)}
+                    >
+                      {isFollowingThisUser ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <IconUserCheck size={14} /> Following
+                        </span>
+                      ) : (
+                        'Follow'
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="apple-glass-action-btn"
+                      style={{
+                        color: isInCloseFriends ? 'var(--cf-emerald)' : undefined,
+                        borderColor: isInCloseFriends ? 'rgba(16, 185, 129, 0.4)' : undefined,
+                      }}
+                      onClick={() => toggleCloseFriends(profile.handle)}
+                    >
+                      <IconStarCloseFriends size={14} color={isInCloseFriends ? 'var(--cf-emerald)' : 'currentColor'} />
+                      <span>{isInCloseFriends ? 'Close Friend' : 'Add to Circle'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="apple-glass-action-btn"
+                      onClick={() => {
+                        setActiveChatUser(profile);
+                        setActiveTab('messages');
+                      }}
+                    >
+                      <IconChat size={14} />
+                      <span>Message</span>
+                    </button>
+                  </div>
+                )}
                 </div>
 
                 {/* Real Numerical Stats Bar - Apple VisionOS Complication Bar with Icons */}
@@ -8323,6 +8516,96 @@ export function App() {
 
                 </>
               )}
+
+              {/* Profile Right Slide-Over Drawer */}
+              <div
+                className={`profile-drawer-backdrop ${isProfileDrawerOpen ? 'open' : ''}`}
+                onClick={() => setIsProfileDrawerOpen(false)}
+              />
+
+              <div className={`profile-slideover-drawer ${isProfileDrawerOpen ? 'open' : ''}`}>
+                <div className="profile-drawer-header">
+                  <div className="profile-drawer-user-info">
+                    <img src={profile.avatar} alt={profile.name} className="profile-drawer-avatar" />
+                    <div>
+                      <div className="profile-drawer-name">{profile.name}</div>
+                      <div className="profile-drawer-handle">@{profile.handle}</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="profile-drawer-close-btn"
+                    onClick={() => setIsProfileDrawerOpen(false)}
+                    title="Close Menu"
+                  >
+                    <IconX size={16} />
+                  </button>
+                </div>
+
+                <div className="profile-drawer-menu">
+                  <button
+                    type="button"
+                    className="profile-drawer-item"
+                    onClick={() => {
+                      setIsProfileDrawerOpen(false);
+                      handleOpenEditProfile();
+                    }}
+                  >
+                    <div className="profile-drawer-item-icon edit">
+                      <IconEdit size={18} color="#fff" />
+                    </div>
+                    <div className="profile-drawer-item-text">
+                      <span className="profile-drawer-item-title">Edit Profile</span>
+                      <span className="profile-drawer-item-desc">Change bio, username & media</span>
+                    </div>
+                    <span className="profile-drawer-chevron">›</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="profile-drawer-item"
+                    onClick={() => {
+                      setIsProfileDrawerOpen(false);
+                      setIsSettingsOpen(true);
+                    }}
+                  >
+                    <div className="profile-drawer-item-icon settings">
+                      <IconSettings size={18} color="#fff" />
+                    </div>
+                    <div className="profile-drawer-item-text">
+                      <span className="profile-drawer-item-title">Settings</span>
+                      <span className="profile-drawer-item-desc">Security, privacy & keys</span>
+                    </div>
+                    <span className="profile-drawer-chevron">›</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="profile-drawer-item"
+                    onClick={() => {
+                      setIsProfileDrawerOpen(false);
+                      navigator.clipboard?.writeText(`https://privity.app/@${profile.handle}`);
+                      triggerToast(`Profile link copied: @${profile.handle}`);
+                    }}
+                  >
+                    <div className="profile-drawer-item-icon share">
+                      <IconShare size={18} color="#fff" />
+                    </div>
+                    <div className="profile-drawer-item-text">
+                      <span className="profile-drawer-item-title">Share Profile</span>
+                      <span className="profile-drawer-item-desc">Copy link or share to friends</span>
+                    </div>
+                    <span className="profile-drawer-chevron">›</span>
+                  </button>
+                </div>
+
+                <div className="profile-drawer-footer">
+                  <div className="profile-drawer-badge">
+                    <IconShield size={14} color="var(--public-cyan)" />
+                    <span>Ed25519 Hardware Verification</span>
+                  </div>
+                  <span className="profile-drawer-version">Privity Mobile App • v2.6.0</span>
+                </div>
               </div>
             </div>
           );
@@ -10659,6 +10942,7 @@ export function App() {
             className={`mobile-nav-item ${activeTab === 'messages' ? 'active' : ''}`}
             onClick={() => {
               setActiveTab('messages');
+              setActiveChatUser(null);
             }}
             title="Encrypted Messages"
           >
