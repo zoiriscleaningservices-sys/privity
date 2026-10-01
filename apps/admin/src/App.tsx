@@ -60,7 +60,20 @@ import {
 import './gifts/gifts.css';
 import { CameraModal } from './camera';
 import { LiveMeStreamArena } from './components/liveme';
-import { TikTokSlideFeed } from './components/feed/TikTokSlideFeed';
+import {
+  TikTokSlideFeed,
+  EXCLUSIVE_FORYOU_POSTS,
+  EXCLUSIVE_FOLLOWING_POSTS,
+  EXCLUSIVE_CIRCLES_POSTS,
+  EXCLUSIVE_BIRDIE_POSTS,
+} from './components/feed/TikTokSlideFeed';
+
+const ALL_TEMPLATE_POSTS: PostItem[] = [
+  ...EXCLUSIVE_FORYOU_POSTS,
+  ...EXCLUSIVE_FOLLOWING_POSTS,
+  ...EXCLUSIVE_CIRCLES_POSTS,
+  ...EXCLUSIVE_BIRDIE_POSTS,
+] as unknown as PostItem[];
 
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -112,7 +125,7 @@ interface PostComment {
   authorName: string;
   authorHandle: string;
   authorAvatar: string;
-  isVerified: boolean;
+  isVerified?: boolean;
   text: string;
   timeAgo: string;
   likesCount: number;
@@ -122,9 +135,11 @@ interface PostComment {
     authorName: string;
     authorHandle: string;
     authorAvatar: string;
-    isVerified: boolean;
+    isVerified?: boolean;
     text: string;
     timeAgo: string;
+    likesCount?: number;
+    isLiked?: boolean;
   }[];
 }
 
@@ -157,6 +172,7 @@ interface PostItem {
   savesCount: number;
   isLiked?: boolean;
   isSaved?: boolean;
+  isReposted?: boolean;
   timeAgo: string;
   comments: PostComment[];
 }
@@ -2696,9 +2712,25 @@ export function App() {
   // Post Actions Menu & Caption Editing State
   const [postMenuModal, setPostMenuModal] = useState<{ post: PostItem; isOwn: boolean } | null>(null);
   const [editingPostCaption, setEditingPostCaption] = useState<{ id: string; caption: string } | null>(null);
+  const [deletedPostIds, setDeletedPostIds] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('privity_deleted_post_ids_v1');
+    if (saved) {
+      try {
+        return new Set(JSON.parse(saved));
+      } catch (e) {}
+    }
+    return new Set<string>();
+  });
 
   // Delete post permanently and synchronize with Media & Studio
   const handleDeletePost = (postId: string) => {
+    setDeletedPostIds((prev) => {
+      const next = new Set(prev);
+      next.add(postId);
+      safeSaveStorage('privity_deleted_post_ids_v1', Array.from(next));
+      return next;
+    });
+
     const targetPost = posts.find((p) => p.id === postId);
     const targetPhotoUrl = targetPost?.contentUrl || targetPost?.thumbnailUrl;
 
@@ -3655,7 +3687,10 @@ export function App() {
     setHeartExplodingPostId(postId);
     setTimeout(() => setHeartExplodingPostId(null), 750);
 
-    const targetPost = posts.find((p) => p.id === postId);
+    let targetPost = posts.find((p) => p.id === postId);
+    if (!targetPost) {
+      targetPost = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
+    }
     if (!targetPost) return;
 
     const photoUrl = targetPost.contentUrl || targetPost.thumbnailUrl;
@@ -3718,17 +3753,29 @@ export function App() {
 
     // 3. Update posts immediately
     setPosts((prevPosts) => {
-      const nextPosts = prevPosts.map((p) => {
-        if (p.id === postId || (photoUrl && (isSameMedia(p.contentUrl, photoUrl) || isSameMedia(p.thumbnailUrl, photoUrl)))) {
-          return {
-            ...p,
-            isLiked: nextLiked,
-            likersList: nextLikers,
-            likesCount: nextCount,
-          };
-        }
-        return p;
-      });
+      const exists = prevPosts.some((p) => p.id === postId);
+      let nextPosts;
+      if (exists) {
+        nextPosts = prevPosts.map((p) => {
+          if (p.id === postId || (photoUrl && (isSameMedia(p.contentUrl, photoUrl) || isSameMedia(p.thumbnailUrl, photoUrl)))) {
+            return {
+              ...p,
+              isLiked: nextLiked,
+              likersList: nextLikers,
+              likesCount: nextCount,
+            };
+          }
+          return p;
+        });
+      } else {
+        const newP = {
+          ...targetPost!,
+          isLiked: nextLiked,
+          likersList: nextLikers,
+          likesCount: nextCount,
+        };
+        nextPosts = [newP, ...prevPosts];
+      }
       safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
@@ -3748,15 +3795,23 @@ export function App() {
   const handleSave = (postId: string) => {
     let nextSavedState = false;
     setPosts((prev) => {
-      const nextPosts = prev.map((p) => {
+      let currentList = prev;
+      let targetPost = currentList.find((p) => p.id === postId);
+      if (!targetPost) {
+        const template = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
+        if (template) {
+          targetPost = { ...template };
+          currentList = [...currentList, targetPost];
+        }
+      }
+      if (!targetPost) return prev;
+      nextSavedState = !targetPost.isSaved;
+      const nextPosts = currentList.map((p) => {
         if (p.id === postId) {
-          const next = !p.isSaved;
-          nextSavedState = next;
-          triggerToast(next ? 'Saved to private collection' : 'Removed from saved');
           return {
             ...p,
-            isSaved: next,
-            savesCount: next ? p.savesCount + 1 : Math.max(0, p.savesCount - 1),
+            isSaved: nextSavedState,
+            savesCount: nextSavedState ? p.savesCount + 1 : Math.max(0, p.savesCount - 1),
           };
         }
         return p;
@@ -3770,6 +3825,7 @@ export function App() {
       postId,
       isSaved: nextSavedState,
     });
+    triggerToast(nextSavedState ? 'Saved to collection! 🔖' : 'Removed from collection');
   };
 
   // Share
@@ -3784,14 +3840,21 @@ export function App() {
     const text = (textOverride !== undefined ? textOverride : commentInputs[postId])?.trim();
     if (!text) return;
 
-    const targetPost = posts.find((p) => p.id === postId);
+    let targetPost = posts.find((p) => p.id === postId);
+    if (!targetPost) {
+      targetPost = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
+    }
     const targetPhotoUrl = targetPost?.contentUrl || targetPost?.thumbnailUrl;
 
     let createdItem: any = null;
     let parentCommentId: string | undefined = undefined;
 
     setPosts((prev) => {
-      const nextPosts = prev.map((p) => {
+      let currentList = prev;
+      if (!currentList.some((p) => p.id === postId) && targetPost) {
+        currentList = [{ ...targetPost }, ...currentList];
+      }
+      const nextPosts = currentList.map((p) => {
         if (p.id === postId) {
           if (replyTarget && replyTarget.postId === postId && !textOverride) {
             parentCommentId = replyTarget.commentId;
@@ -4396,14 +4459,39 @@ export function App() {
   };
 
   // Like or unlike comment
-  const handleLikeComment = (postId: string, commentId: string) => {
+  const handleLikeComment = (postId: string, commentId: string, replyId?: string) => {
     let nextLikedState = false;
     let nextLikesTotal = 0;
     setPosts((prev) => {
-      const nextPosts = prev.map((p) => {
+      let currentList = prev;
+      let targetPost = currentList.find((p) => p.id === postId);
+      if (!targetPost) {
+        const template = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
+        if (template) {
+          targetPost = { ...template };
+          currentList = [...currentList, targetPost];
+        }
+      }
+      if (!targetPost) return prev;
+
+      const nextPosts = currentList.map((p) => {
         if (p.id !== postId) return p;
         const updated = p.comments.map((c) => {
           if (c.id !== commentId) return c;
+          if (replyId) {
+            const updatedReplies = (c.replies || []).map((r) => {
+              if (r.id !== replyId) return r;
+              const nextLiked = !r.isLiked;
+              nextLikedState = nextLiked;
+              nextLikesTotal = nextLiked ? (r.likesCount || 0) + 1 : Math.max(0, (r.likesCount || 0) - 1);
+              return {
+                ...r,
+                isLiked: nextLiked,
+                likesCount: nextLikesTotal,
+              };
+            });
+            return { ...c, replies: updatedReplies };
+          }
           const nextLiked = !c.isLiked;
           nextLikedState = nextLiked;
           nextLikesTotal = nextLiked ? (c.likesCount || 0) + 1 : Math.max(0, (c.likesCount || 0) - 1);
@@ -4423,9 +4511,133 @@ export function App() {
       action: 'LIKE_COMMENT',
       postId,
       commentId,
+      replyId,
       isLiked: nextLikedState,
       likesCount: nextLikesTotal,
     });
+  };
+
+  // Reply to a comment
+  const handleReplyComment = (postId: string, commentId: string, text: string) => {
+    if (!text.trim()) return;
+    setPosts((prev) => {
+      let currentList = prev;
+      let targetPost = currentList.find((p) => p.id === postId);
+      if (!targetPost) {
+        const template = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
+        if (template) {
+          targetPost = { ...template };
+          currentList = [...currentList, targetPost];
+        }
+      }
+      if (!targetPost) return prev;
+
+      const replyItem = {
+        id: `r-${Date.now()}`,
+        authorName: myProfile.name,
+        authorHandle: myProfile.handle,
+        authorAvatar: myProfile.avatar,
+        isVerified: myProfile.isVerified,
+        text: text.trim(),
+        timeAgo: 'Just now',
+        likesCount: 0,
+        isLiked: false,
+      };
+
+      const nextPosts = currentList.map((p) => {
+        if (p.id === postId) {
+          const updatedComments = p.comments.map((c) => {
+            if (c.id === commentId) {
+              return {
+                ...c,
+                replies: [...(c.replies || []), replyItem],
+              };
+            }
+            return c;
+          });
+          return {
+            ...p,
+            commentsCount: p.commentsCount + 1,
+            comments: updatedComments,
+          };
+        }
+        return p;
+      });
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+    triggerToast('Reply posted! 💬');
+  };
+
+  // Repost a dispatch
+  const handleRepostPost = (postId: string) => {
+    let nextRepost = false;
+    setPosts((prev) => {
+      let currentList = prev;
+      let targetPost = currentList.find((p) => p.id === postId);
+      if (!targetPost) {
+        const template = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
+        if (template) {
+          targetPost = { ...template };
+          currentList = [...currentList, targetPost];
+        }
+      }
+      if (!targetPost) return prev;
+      nextRepost = !targetPost.isReposted;
+      const nextPosts = currentList.map((p) => {
+        if (p.id === postId) {
+          return {
+            ...p,
+            isReposted: nextRepost,
+            sharesCount: nextRepost ? p.sharesCount + 1 : Math.max(0, p.sharesCount - 1),
+          };
+        }
+        return p;
+      });
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+    triggerToast(nextRepost ? 'Reposted to your circle! 🔁' : 'Removed repost');
+  };
+
+  // Dedicated Birdie quick-composer post creation
+  const handleAddBirdiePost = (caption: string, privacy: 'public' | 'followers' | 'close_friends' = 'public') => {
+    if (!caption.trim()) return;
+    const extractedTags = (caption.match(/#[\w-]+/g) || []).map((t) => t.slice(1));
+    const finalTags = extractedTags.length > 0 ? extractedTags : ['birdie', 'thought', 'privity'];
+
+    const newBirdiePost: PostItem = {
+      id: `p-birdie-${Date.now()}`,
+      authorId: 'usr-luciano',
+      authorName: myProfile.name,
+      authorHandle: myProfile.handle,
+      authorAvatar: myProfile.avatar,
+      isVerified: myProfile.isVerified,
+      verifiedCategory: myProfile.verifiedCategory,
+      verifiedSince: myProfile.verifiedSince,
+      cryptoProofId: myProfile.cryptoProofId,
+      type: 'text',
+      caption: caption.trim(),
+      tags: finalTags,
+      privacy: privacy,
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      savesCount: 0,
+      isLiked: false,
+      isSaved: false,
+      likersList: [],
+      timeAgo: 'Just now',
+      comments: [],
+    };
+
+    setPosts((prev) => {
+      const nextPosts = [newBirdiePost, ...prev];
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+
+    triggerToast('Chirped to Birdie! 🐦');
   };
 
   // Publish instantly from inline composer without requiring refresh
@@ -5224,9 +5436,17 @@ export function App() {
                 }}
                 followingMap={followingMap}
                 closeFriendsList={closeFriendsList}
+                deletedPostIds={deletedPostIds}
                 onLike={(postId) => handleLike(postId)}
                 onSave={(postId) => handleSave(postId)}
                 onAddComment={(postId, text) => handleAddComment(postId, text)}
+                onLikeComment={(postId, commentId, replyId) => handleLikeComment(postId, commentId, replyId)}
+                onDeleteComment={(postId, commentId, replyId) => handleDeleteComment(postId, commentId, replyId)}
+                onReplyComment={(postId, commentId, text) => handleReplyComment(postId, commentId, text)}
+                onDeletePost={(postId) => handleDeletePost(postId)}
+                onRepostPost={(postId) => handleRepostPost(postId)}
+                onAddBirdiePost={(caption, privacy) => handleAddBirdiePost(caption, privacy)}
+                onToggleFollow={(handle) => toggleFollow(handle)}
                 onShare={(post) => handleShare(post.id)}
                 onOpenLive={() => handleSelectFeedTab('live')}
                 onOpenCreate={() => setIsCameraOpen(true)}

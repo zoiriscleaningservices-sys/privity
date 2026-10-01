@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './tiktokFeed.css';
 
+export interface PostCommentReply {
+  id: string;
+  authorName: string;
+  authorHandle: string;
+  authorAvatar: string;
+  isVerified?: boolean;
+  text: string;
+  timeAgo: string;
+  likesCount?: number;
+  isLiked?: boolean;
+}
+
 export interface PostComment {
   id: string;
   authorName: string;
@@ -10,15 +22,8 @@ export interface PostComment {
   text: string;
   timeAgo: string;
   likesCount?: number;
-  replies?: Array<{
-    id: string;
-    authorName: string;
-    authorHandle: string;
-    authorAvatar: string;
-    isVerified?: boolean;
-    text: string;
-    timeAgo: string;
-  }>;
+  isLiked?: boolean;
+  replies?: PostCommentReply[];
 }
 
 export interface PostItem {
@@ -29,7 +34,9 @@ export interface PostItem {
   authorAvatar: string;
   isVerified: boolean;
   verifiedCategory?: string;
-  type: 'text' | 'image' | 'video' | 'audio';
+  verifiedSince?: string;
+  cryptoProofId?: string;
+  type: 'text' | 'image' | 'video';
   contentUrl?: string;
   thumbnailUrl?: string;
   videoUrl?: string;
@@ -46,9 +53,95 @@ export interface PostItem {
   savesCount: number;
   isLiked?: boolean;
   isSaved?: boolean;
+  isReposted?: boolean;
+  likersList?: string[];
   timeAgo: string;
   comments: PostComment[];
 }
+
+export interface StoryItem {
+  id: string;
+  authorName: string;
+  authorHandle: string;
+  authorAvatar: string;
+  isVerified?: boolean;
+  mediaUrl: string;
+  mediaType: 'image' | 'video';
+  caption?: string;
+  timeAgo: string;
+  createdAt: number;
+  privacy: 'close_friends' | 'followers' | 'public';
+  likesCount?: number;
+  isLiked?: boolean;
+}
+
+export const INITIAL_STORIES_V3: StoryItem[] = [
+  {
+    id: 'story-elena',
+    authorName: 'Elena Rodriguez',
+    authorHandle: 'elena_rodriguez',
+    authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    isVerified: true,
+    mediaUrl: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200',
+    mediaType: 'image',
+    caption: 'Late night studio reflections & architectural blueprints 📐✨',
+    timeAgo: '3h ago',
+    createdAt: Date.now() - 3 * 3600 * 1000,
+    privacy: 'close_friends',
+  },
+  {
+    id: 'story-marcus',
+    authorName: 'Marcus Vance',
+    authorHandle: 'marcus_dev',
+    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+    isVerified: true,
+    mediaUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=1200',
+    mediaType: 'image',
+    caption: 'Compiling sovereign cryptographic peer protocol 🛡️',
+    timeAgo: '5h ago',
+    createdAt: Date.now() - 5 * 3600 * 1000,
+    privacy: 'followers',
+  },
+  {
+    id: 'story-julian',
+    authorName: 'Julian Thorne',
+    authorHandle: 'julian_analogue',
+    authorAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
+    isVerified: true,
+    mediaUrl: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200',
+    mediaType: 'image',
+    caption: 'Leica M6 loaded with Portra 400. Real silver halide grains 🎞️',
+    timeAgo: '7h ago',
+    createdAt: Date.now() - 7 * 3600 * 1000,
+    privacy: 'close_friends',
+  },
+  {
+    id: 'story-chloe',
+    authorName: 'Chloe Kim',
+    authorHandle: 'chloe_visuals',
+    authorAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
+    isVerified: true,
+    mediaUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-sign-1232-large.mp4',
+    mediaType: 'video',
+    caption: 'Shibuya neon reflections after midnight 🌧️💜',
+    timeAgo: '8h ago',
+    createdAt: Date.now() - 8 * 3600 * 1000,
+    privacy: 'public',
+  },
+  {
+    id: 'story-nicole',
+    authorName: 'Nicole🎀🧸',
+    authorHandle: 'nicole_spicy',
+    authorAvatar: './nicole-avatar.jpg',
+    isVerified: true,
+    mediaUrl: './nicole-spicy.jpg',
+    mediaType: 'image',
+    caption: 'Golden hour walk along South Beach 🌊☀️',
+    timeAgo: '11h ago',
+    createdAt: Date.now() - 11 * 3600 * 1000,
+    privacy: 'public',
+  },
+];
 
 export interface ItunesTrack {
   id: number | string;
@@ -119,9 +212,17 @@ export interface TikTokSlideFeedProps {
   };
   followingMap?: Record<string, boolean>;
   closeFriendsList?: string[];
+  deletedPostIds?: Set<string>;
   onLike: (postId: string, photoUrl?: string) => void;
   onSave: (postId: string) => void;
   onAddComment: (postId: string, text: string) => void;
+  onLikeComment?: (postId: string, commentId: string, replyId?: string) => void;
+  onReplyComment?: (postId: string, commentId: string, text: string) => void;
+  onDeleteComment?: (postId: string, commentId: string, replyId?: string) => void;
+  onDeletePost?: (postId: string) => void;
+  onRepostPost?: (postId: string) => void;
+  onAddBirdiePost?: (caption: string, privacy: 'public' | 'followers' | 'close_friends') => void;
+  onToggleFollow?: (handle: string) => void;
   onShare: (post: PostItem) => void;
   onOpenLive: () => void;
   onOpenCreate: () => void;
@@ -745,11 +846,19 @@ export const EXCLUSIVE_BIRDIE_POSTS: PostItem[] = [
 export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   posts,
   currentUser,
-  followingMap: _followingMap,
-  closeFriendsList: _closeFriendsList,
+  followingMap = {},
+  closeFriendsList: _closeFriendsList = [],
+  deletedPostIds,
   onLike,
   onSave,
   onAddComment,
+  onLikeComment,
+  onReplyComment,
+  onDeleteComment,
+  onDeletePost,
+  onRepostPost,
+  onAddBirdiePost,
+  onToggleFollow,
   onShare,
   onOpenLive,
   onOpenCreate,
@@ -837,67 +946,114 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   // Followed creators map (clicking '+' button)
   const [followedMap, setFollowedMap] = useState<Record<string, boolean>>({});
 
-  // Filtered posts strictly according to user circles & following rules
-  // 100% MUTUALLY EXCLUSIVE FEEDS: ZERO REPEATED POSTS ACROSS FOR YOU, FOLLOWING, CIRCLES, AND BIRDIE!
+  const isFollowed = (handle: string) => {
+    const clean = handle.replace(/^@/, '').toLowerCase();
+    return !!followedMap[handle] || !!followedMap[clean] || !!followingMap?.[handle] || !!followingMap?.[clean];
+  };
+
+  // Dedicated Stories System (Strictly separate from posts feeds)
+  const [stories, setStories] = useState<StoryItem[]>(() => {
+    const saved = localStorage.getItem('privity_stories_v3');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return INITIAL_STORIES_V3;
+  });
+
+  const [isAddStoryModalOpen, setIsAddStoryModalOpen] = useState(false);
+  const [storyDraftMediaUrl, setStoryDraftMediaUrl] = useState<string>('https://images.unsplash.com/photo-1533105079780-92b9be482077?w=1200');
+  const [storyDraftMediaType, setStoryDraftMediaType] = useState<'image' | 'video'>('image');
+  const [storyDraftCaption, setStoryDraftCaption] = useState<string>('');
+  const [storyDraftPrivacy, setStoryDraftPrivacy] = useState<'close_friends' | 'followers' | 'public'>('close_friends');
+
+  const [activeStoryViewerIndex, setActiveStoryViewerIndex] = useState<number | null>(null);
+  const [storyProgress, setStoryProgress] = useState(0);
+  const [isStoryPaused, setIsStoryPaused] = useState(false);
+  const [storyReplyText, setStoryReplyText] = useState('');
+
+  // Dedicated Birdie Quick Composer State
+  const [birdieDraftText, setBirdieDraftText] = useState('');
+  const [birdieDraftPrivacy, setBirdieDraftPrivacy] = useState<'public' | 'followers' | 'close_friends'>('public');
+
+  // Post Options Action Sheet (...) State
+  const [activePostMenu, setActivePostMenu] = useState<PostItem | null>(null);
+
+  // Replying target in slide-up comments drawer
+  const [replyingToComment, setReplyingToComment] = useState<{ id: string; authorHandle: string; authorName: string } | null>(null);
+  const commentInputRef = useRef<HTMLInputElement>(null);
+
+  // VisionOS Glass Toast
+  const [slideToastMsg, setSlideToastMsg] = useState<string | null>(null);
+  const triggerSlideToast = (msg: string) => {
+    setSlideToastMsg(msg);
+    setTimeout(() => setSlideToastMsg(null), 2500);
+  };
+
+  // Filtered posts strictly according to user distribution intent:
+  // - Birdie text posts stay STRICTLY within Birdie
+  // - User-published photo/video dispatches appear in For You, Following, and Circles
+  // - Stories NEVER enter post feeds (strictly Stories rail/viewer)
+  // - Deleted posts never appear in any feed
   const displayPosts = React.useMemo(() => {
-    // Helper to merge stateful overrides (likes, comments, bookmarks, sounds) from the live `posts` prop
-    // without overriding the post's core feed identity, privacy, or media type
+    const nonDeletedPosts = posts.filter((p) => !deletedPostIds?.has(p.id));
+
     const mergeOverrides = (baseList: PostItem[]) => {
-      return baseList.map((base) => {
-        const live = posts.find((p) => p.id === base.id);
-        if (!live) return base;
-        return {
-          ...base,
-          likesCount: live.likesCount ?? base.likesCount,
-          isLiked: live.isLiked ?? base.isLiked,
-          commentsCount: live.commentsCount ?? base.commentsCount,
-          comments: live.comments ?? base.comments,
-          savesCount: live.savesCount ?? base.savesCount,
-          isSaved: live.isSaved ?? base.isSaved,
-          sharesCount: live.sharesCount ?? base.sharesCount,
-          soundName: live.soundName ?? base.soundName,
-          soundArtist: live.soundArtist ?? base.soundArtist,
-          soundUrl: live.soundUrl ?? base.soundUrl,
-          soundCover: live.soundCover ?? base.soundCover,
-        };
-      });
+      return baseList
+        .filter((base) => !deletedPostIds?.has(base.id))
+        .map((base) => {
+          const live = nonDeletedPosts.find((p) => p.id === base.id);
+          if (!live) return base;
+          return {
+            ...base,
+            likesCount: live.likesCount ?? base.likesCount,
+            isLiked: live.isLiked ?? base.isLiked,
+            commentsCount: live.commentsCount ?? base.commentsCount,
+            comments: live.comments ?? base.comments,
+            savesCount: live.savesCount ?? base.savesCount,
+            isSaved: live.isSaved ?? base.isSaved,
+            sharesCount: live.sharesCount ?? base.sharesCount,
+            isReposted: live.isReposted ?? (base as any).isReposted,
+            soundName: live.soundName ?? base.soundName,
+            soundArtist: live.soundArtist ?? base.soundArtist,
+            soundUrl: live.soundUrl ?? base.soundUrl,
+            soundCover: live.soundCover ?? base.soundCover,
+          };
+        });
     };
 
-    // User-created dynamic dispatches
     const allExclusiveIds = new Set([
       ...EXCLUSIVE_FORYOU_POSTS.map((x) => x.id),
       ...EXCLUSIVE_FOLLOWING_POSTS.map((x) => x.id),
       ...EXCLUSIVE_CIRCLES_POSTS.map((x) => x.id),
       ...EXCLUSIVE_BIRDIE_POSTS.map((x) => x.id),
     ]);
-    const customUserPosts = posts.filter((p) => !allExclusiveIds.has(p.id));
+    const customUserPosts = nonDeletedPosts.filter((p) => !allExclusiveIds.has(p.id));
 
     if (activeChannel === 'circles') {
-      // 100% EXCLUSIVE TO CIRCLES: Elena Rodriguez studio study, Sam Archer alpine, Maya Lin, Carlos Mendez, Zoe Brooks
-      const userCf = customUserPosts.filter((p) => p.privacy === 'close_friends' && p.type !== 'text');
-      return [...userCf, ...mergeOverrides(EXCLUSIVE_CIRCLES_POSTS)];
+      // Circles: User's visual posts + 100% exclusive circles creators
+      const userMedia = customUserPosts.filter((p) => p.type !== 'text');
+      return [...userMedia, ...mergeOverrides(EXCLUSIVE_CIRCLES_POSTS)];
     }
 
     if (activeChannel === 'following') {
-      // 100% EXCLUSIVE TO FOLLOWING: Sara Lin Kyoto pavilion, Oliver Craft joinery, Jessica Vance 35mm, Liam ceramics, Hannah botanics
-      const userFollowing = customUserPosts.filter(
-        (p) => p.privacy === 'followers' && p.type !== 'text'
-      );
-      return [...userFollowing, ...mergeOverrides(EXCLUSIVE_FOLLOWING_POSTS)];
+      // Following: User's visual posts (visible to followers) + 100% exclusive following creators
+      const userMedia = customUserPosts.filter((p) => p.type !== 'text' && p.privacy !== 'close_friends');
+      return [...userMedia, ...mergeOverrides(EXCLUSIVE_FOLLOWING_POSTS)];
     }
 
     if (activeChannel === 'birdie') {
-      // 100% EXCLUSIVE TO BIRDIE: Marcus Vance manifesto, Julian Thorne field notes, Dr. Aris Thorne reflection, Luciano crypto, David Kahr, Nadia Chen
+      // Birdie: Text dispatches ONLY + exclusive birdie dispatches
       const userText = customUserPosts.filter((p) => p.type === 'text');
       return [...userText, ...mergeOverrides(EXCLUSIVE_BIRDIE_POSTS)];
     }
 
-    // 100% EXCLUSIVE TO FOR YOU: Nicole viral video, Chloe Kim Tokyo neon, Kai Tanaka drifting, Isabella Rossi dance, Leo Sterling surf
-    const userForYou = customUserPosts.filter(
-      (p) => p.privacy === 'public' && p.type !== 'text'
-    );
+    // For You: Public photo/video dispatches + high-energy discovery posts
+    const userForYou = customUserPosts.filter((p) => p.privacy === 'public' && p.type !== 'text');
     return [...userForYou, ...mergeOverrides(EXCLUSIVE_FORYOU_POSTS)];
-  }, [posts, activeChannel]);
+  }, [posts, activeChannel, deletedPostIds]);
 
   // Active slide index tracked via IntersectionObserver / scroll position
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
@@ -1227,20 +1383,109 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   // Follow creator action via the red '+' button
   const handleFollowClick = (e: React.MouseEvent, handle: string) => {
     e.stopPropagation();
+    const clean = handle.replace(/^@/, '');
+    const current = isFollowed(clean);
+    const next = !current;
     setFollowedMap((prev) => ({
       ...prev,
-      [handle]: true,
+      [handle]: next,
+      [clean]: next,
+      [clean.toLowerCase()]: next,
     }));
+    onToggleFollow?.(clean);
   };
 
-  // Add Comment submit
+  // Add Comment or Reply submit
   const handleCommentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCommentsPostId || !newCommentText.trim()) return;
 
-    onAddComment(activeCommentsPostId, newCommentText.trim());
+    if (replyingToComment) {
+      onReplyComment?.(activeCommentsPostId, replyingToComment.id, newCommentText.trim());
+      setReplyingToComment(null);
+    } else {
+      onAddComment(activeCommentsPostId, newCommentText.trim());
+    }
     setNewCommentText('');
   };
+
+  // Add Story submit
+  const handleAddStorySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!storyDraftMediaUrl) return;
+
+    const newStory: StoryItem = {
+      id: `story-${Date.now()}`,
+      authorName: currentUser.name,
+      authorHandle: currentUser.handle,
+      authorAvatar: currentUser.avatar,
+      isVerified: true,
+      mediaUrl: storyDraftMediaUrl,
+      mediaType: storyDraftMediaType,
+      caption: storyDraftCaption,
+      timeAgo: 'Just now',
+      createdAt: Date.now(),
+      privacy: storyDraftPrivacy,
+      likesCount: 0,
+      isLiked: false,
+    };
+
+    const nextStories = [newStory, ...stories];
+    setStories(nextStories);
+    try {
+      localStorage.setItem('privity_stories_v3', JSON.stringify(nextStories));
+    } catch (e) {}
+    setIsAddStoryModalOpen(false);
+    setStoryDraftCaption('');
+    triggerSlideToast('Story shared to your circle! ⭕');
+  };
+
+  // Delete Story
+  const handleDeleteStory = (storyId: string) => {
+    const nextStories = stories.filter((s) => s.id !== storyId);
+    setStories(nextStories);
+    try {
+      localStorage.setItem('privity_stories_v3', JSON.stringify(nextStories));
+    } catch (e) {}
+    triggerSlideToast('Story removed');
+    if (activeStoryViewerIndex !== null) {
+      if (nextStories.length === 0) {
+        setActiveStoryViewerIndex(null);
+      } else if (activeStoryViewerIndex >= nextStories.length) {
+        setActiveStoryViewerIndex(nextStories.length - 1);
+      }
+    }
+  };
+
+  // Story Viewer Timer Effect (6s auto-advancing, pause on hold)
+  useEffect(() => {
+    if (activeStoryViewerIndex === null) {
+      setStoryProgress(0);
+      return;
+    }
+    if (isStoryPaused) return;
+
+    const stepMs = 50;
+    const totalDurationMs = 6000;
+    const increment = (stepMs / totalDurationMs) * 100;
+
+    const timer = setInterval(() => {
+      setStoryProgress((prev) => {
+        if (prev >= 100) {
+          if (activeStoryViewerIndex < stories.length - 1) {
+            setActiveStoryViewerIndex((curr) => (curr !== null ? curr + 1 : null));
+            return 0;
+          } else {
+            setActiveStoryViewerIndex(null);
+            return 0;
+          }
+        }
+        return prev + increment;
+      });
+    }, stepMs);
+
+    return () => clearInterval(timer);
+  }, [activeStoryViewerIndex, isStoryPaused, stories.length]);
 
   // iTunes Free 30-Second Music Preview Search
   const searchItunes = async (query: string) => {
@@ -1439,34 +1684,114 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           onMouseDown={onMouseDownHandler}
           onMouseUp={(e) => onMouseUpHandler(e)}
         >
-          {/* Integrated Stories & Circles Rail at top of Birdie */}
+          {/* Integrated Dedicated Stories & Circles Rail at top of Birdie */}
           <div className="birdie-story-rail">
-            {STORIES_DATA.map((s) => (
-              <div
-                key={s.id}
-                className="birdie-story-unit"
-                onClick={() => {
-                  if (s.isAdd) {
-                    stopAllAudio();
-                    onOpenCreate();
-                  } else if (s.handle) {
-                    stopAllAudio();
-                    onNavigateProfile(s.handle);
-                  }
-                }}
-                title={s.isAdd ? 'Create Dispatch / Story' : `View @${s.handle}`}
-              >
-                <div className={`birdie-story-halo ${s.ringType}`}>
-                  <img src={s.avatar} alt={s.name} className="birdie-story-avatar" />
-                  {s.isAdd && (
-                    <div className="birdie-story-plus-badge">
-                      <span>+</span>
-                    </div>
-                  )}
-                </div>
-                <span className="birdie-story-name">{s.name}</span>
+            {/* 1. User Story Unit */}
+            <div
+              className="birdie-story-unit user-story-unit"
+              onClick={() => {
+                const userStoryIdx = stories.findIndex((s) => s.authorHandle === currentUser.handle);
+                if (userStoryIdx !== -1) {
+                  stopAllAudio();
+                  setActiveStoryViewerIndex(userStoryIdx);
+                } else {
+                  setIsAddStoryModalOpen(true);
+                }
+              }}
+              title={stories.some((s) => s.authorHandle === currentUser.handle) ? 'View your Story' : 'Add Story'}
+            >
+              <div className={`birdie-story-halo ${stories.some((s) => s.authorHandle === currentUser.handle) ? 'cf active-story' : 'add'}`}>
+                <img src={currentUser.avatar} alt={currentUser.name} className="birdie-story-avatar" />
+                <button
+                  type="button"
+                  className="birdie-story-plus-badge"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsAddStoryModalOpen(true);
+                  }}
+                  title="Add Story"
+                >
+                  <span>+</span>
+                </button>
               </div>
-            ))}
+              <span className="birdie-story-name">Your Story</span>
+            </div>
+
+            {/* Other Creator Stories */}
+            {stories
+              .filter((s) => s.authorHandle !== currentUser.handle)
+              .map((story) => (
+                <div
+                  key={story.id}
+                  className="birdie-story-unit"
+                  onClick={() => {
+                    const idx = stories.findIndex((s) => s.id === story.id);
+                    stopAllAudio();
+                    setActiveStoryViewerIndex(idx);
+                  }}
+                  title={`View @${story.authorHandle}'s Story`}
+                >
+                  <div className={`birdie-story-halo ${story.privacy === 'close_friends' ? 'cf' : story.privacy === 'followers' ? 'followers' : 'public'}`}>
+                    <img src={story.authorAvatar} alt={story.authorName} className="birdie-story-avatar" />
+                  </div>
+                  <span className="birdie-story-name">{story.authorName.split(' ')[0]}</span>
+                </div>
+              ))}
+          </div>
+
+          {/* Dedicated Birdie Quick-Composer Bar */}
+          <div className="birdie-quick-composer-card">
+            <div className="birdie-quick-composer-top">
+              <img
+                src={currentUser.avatar}
+                alt={currentUser.name}
+                className="birdie-quick-composer-avatar"
+              />
+              <textarea
+                className="birdie-quick-composer-textarea"
+                placeholder={`What's on your sovereign mind, ${currentUser.name.split(' ')[0]}? Chirp a thought to Birdie...`}
+                value={birdieDraftText}
+                onChange={(e) => setBirdieDraftText(e.target.value)}
+                rows={2}
+                maxLength={280}
+              />
+            </div>
+            <div className="birdie-quick-composer-bottom">
+              <div className="birdie-quick-composer-left">
+                <button
+                  type="button"
+                  className={`birdie-privacy-select-btn ${birdieDraftPrivacy}`}
+                  onClick={() => {
+                    setBirdieDraftPrivacy((prev) =>
+                      prev === 'public' ? 'followers' : prev === 'followers' ? 'close_friends' : 'public'
+                    );
+                  }}
+                  title="Audience Selector"
+                >
+                  {birdieDraftPrivacy === 'close_friends' ? (
+                    <>⭐ Close Friends</>
+                  ) : birdieDraftPrivacy === 'followers' ? (
+                    <>🔒 Followers</>
+                  ) : (
+                    <>🌐 Public</>
+                  )}
+                </button>
+                <span className="birdie-char-counter">{280 - birdieDraftText.length}</span>
+              </div>
+              <button
+                type="button"
+                className="birdie-quick-publish-btn"
+                disabled={!birdieDraftText.trim()}
+                onClick={() => {
+                  if (!birdieDraftText.trim()) return;
+                  onAddBirdiePost?.(birdieDraftText.trim(), birdieDraftPrivacy);
+                  setBirdieDraftText('');
+                  triggerSlideToast('Chirped to Birdie! 🐦');
+                }}
+              >
+                <span>Chirp 🐦</span>
+              </button>
+            </div>
           </div>
 
           {displayPosts.map((post) => {
@@ -1587,16 +1912,17 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   {/* Repost Button */}
                   <button
                     type="button"
-                    className="birdie-action-btn"
-                    onClick={() => onShare(post)}
-                    title="Share Dispatch"
+                    className={`birdie-action-btn ${post.isReposted ? 'reposted' : ''}`}
+                    onClick={() => onRepostPost?.(post.id)}
+                    title={post.isReposted ? 'Undo Repost' : 'Repost to your circle'}
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={post.isReposted ? '#10b981' : 'currentColor'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="17 1 21 5 17 9" />
                       <path d="M3 11V9a4 4 0 0 1 4-4h14" />
                       <polyline points="7 23 3 19 7 15" />
                       <path d="M21 13v2a4 4 0 0 1-4 4H3" />
                     </svg>
+                    <span>{post.sharesCount || 0}</span>
                   </button>
 
                   {/* Bookmark Button */}
@@ -1611,12 +1937,12 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     </svg>
                   </button>
 
-                  {/* More Options Button */}
+                  {/* More Options Button (Three Dots) */}
                   <button
                     type="button"
                     className="birdie-action-btn"
-                    onClick={() => {}}
-                    title="More Options"
+                    onClick={() => setActivePostMenu(post)}
+                    title="Dispatch options"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <circle cx="12" cy="12" r="1.5"/>
@@ -1848,6 +2174,23 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     </span>
                   </button>
 
+                  {/* 5b. Three-dots More Options Button */}
+                  <button
+                    type="button"
+                    className="tiktok-rail-btn more"
+                    onClick={() => setActivePostMenu(post)}
+                    title="Dispatch options"
+                    aria-label="Options"
+                  >
+                    <div className="tiktok-icon-wrap">
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="#ffffff" className="tiktok-rail-icon">
+                        <circle cx="12" cy="12" r="2"/>
+                        <circle cx="12" cy="5" r="2"/>
+                        <circle cx="12" cy="19" r="2"/>
+                      </svg>
+                    </div>
+                  </button>
+
                   {/* 6. Rotating Vinyl Sound Record */}
                   <div
                     className={`tiktok-rail-sound-disc ${isPaused ? 'paused' : 'spinning'}`}
@@ -2028,17 +2371,17 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       {/* 6. SLIDE-UP COMMENTS DRAWER (TIKTOK STYLE)               */}
       {/* ======================================================== */}
       {activeCommentsPostId && activeCommentPost && (
-        <div className="tiktok-comments-drawer-backdrop" onClick={() => setActiveCommentsPostId(null)}>
+        <div className="tiktok-comments-drawer-backdrop" onClick={() => { setActiveCommentsPostId(null); setReplyingToComment(null); }}>
           <div className="tiktok-comments-drawer-sheet" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="tiktok-comments-drawer-header">
               <div className="tiktok-comments-drawer-count">
-                {activeCommentPost.comments.length} comments
+                {activeCommentPost.commentsCount || activeCommentPost.comments.length} comments
               </div>
               <button
                 type="button"
                 className="tiktok-comments-close-btn"
-                onClick={() => setActiveCommentsPostId(null)}
+                onClick={() => { setActiveCommentsPostId(null); setReplyingToComment(null); }}
               >
                 ✕
               </button>
@@ -2051,40 +2394,144 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   Be the first to comment on this dispatch! ✨
                 </div>
               ) : (
-                activeCommentPost.comments.map((comment) => (
-                  <div key={comment.id} className="tiktok-comment-row">
-                    <img
-                      src={comment.authorAvatar}
-                      alt={comment.authorName}
-                      className="tiktok-comment-avatar"
-                      onClick={() => onNavigateProfile(comment.authorHandle)}
-                    />
-                    <div className="tiktok-comment-content">
-                      <div className="tiktok-comment-author">
-                        <span>{comment.authorName}</span>
-                        {comment.isVerified && <span style={{ color: '#38bdf8' }}>✓</span>}
+                activeCommentPost.comments.map((comment) => {
+                  const isCommentLiked = !!comment.isLiked;
+                  const isMyComment = comment.authorHandle === currentUser.handle || activeCommentPost.authorHandle === currentUser.handle;
+
+                  return (
+                    <div key={comment.id} className="tiktok-comment-thread">
+                      <div className="tiktok-comment-row">
+                        <img
+                          src={comment.authorAvatar}
+                          alt={comment.authorName}
+                          className="tiktok-comment-avatar"
+                          onClick={() => onNavigateProfile(comment.authorHandle)}
+                        />
+                        <div className="tiktok-comment-content">
+                          <div className="tiktok-comment-author">
+                            <span>{comment.authorName}</span>
+                            {comment.isVerified && <span style={{ color: '#38bdf8' }}>✓</span>}
+                          </div>
+                          <p className="tiktok-comment-text">{comment.text}</p>
+                          <div className="tiktok-comment-sub">
+                            <span>{comment.timeAgo}</span>
+                            <button
+                              type="button"
+                              className="tiktok-reply-btn"
+                              onClick={() => {
+                                setReplyingToComment({
+                                  id: comment.id,
+                                  authorHandle: comment.authorHandle,
+                                  authorName: comment.authorName,
+                                });
+                                commentInputRef.current?.focus();
+                              }}
+                            >
+                              Reply
+                            </button>
+                            {isMyComment && (
+                              <button
+                                type="button"
+                                className="tiktok-delete-comment-btn"
+                                onClick={() => onDeleteComment?.(activeCommentPost.id, comment.id)}
+                                title="Delete comment"
+                              >
+                                🗑️
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className={`tiktok-comment-like-btn ${isCommentLiked ? 'liked' : ''}`}
+                          onClick={() => onLikeComment?.(activeCommentPost.id, comment.id)}
+                          title={isCommentLiked ? 'Unlike comment' : 'Like comment'}
+                        >
+                          <span style={{ color: isCommentLiked ? '#fe2c55' : 'inherit' }}>
+                            {isCommentLiked ? '♥' : '♡'}
+                          </span>
+                          <span>{comment.likesCount || 0}</span>
+                        </button>
                       </div>
-                      <p className="tiktok-comment-text">{comment.text}</p>
-                      <div className="tiktok-comment-sub">
-                        <span>{comment.timeAgo}</span>
-                        <button type="button" className="tiktok-reply-btn">Reply</button>
-                      </div>
+
+                      {/* Nested Replies */}
+                      {comment.replies && comment.replies.length > 0 && (
+                        <div className="tiktok-comment-replies-list">
+                          {comment.replies.map((reply) => {
+                            const isReplyLiked = !!reply.isLiked;
+                            const isMyReply = reply.authorHandle === currentUser.handle || activeCommentPost.authorHandle === currentUser.handle;
+
+                            return (
+                              <div key={reply.id} className="tiktok-comment-row reply-row">
+                                <img
+                                  src={reply.authorAvatar}
+                                  alt={reply.authorName}
+                                  className="tiktok-comment-avatar reply-avatar"
+                                  onClick={() => onNavigateProfile(reply.authorHandle)}
+                                />
+                                <div className="tiktok-comment-content">
+                                  <div className="tiktok-comment-author">
+                                    <span>{reply.authorName}</span>
+                                    {reply.isVerified && <span style={{ color: '#38bdf8' }}>✓</span>}
+                                  </div>
+                                  <p className="tiktok-comment-text">{reply.text}</p>
+                                  <div className="tiktok-comment-sub">
+                                    <span>{reply.timeAgo}</span>
+                                    {isMyReply && (
+                                      <button
+                                        type="button"
+                                        className="tiktok-delete-comment-btn"
+                                        onClick={() => onDeleteComment?.(activeCommentPost.id, comment.id, reply.id)}
+                                        title="Delete reply"
+                                      >
+                                        🗑️
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className={`tiktok-comment-like-btn ${isReplyLiked ? 'liked' : ''}`}
+                                  onClick={() => onLikeComment?.(activeCommentPost.id, comment.id, reply.id)}
+                                  title={isReplyLiked ? 'Unlike reply' : 'Like reply'}
+                                >
+                                  <span style={{ color: isReplyLiked ? '#fe2c55' : 'inherit' }}>
+                                    {isReplyLiked ? '♥' : '♡'}
+                                  </span>
+                                  <span>{reply.likesCount || 0}</span>
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <button type="button" className="tiktok-comment-like-btn">
-                      <span>♥</span>
-                      <span>{comment.likesCount || 0}</span>
-                    </button>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
+
+            {/* Replying Banner */}
+            {replyingToComment && (
+              <div className="tiktok-replying-banner">
+                <span>Replying to <strong>@{replyingToComment.authorHandle}</strong></span>
+                <button
+                  type="button"
+                  className="tiktok-cancel-reply-btn"
+                  onClick={() => setReplyingToComment(null)}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
 
             {/* Bottom Add Comment Bar */}
             <form onSubmit={handleCommentSubmit} className="tiktok-comments-input-bar">
               <img src={currentUser.avatar} alt="You" className="tiktok-input-avatar" />
               <input
+                ref={commentInputRef}
                 type="text"
-                placeholder="Add a comment..."
+                placeholder={replyingToComment ? `Reply to @${replyingToComment.authorHandle}...` : "Add a comment..."}
                 value={newCommentText}
                 onChange={(e) => setNewCommentText(e.target.value)}
                 className="tiktok-comment-input-field"
@@ -2100,6 +2547,8 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           </div>
         </div>
       )}
+
+      
 
       {/* ======================================================== */}
       {/* 7. SOUND HUB & APPLE MUSIC FREE PREVIEW DRAWER           */}
@@ -2305,6 +2754,446 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           </div>
         </div>
       )}
+
+      {/* ======================================================== */}
+      {/* 9. THREE-DOTS POST OPTIONS ACTION SHEET MODAL            */}
+      {/* ======================================================== */}
+      {activePostMenu && (
+        <div className="privity-action-sheet-backdrop" onClick={() => setActivePostMenu(null)}>
+          <div className="privity-action-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="privity-action-sheet-handle" />
+            <div className="privity-action-sheet-header">
+              <span className="privity-sheet-title">Dispatch Options</span>
+              <span className="privity-sheet-subtitle">@{activePostMenu.authorHandle}</span>
+            </div>
+            <div className="privity-action-sheet-options">
+              {/* If user's own post, show Delete Dispatch */}
+              {(activePostMenu.authorHandle === currentUser.handle || activePostMenu.authorId === 'usr-luciano') && (
+                <button
+                  type="button"
+                  className="privity-sheet-btn danger"
+                  onClick={() => {
+                    const id = activePostMenu.id;
+                    setActivePostMenu(null);
+                    onDeletePost?.(id);
+                    triggerSlideToast('Dispatch deleted permanently');
+                  }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                  <span>Delete Dispatch Permanently</span>
+                </button>
+              )}
+
+              {/* Repost Dispatch */}
+              <button
+                type="button"
+                className="privity-sheet-btn"
+                onClick={() => {
+                  const id = activePostMenu.id;
+                  setActivePostMenu(null);
+                  onRepostPost?.(id);
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="17 1 21 5 17 9" />
+                  <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                  <polyline points="7 23 3 19 7 15" />
+                  <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+                </svg>
+                <span>{activePostMenu.isReposted ? 'Undo Repost' : 'Repost to Circle'}</span>
+              </button>
+
+              {/* Copy Dispatch Link */}
+              <button
+                type="button"
+                className="privity-sheet-btn"
+                onClick={() => {
+                  const url = `https://privity.app/p/${activePostMenu.id}`;
+                  navigator.clipboard?.writeText(url);
+                  setActivePostMenu(null);
+                  triggerSlideToast('Dispatch link copied to clipboard! 📋');
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                <span>Copy Dispatch Link</span>
+              </button>
+
+              {/* Save / Bookmark Dispatch */}
+              <button
+                type="button"
+                className="privity-sheet-btn"
+                onClick={() => {
+                  const id = activePostMenu.id;
+                  setActivePostMenu(null);
+                  onSave(id);
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                </svg>
+                <span>{activePostMenu.isSaved ? 'Remove Bookmark' : 'Bookmark Dispatch'}</span>
+              </button>
+
+              {/* Mute Creator */}
+              <button
+                type="button"
+                className="privity-sheet-btn"
+                onClick={() => {
+                  const handle = activePostMenu.authorHandle;
+                  setActivePostMenu(null);
+                  triggerSlideToast(`Muted dispatches from @${handle} 🔕`);
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                  <line x1="23" y1="9" x2="17" y2="15"/>
+                  <line x1="17" y1="9" x2="23" y2="15"/>
+                </svg>
+                <span>Mute @{activePostMenu.authorHandle}</span>
+              </button>
+
+              {/* Report Dispatch */}
+              <button
+                type="button"
+                className="privity-sheet-btn"
+                onClick={() => {
+                  setActivePostMenu(null);
+                  triggerSlideToast('Report submitted for cryptographic review 🛡️');
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+                <span>Report Dispatch</span>
+              </button>
+
+              <button
+                type="button"
+                className="privity-sheet-btn cancel"
+                onClick={() => setActivePostMenu(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 10. DEDICATED STORY CREATOR MODAL (STRICTLY FOR STORIES)  */}
+      {/* ======================================================== */}
+      {isAddStoryModalOpen && (
+        <div className="story-creator-backdrop" onClick={() => setIsAddStoryModalOpen(false)}>
+          <div className="story-creator-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="story-creator-header">
+              <div className="story-creator-title-group">
+                <span className="story-creator-title">Share to Story ⭕</span>
+                <span className="story-creator-sub">Stories stay strictly in circles and disappear after 24h</span>
+              </div>
+              <button
+                type="button"
+                className="story-creator-close"
+                onClick={() => setIsAddStoryModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Story 9:16 Preview Card */}
+            <div className="story-preview-container">
+              {storyDraftMediaType === 'video' ? (
+                <video src={storyDraftMediaUrl} autoPlay loop muted playsInline className="story-preview-media" />
+              ) : (
+                <img src={storyDraftMediaUrl} alt="Story Preview" className="story-preview-media" />
+              )}
+              {storyDraftCaption && (
+                <div className="story-preview-caption-overlay">
+                  <span>{storyDraftCaption}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Media Presets */}
+            <div className="story-presets-section">
+              <span className="story-presets-label">Choose Atmosphere Preset:</span>
+              <div className="story-presets-grid">
+                {[
+                  { name: '🌅 Miami Golden', url: './nicole-spicy.jpg', type: 'image' },
+                  { name: '🏙️ Tokyo Neon', url: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200', type: 'image' },
+                  { name: '📐 Studio Blueprint', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200', type: 'image' },
+                  { name: '🎞️ 35mm Silver', url: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200', type: 'image' },
+                  { name: '🏎️ Hakone Night', url: 'https://assets.mixkit.co/videos/preview/mixkit-car-driving-through-a-city-at-night-42861-large.mp4', type: 'video' },
+                ].map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className={`story-preset-chip ${storyDraftMediaUrl === item.url ? 'active' : ''}`}
+                    onClick={() => {
+                      setStoryDraftMediaUrl(item.url);
+                      setStoryDraftMediaType(item.type as any);
+                    }}
+                  >
+                    {item.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom file upload */}
+            <div className="story-file-upload-wrap">
+              <label className="story-file-label">
+                <span>📁 Upload Custom Media</span>
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const isVid = file.type.startsWith('video');
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      if (reader.result) {
+                        setStoryDraftMediaUrl(reader.result as string);
+                        setStoryDraftMediaType(isVid ? 'video' : 'image');
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </label>
+            </div>
+
+            {/* Caption Overlay Input */}
+            <input
+              type="text"
+              placeholder="Add text or thought overlay..."
+              value={storyDraftCaption}
+              onChange={(e) => setStoryDraftCaption(e.target.value)}
+              className="story-caption-input"
+            />
+
+            {/* Audience Ring Selector */}
+            <div className="story-privacy-selector">
+              <button
+                type="button"
+                className={`story-privacy-option ${storyDraftPrivacy === 'close_friends' ? 'active cf' : ''}`}
+                onClick={() => setStoryDraftPrivacy('close_friends')}
+              >
+                ⭐ Close Friends (Green Halo)
+              </button>
+              <button
+                type="button"
+                className={`story-privacy-option ${storyDraftPrivacy === 'followers' ? 'active followers' : ''}`}
+                onClick={() => setStoryDraftPrivacy('followers')}
+              >
+                🔒 Followers (Purple Halo)
+              </button>
+              <button
+                type="button"
+                className={`story-privacy-option ${storyDraftPrivacy === 'public' ? 'active public' : ''}`}
+                onClick={() => setStoryDraftPrivacy('public')}
+              >
+                🌐 Everyone (Cyan Halo)
+              </button>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="story-creator-actions">
+              <button
+                type="button"
+                className="story-creator-cancel-btn"
+                onClick={() => setIsAddStoryModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="story-creator-submit-btn"
+                onClick={handleAddStorySubmit}
+              >
+                Share to Story 🚀
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 11. FULLSCREEN STORY VIEWER (INSTAGRAM / TIKTOK STYLE)   */}
+      {/* ======================================================== */}
+      {activeStoryViewerIndex !== null && stories[activeStoryViewerIndex] && (
+        <div
+          className="story-viewer-backdrop"
+          onMouseDown={() => setIsStoryPaused(true)}
+          onMouseUp={() => setIsStoryPaused(false)}
+          onTouchStart={() => setIsStoryPaused(true)}
+          onTouchEnd={() => setIsStoryPaused(false)}
+        >
+          {(() => {
+            const curStory = stories[activeStoryViewerIndex];
+            const isMyStory = curStory.authorHandle === currentUser.handle;
+
+            return (
+              <div className="story-viewer-modal" onClick={(e) => e.stopPropagation()}>
+                {/* Segmented Progress Bars */}
+                <div className="story-viewer-progress-row">
+                  {stories.map((st, sIdx) => {
+                    const pct = sIdx < activeStoryViewerIndex ? 100 : sIdx === activeStoryViewerIndex ? storyProgress : 0;
+                    return (
+                      <div key={st.id} className="story-progress-track">
+                        <div className="story-progress-fill" style={{ width: `${pct}%` }} />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Top Header */}
+                <div className="story-viewer-header">
+                  <div
+                    className="story-viewer-author"
+                    onClick={() => {
+                      setActiveStoryViewerIndex(null);
+                      onNavigateProfile(curStory.authorHandle);
+                    }}
+                  >
+                    <img src={curStory.authorAvatar} alt={curStory.authorName} className="story-viewer-avatar" />
+                    <div className="story-viewer-meta">
+                      <span className="story-viewer-name">{curStory.authorName}</span>
+                      <span className="story-viewer-sub">@{curStory.authorHandle} · {curStory.timeAgo}</span>
+                    </div>
+                  </div>
+
+                  <div className="story-viewer-right-actions">
+                    <span className={`story-viewer-badge ${curStory.privacy}`}>
+                      {curStory.privacy === 'close_friends' ? '⭐ Close Friends' : curStory.privacy === 'followers' ? '🔒 Followers' : '🌐 Public'}
+                    </span>
+                    {isMyStory && (
+                      <button
+                        type="button"
+                        className="story-delete-btn"
+                        onClick={() => handleDeleteStory(curStory.id)}
+                        title="Delete Story"
+                      >
+                        🗑️
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="story-viewer-close"
+                      onClick={() => setActiveStoryViewerIndex(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Media Container */}
+                <div className="story-viewer-media-wrap">
+                  {curStory.mediaType === 'video' ? (
+                    <video src={curStory.mediaUrl} autoPlay loop playsInline className="story-viewer-media" />
+                  ) : (
+                    <img src={curStory.mediaUrl} alt={curStory.caption || 'Story'} className="story-viewer-media" />
+                  )}
+
+                  {/* Tap navigation zones */}
+                  <div
+                    className="story-nav-zone left"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (activeStoryViewerIndex > 0) {
+                        setActiveStoryViewerIndex(activeStoryViewerIndex - 1);
+                        setStoryProgress(0);
+                      }
+                    }}
+                  />
+                  <div
+                    className="story-nav-zone right"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (activeStoryViewerIndex < stories.length - 1) {
+                        setActiveStoryViewerIndex(activeStoryViewerIndex + 1);
+                        setStoryProgress(0);
+                      } else {
+                        setActiveStoryViewerIndex(null);
+                      }
+                    }}
+                  />
+
+                  {/* Caption Overlay */}
+                  {curStory.caption && (
+                    <div className="story-viewer-caption-box">
+                      <p>{curStory.caption}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bottom Reply & Quick Reaction Bar */}
+                <div className="story-viewer-bottom-bar" onClick={(e) => e.stopPropagation()}>
+                  <div className="story-quick-reactions">
+                    {['❤️', '🔥', '👏', '😂'].map((emoji, eIdx) => (
+                      <button
+                        key={eIdx}
+                        type="button"
+                        className="story-reaction-emoji-btn"
+                        onClick={() => {
+                          triggerSlideToast(`Sent ${emoji} to @${curStory.authorHandle} 📬`);
+                        }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="story-reply-input-wrap">
+                    <input
+                      type="text"
+                      placeholder={`Reply to @${curStory.authorHandle}...`}
+                      value={storyReplyText}
+                      onChange={(e) => setStoryReplyText(e.target.value)}
+                      className="story-reply-input"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && storyReplyText.trim()) {
+                          triggerSlideToast(`Reply sent to @${curStory.authorHandle} 💬`);
+                          setStoryReplyText('');
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={!storyReplyText.trim()}
+                      className="story-reply-send-btn"
+                      onClick={() => {
+                        if (!storyReplyText.trim()) return;
+                        triggerSlideToast(`Reply sent to @${curStory.authorHandle} 💬`);
+                        setStoryReplyText('');
+                      }}
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 12. VISIONOS GLASS TOAST NOTIFICATION                    */}
+      {/* ======================================================== */}
+      {slideToastMsg && (
+        <div className="slide-vision-toast">
+          <span className="toast-dot" />
+          <span>{slideToastMsg}</span>
+        </div>
+      )}
+
     </div>
   );
 };
