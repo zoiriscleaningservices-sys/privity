@@ -233,6 +233,9 @@ export interface TikTokSlideFeedProps {
   onSelectFilter?: (filter: 'foryou' | 'following' | 'circles' | 'birdie' | 'live') => void;
   onSwitchToCardView?: () => void;
   onUpdatePostSound?: (postId: string, sound: { name: string; artist: string; previewUrl: string; coverUrl?: string }) => void;
+  onStoryReplyToDM?: (creatorHandle: string, messageText: string) => void;
+  onAddNewPost?: (newPost: Partial<PostItem>) => void;
+  onRefreshFeeds?: () => void;
 }
 
 export interface StoryRailItem {
@@ -861,7 +864,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   onToggleFollow,
   onShare,
   onOpenLive,
-  onOpenCreate,
+  onOpenCreate: _onOpenCreate,
   onNavigateProfile,
   onNavigateTab,
   currentNavTab = 'feed',
@@ -869,6 +872,9 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   onSelectFilter,
   onSwitchToCardView: _onSwitchToCardView,
   onUpdatePostSound,
+  onStoryReplyToDM,
+  onAddNewPost,
+  onRefreshFeeds,
 }) => {
   // Channel Navigation: ['live', 'birdie', 'circles', 'following', 'foryou']
   const CHANNELS: SlideFeedChannel[] = ['live', 'birdie', 'circles', 'following', 'foryou'];
@@ -952,6 +958,23 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   };
 
   // Dedicated Stories System (Strictly separate from posts feeds)
+  const birdieScrollRef = useRef<HTMLDivElement>(null);
+
+  // Dedicated Story & Post Creator State
+  const [creatorMode, setCreatorMode] = useState<'story' | 'post'>('story');
+  const [postDraftCaption, setPostDraftCaption] = useState('');
+  const [postDraftPrivacy, setPostDraftPrivacy] = useState<'public' | 'followers' | 'close_friends'>('public');
+
+  // Pull-to-Refresh State
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const isPullingRef = useRef(false);
+
+  // Story Viewer Slide-Down Gesture State
+  const [storyDragY, setStoryDragY] = useState(0);
+  const [isDraggingStory, setIsDraggingStory] = useState(false);
+  const storyTouchStartPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
   const [stories, setStories] = useState<StoryItem[]>(() => {
     const saved = localStorage.getItem('privity_stories_v3');
     if (saved) {
@@ -1106,6 +1129,12 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   const onTouchStartHandler = (e: React.TouchEvent) => {
     const t = e.touches[0];
     touchStartPos.current = { x: t.clientX, y: t.clientY, time: Date.now() };
+    handlePullStart(t.clientY, t.clientX);
+  };
+
+  const onTouchMoveHandler = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    handlePullMove(t.clientY, t.clientX);
   };
 
   const onTouchEndHandler = (e: React.TouchEvent, authorHandle?: string) => {
@@ -1256,6 +1285,105 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       stopAllAudio();
     };
   }, []);
+
+  // Story viewer slide-down to dismiss gesture
+  const handleStoryTouchStart = (e: React.TouchEvent) => {
+    setIsStoryPaused(true);
+    const t = e.touches[0];
+    storyTouchStartPos.current = { x: t.clientX, y: t.clientY };
+    setIsDraggingStory(true);
+  };
+
+  const handleStoryTouchMove = (e: React.TouchEvent) => {
+    if (!isDraggingStory) return;
+    const t = e.touches[0];
+    const dy = t.clientY - storyTouchStartPos.current.y;
+    const dx = t.clientX - storyTouchStartPos.current.x;
+    if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+      setStoryDragY(dy);
+    }
+  };
+
+  const handleStoryTouchEnd = () => {
+    setIsStoryPaused(false);
+    setIsDraggingStory(false);
+    if (storyDragY > 70) {
+      setActiveStoryViewerIndex(null);
+      setStoryDragY(0);
+    } else {
+      setStoryDragY(0);
+    }
+  };
+
+  const handleStoryMouseDown = (e: React.MouseEvent) => {
+    setIsStoryPaused(true);
+    storyTouchStartPos.current = { x: e.clientX, y: e.clientY };
+    setIsDraggingStory(true);
+  };
+
+  const handleStoryMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingStory) return;
+    const dy = e.clientY - storyTouchStartPos.current.y;
+    const dx = e.clientX - storyTouchStartPos.current.x;
+    if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+      setStoryDragY(dy);
+    }
+  };
+
+  const handleStoryMouseUp = () => {
+    setIsStoryPaused(false);
+    setIsDraggingStory(false);
+    if (storyDragY > 70) {
+      setActiveStoryViewerIndex(null);
+      setStoryDragY(0);
+    } else {
+      setStoryDragY(0);
+    }
+  };
+
+  // Pull to refresh handlers
+  const handlePullStart = (clientY: number, clientX: number) => {
+    if (activeSlideIndex === 0 || (activeChannel === 'birdie' && (!birdieScrollRef.current || birdieScrollRef.current.scrollTop <= 0))) {
+      touchStartPos.current = { x: clientX, y: clientY, time: Date.now() };
+      isPullingRef.current = true;
+    }
+  };
+
+  const handlePullMove = (clientY: number, clientX: number) => {
+    if (!isPullingRef.current || isRefreshing) return;
+    const dy = clientY - touchStartPos.current.y;
+    const dx = clientX - touchStartPos.current.x;
+    if (dy > 0 && Math.abs(dy) > Math.abs(dx) * 1.15) {
+      setPullDistance(Math.min(90, dy * 0.45));
+    }
+  };
+
+  const handlePullEnd = () => {
+    isPullingRef.current = false;
+    if (pullDistance > 55 && !isRefreshing) {
+      setIsRefreshing(true);
+      setPullDistance(50);
+
+      try {
+        // Calling onRefreshFeeds notifies parent App to reload sovereign posts
+        const savedStories = localStorage.getItem('privity_stories_v3');
+        if (savedStories) {
+          const parsed = JSON.parse(savedStories);
+          if (Array.isArray(parsed) && parsed.length > 0) setStories(parsed);
+        }
+      } catch (e) {}
+
+      if (onRefreshFeeds) onRefreshFeeds();
+      triggerSlideToast('Feed refreshed with latest sovereign updates 🔄');
+
+      setTimeout(() => {
+        setIsRefreshing(false);
+        setPullDistance(0);
+      }, 650);
+    } else {
+      setPullDistance(0);
+    }
+  };
 
   // Keyboard Up / Down arrows for desktop snap navigation
   useEffect(() => {
@@ -1409,9 +1537,46 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     setNewCommentText('');
   };
 
+  // Publish Post submit
+  const handlePublishPostSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!postDraftCaption.trim() && !storyDraftMediaUrl) return;
+
+    const newPostItem: PostItem = {
+      id: 'post-' + Date.now(),
+      authorId: 'usr-' + currentUser.handle.replace(/^@/, ''),
+      authorName: currentUser.name,
+      authorHandle: currentUser.handle,
+      authorAvatar: currentUser.avatar,
+      isVerified: true,
+      type: storyDraftMediaType === 'video' ? 'video' : 'image',
+      contentUrl: storyDraftMediaType !== 'video' ? storyDraftMediaUrl : undefined,
+      videoUrl: storyDraftMediaType === 'video' ? storyDraftMediaUrl : undefined,
+      thumbnailUrl: storyDraftMediaUrl,
+      caption: postDraftCaption.trim() || 'Visual sovereign dispatch 🌟',
+      tags: ['#privity', '#creator'],
+      privacy: postDraftPrivacy,
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      savesCount: 0,
+      timeAgo: 'Just now',
+      comments: [],
+    };
+
+    if (onAddNewPost) {
+      onAddNewPost(newPostItem);
+    }
+
+    setIsAddStoryModalOpen(false);
+    setPostDraftCaption('');
+    triggerSlideToast('Post published live across your feed! 🌟');
+    setActiveSlideIndex(0);
+  };
+
   // Add Story submit
-  const handleAddStorySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddStorySubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!storyDraftMediaUrl) return;
 
     const newStory: StoryItem = {
@@ -1679,8 +1844,13 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         /* BIRDIE MICROBLOGGING FEED (MATCHING SCREENSHOT 2) */
         <div
           className="birdie-feed-scroll-container"
+          ref={birdieScrollRef}
           onTouchStart={onTouchStartHandler}
-          onTouchEnd={(e) => onTouchEndHandler(e)}
+          onTouchMove={onTouchMoveHandler}
+          onTouchEnd={(e) => {
+            handlePullEnd();
+            onTouchEndHandler(e);
+          }}
           onMouseDown={onMouseDownHandler}
           onMouseUp={(e) => onMouseUpHandler(e)}
         >
@@ -2316,7 +2486,8 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           className="privity-nav-tab-create-btn"
           onClick={() => {
             stopAllAudio();
-            onOpenCreate();
+            setCreatorMode('post');
+            setIsAddStoryModalOpen(true);
           }}
           title="Open Camera & Studio"
           aria-label="Create Dispatch"
@@ -2886,69 +3057,89 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       )}
 
       {/* ======================================================== */}
-      {/* 10. DEDICATED STORY CREATOR MODAL (STRICTLY FOR STORIES)  */}
+      {/* 10. FULLSCREEN CREATOR STUDIO (STORIES & POSTS)          */}
       {/* ======================================================== */}
       {isAddStoryModalOpen && (
-        <div className="story-creator-backdrop" onClick={() => setIsAddStoryModalOpen(false)}>
-          <div className="story-creator-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="story-creator-header">
-              <div className="story-creator-title-group">
-                <span className="story-creator-title">Share to Story ⭕</span>
-                <span className="story-creator-sub">Stories stay strictly in circles and disappear after 24h</span>
-              </div>
+        <div className="fullscreen-creator-modal" onClick={(e) => e.stopPropagation()}>
+          {/* Top Bar with Mode Segment Switcher */}
+          <div className="creator-top-bar">
+            <button
+              type="button"
+              className="creator-close-circle"
+              onClick={() => setIsAddStoryModalOpen(false)}
+              title="Close Studio"
+            >
+              ✕
+            </button>
+
+            <div className="creator-mode-segmented">
               <button
                 type="button"
-                className="story-creator-close"
-                onClick={() => setIsAddStoryModalOpen(false)}
+                className={`creator-mode-tab ${creatorMode === 'story' ? 'active' : ''}`}
+                onClick={() => setCreatorMode('story')}
               >
-                ✕
+                <span>⭕ Story</span>
+              </button>
+              <button
+                type="button"
+                className={`creator-mode-tab ${creatorMode === 'post' ? 'active' : ''}`}
+                onClick={() => setCreatorMode('post')}
+              >
+                <span>📱 Feed Post</span>
               </button>
             </div>
 
-            {/* Story 9:16 Preview Card */}
-            <div className="story-preview-container">
+            <div style={{ width: '38px' }} />
+          </div>
+
+          {/* Main Stage Preview */}
+          <div className="creator-main-canvas-area">
+            <div className="creator-canvas-card">
               {storyDraftMediaType === 'video' ? (
-                <video src={storyDraftMediaUrl} autoPlay loop muted playsInline className="story-preview-media" />
+                <video src={storyDraftMediaUrl} autoPlay loop muted playsInline className="creator-canvas-media" />
               ) : (
-                <img src={storyDraftMediaUrl} alt="Story Preview" className="story-preview-media" />
+                <img src={storyDraftMediaUrl} alt="Draft Preview" className="creator-canvas-media" />
               )}
-              {storyDraftCaption && (
-                <div className="story-preview-caption-overlay">
-                  <span>{storyDraftCaption}</span>
+
+              {/* Thought / Text Overlay */}
+              {(creatorMode === 'story' ? storyDraftCaption : postDraftCaption) && (
+                <div className="creator-thought-overlay">
+                  <span>{creatorMode === 'story' ? storyDraftCaption : postDraftCaption}</span>
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Quick Media Presets */}
-            <div className="story-presets-section">
-              <span className="story-presets-label">Choose Atmosphere Preset:</span>
-              <div className="story-presets-grid">
-                {[
-                  { name: '🌅 Miami Golden', url: './nicole-spicy.jpg', type: 'image' },
-                  { name: '🏙️ Tokyo Neon', url: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200', type: 'image' },
-                  { name: '📐 Studio Blueprint', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200', type: 'image' },
-                  { name: '🎞️ 35mm Silver', url: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200', type: 'image' },
-                  { name: '🏎️ Hakone Night', url: 'https://assets.mixkit.co/videos/preview/mixkit-car-driving-through-a-city-at-night-42861-large.mp4', type: 'video' },
-                ].map((item, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    className={`story-preset-chip ${storyDraftMediaUrl === item.url ? 'active' : ''}`}
-                    onClick={() => {
-                      setStoryDraftMediaUrl(item.url);
-                      setStoryDraftMediaType(item.type as any);
-                    }}
-                  >
-                    {item.name}
-                  </button>
-                ))}
-              </div>
+          {/* Controls Bottom Drawer */}
+          <div className="creator-controls-drawer">
+            {/* Presets Horizontal Row */}
+            <div className="creator-atmosphere-row">
+              {[
+                { name: '🌅 Miami Golden', url: './nicole-spicy.jpg', type: 'image' },
+                { name: '🏙️ Tokyo Neon', url: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200', type: 'image' },
+                { name: '📐 Studio Blueprint', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200', type: 'image' },
+                { name: '🎞️ 35mm Silver', url: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200', type: 'image' },
+                { name: '🏎️ Night Racing', url: 'https://assets.mixkit.co/videos/preview/mixkit-car-driving-through-a-city-at-night-42861-large.mp4', type: 'video' },
+                { name: '🌴 Sunset Horizon', url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1200', type: 'image' },
+              ].map((preset, pIdx) => (
+                <button
+                  key={pIdx}
+                  type="button"
+                  className={`creator-preset-pill ${storyDraftMediaUrl === preset.url ? 'active' : ''}`}
+                  onClick={() => {
+                    setStoryDraftMediaUrl(preset.url);
+                    setStoryDraftMediaType(preset.type as any);
+                  }}
+                >
+                  <span>{preset.name}</span>
+                </button>
+              ))}
             </div>
 
-            {/* Custom file upload */}
-            <div className="story-file-upload-wrap">
-              <label className="story-file-label">
-                <span>📁 Upload Custom Media</span>
+            {/* Custom File Upload & Caption Input */}
+            <div className="creator-input-bar">
+              <label className="creator-upload-btn" title="Upload from Device">
+                <span>📁 Upload</span>
                 <input
                   type="file"
                   accept="image/*,video/*"
@@ -2968,69 +3159,74 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   }}
                 />
               </label>
-            </div>
 
-            {/* Caption Overlay Input */}
-            <input
-              type="text"
-              placeholder="Add text or thought overlay..."
-              value={storyDraftCaption}
-              onChange={(e) => setStoryDraftCaption(e.target.value)}
-              className="story-caption-input"
-            />
+              <input
+                type="text"
+                placeholder={creatorMode === 'story' ? 'Add overlay text to story...' : 'Write post caption / description...'}
+                value={creatorMode === 'story' ? storyDraftCaption : postDraftCaption}
+                onChange={(e) => {
+                  if (creatorMode === 'story') setStoryDraftCaption(e.target.value);
+                  else setPostDraftCaption(e.target.value);
+                }}
+              />
+            </div>
 
             {/* Audience Ring Selector */}
-            <div className="story-privacy-selector">
+            <div className="creator-privacy-strip">
               <button
                 type="button"
-                className={`story-privacy-option ${storyDraftPrivacy === 'close_friends' ? 'active cf' : ''}`}
-                onClick={() => setStoryDraftPrivacy('close_friends')}
+                className={`creator-privacy-btn ${(creatorMode === 'story' ? storyDraftPrivacy : postDraftPrivacy) === 'close_friends' ? 'active cf' : ''}`}
+                onClick={() => {
+                  if (creatorMode === 'story') setStoryDraftPrivacy('close_friends');
+                  else setPostDraftPrivacy('close_friends');
+                }}
               >
-                ⭐ Close Friends (Green Halo)
+                ⭐ Close Friends
               </button>
               <button
                 type="button"
-                className={`story-privacy-option ${storyDraftPrivacy === 'followers' ? 'active followers' : ''}`}
-                onClick={() => setStoryDraftPrivacy('followers')}
+                className={`creator-privacy-btn ${(creatorMode === 'story' ? storyDraftPrivacy : postDraftPrivacy) === 'followers' ? 'active followers' : ''}`}
+                onClick={() => {
+                  if (creatorMode === 'story') setStoryDraftPrivacy('followers');
+                  else setPostDraftPrivacy('followers');
+                }}
               >
-                🔒 Followers (Purple Halo)
+                🔒 Followers
               </button>
               <button
                 type="button"
-                className={`story-privacy-option ${storyDraftPrivacy === 'public' ? 'active public' : ''}`}
-                onClick={() => setStoryDraftPrivacy('public')}
+                className={`creator-privacy-btn ${(creatorMode === 'story' ? storyDraftPrivacy : postDraftPrivacy) === 'public' ? 'active public' : ''}`}
+                onClick={() => {
+                  if (creatorMode === 'story') setStoryDraftPrivacy('public');
+                  else setPostDraftPrivacy('public');
+                }}
               >
-                🌐 Everyone (Cyan Halo)
+                🌐 Everyone
               </button>
             </div>
 
-            {/* Action Buttons */}
-            <div className="story-creator-actions">
-              <button
-                type="button"
-                className="story-creator-cancel-btn"
-                onClick={() => setIsAddStoryModalOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="story-creator-submit-btn"
-                onClick={handleAddStorySubmit}
-              >
-                Share to Story 🚀
-              </button>
-            </div>
+            {/* Primary Action Button */}
+            <button
+              type="button"
+              className="creator-primary-publish-btn"
+              onClick={creatorMode === 'story' ? handleAddStorySubmit : handlePublishPostSubmit}
+            >
+              {creatorMode === 'story' ? 'Share to Story 🚀' : 'Publish to Feed 🌟'}
+            </button>
           </div>
         </div>
       )}
 
       {/* ======================================================== */}
-      {/* 11. FULLSCREEN STORY VIEWER (INSTAGRAM / TIKTOK STYLE)   */}
+      {/* 11. FULLSCREEN STORY VIEWER (SLIDE DOWN TO DISMISS)      */}
       {/* ======================================================== */}
       {activeStoryViewerIndex !== null && stories[activeStoryViewerIndex] && (
         <div
           className="story-viewer-backdrop"
+          style={{
+            backgroundColor: storyDragY > 0 ? `rgba(0, 0, 0, ${Math.max(0, 1 - storyDragY / 260)})` : '#000',
+            transition: isDraggingStory ? 'none' : 'background-color 0.28s ease',
+          }}
           onMouseDown={() => setIsStoryPaused(true)}
           onMouseUp={() => setIsStoryPaused(false)}
           onTouchStart={() => setIsStoryPaused(true)}
@@ -3041,7 +3237,25 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             const isMyStory = curStory.authorHandle === currentUser.handle;
 
             return (
-              <div className="story-viewer-modal" onClick={(e) => e.stopPropagation()}>
+              <div
+                className="story-viewer-modal"
+                onClick={(e) => e.stopPropagation()}
+                onTouchStart={handleStoryTouchStart}
+                onTouchMove={handleStoryTouchMove}
+                onTouchEnd={handleStoryTouchEnd}
+                onMouseDown={handleStoryMouseDown}
+                onMouseMove={handleStoryMouseMove}
+                onMouseUp={handleStoryMouseUp}
+                style={{
+                  transform: storyDragY > 0 ? `translateY(${storyDragY}px) scale(${Math.max(0.75, 1 - storyDragY / 900)})` : undefined,
+                  opacity: storyDragY > 0 ? Math.max(0.2, 1 - storyDragY / 450) : 1,
+                  borderRadius: storyDragY > 0 ? `${Math.min(32, storyDragY / 3)}px` : undefined,
+                  transition: isDraggingStory ? 'none' : 'transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.28s ease',
+                }}
+              >
+                {/* Visual Tactile Drag Handle */}
+                <div className="story-viewer-drag-bar" title="Slide down to close story" />
+
                 {/* Segmented Progress Bars */}
                 <div className="story-viewer-progress-row">
                   {stories.map((st, sIdx) => {
@@ -3088,6 +3302,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                       type="button"
                       className="story-viewer-close"
                       onClick={() => setActiveStoryViewerIndex(null)}
+                      title="Close (or slide down)"
                     >
                       ✕
                     </button>
@@ -3143,7 +3358,14 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                         type="button"
                         className="story-reaction-emoji-btn"
                         onClick={() => {
-                          triggerSlideToast(`Sent ${emoji} to @${curStory.authorHandle} 📬`);
+                          stopAllAudio();
+                          const msg = `Reacted ${emoji} to your story`;
+                          if (onStoryReplyToDM) {
+                            onStoryReplyToDM(curStory.authorHandle, msg);
+                          } else {
+                            triggerSlideToast(`Sent ${emoji} to @${curStory.authorHandle} 📬`);
+                          }
+                          setActiveStoryViewerIndex(null);
                         }}
                       >
                         {emoji}
@@ -3159,8 +3381,15 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                       className="story-reply-input"
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && storyReplyText.trim()) {
-                          triggerSlideToast(`Reply sent to @${curStory.authorHandle} 💬`);
+                          stopAllAudio();
+                          const msg = `Replied to your story: "${storyReplyText.trim()}"`;
+                          if (onStoryReplyToDM) {
+                            onStoryReplyToDM(curStory.authorHandle, msg);
+                          } else {
+                            triggerSlideToast(`Reply sent to @${curStory.authorHandle} 💬`);
+                          }
                           setStoryReplyText('');
+                          setActiveStoryViewerIndex(null);
                         }
                       }}
                     />
@@ -3170,8 +3399,15 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                       className="story-reply-send-btn"
                       onClick={() => {
                         if (!storyReplyText.trim()) return;
-                        triggerSlideToast(`Reply sent to @${curStory.authorHandle} 💬`);
+                        stopAllAudio();
+                        const msg = `Replied to your story: "${storyReplyText.trim()}"`;
+                        if (onStoryReplyToDM) {
+                          onStoryReplyToDM(curStory.authorHandle, msg);
+                        } else {
+                          triggerSlideToast(`Reply sent to @${curStory.authorHandle} 💬`);
+                        }
                         setStoryReplyText('');
+                        setActiveStoryViewerIndex(null);
                       }}
                     >
                       Send
@@ -3184,7 +3420,6 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         </div>
       )}
 
-      {/* ======================================================== */}
       {/* 12. VISIONOS GLASS TOAST NOTIFICATION                    */}
       {/* ======================================================== */}
       {slideToastMsg && (

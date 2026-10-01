@@ -1,3 +1,26 @@
+/* ========================================================
+   GLOBAL SCROLLBAR ERADICATION (NATIVE MOBILE APP EXPERIENCE)
+   ======================================================== */
+html, body, #root, *, *::before, *::after {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+*::-webkit-scrollbar,
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+div::-webkit-scrollbar,
+main::-webkit-scrollbar,
+section::-webkit-scrollbar,
+aside::-webkit-scrollbar,
+ul::-webkit-scrollbar,
+textarea::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
 :root {
   /* Ultra-Premium Glass & Deep Obsidian Palette */
   --bg-deep: #05070c;
@@ -8263,3 +8286,138 @@ textarea::placeholder {
 
 
 
+
+/* ======================================================== */
+/* DIRECT MESSAGES STORIES RAIL & FULLSCREEN ENHANCEMENTS  */
+/* ======================================================== */
+.messages-stories-rail {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: rgba(10, 14, 23, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+.messages-stories-rail::-webkit-scrollbar {
+  display: none !important;
+}
+.dm-story-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dm-story-bubble:hover {
+  transform: translateY(-2px);
+}
+.dm-story-bubble:active {
+  transform: scale(0.94);
+}
+.dm-story-avatar-ring {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  padding: 2.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
+}
+.dm-story-avatar-ring.cf {
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+}
+.dm-story-avatar-ring.followers {
+  background: linear-gradient(135deg, #818cf8, #a855f7);
+  box-shadow: 0 0 12px rgba(129, 140, 248, 0.4);
+}
+.dm-story-avatar-ring.public {
+  background: linear-gradient(135deg, #38bdf8, #6366f1);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+}
+.dm-story-avatar-ring.add {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1.5px dashed rgba(255, 255, 255, 0.3);
+}
+.dm-story-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #06090f;
+}
+.dm-story-plus-icon {
+  position: absolute;
+  bottom: 0px;
+  right: 0px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--brand-gradient);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  border: 2px solid #06090f;
+}
+.dm-story-online-dot {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #10b981;
+  border: 2px solid #06090f;
+}
+.dm-story-name {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  max-width: 62px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Floating Profile Back Button */
+.profile-fullscreen-back-btn {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top, 16px));
+  left: 16px;
+  z-index: 50;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(10, 14, 23, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.profile-fullscreen-back-btn:hover {
+  transform: scale(1.08);
+  background: rgba(20, 26, 40, 0.9);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.profile-fullscreen-back-btn:active {
+  transform: scale(0.92);
+}

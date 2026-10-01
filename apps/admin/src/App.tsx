@@ -66,6 +66,8 @@ import {
   EXCLUSIVE_FOLLOWING_POSTS,
   EXCLUSIVE_CIRCLES_POSTS,
   EXCLUSIVE_BIRDIE_POSTS,
+  INITIAL_STORIES_V3,
+  StoryItem,
 } from './components/feed/TikTokSlideFeed';
 
 const ALL_TEMPLATE_POSTS: PostItem[] = [
@@ -1660,6 +1662,9 @@ export function App() {
     return sanitizeStoredDirectMessages(loaded);
   });
   const [activeChatUser, setActiveChatUser] = useState<UserProfile | null>(null);
+  const [dmActiveStoryIndex, setDmActiveStoryIndex] = useState<number | null>(null);
+  const [dmStoryDragY, setDmStoryDragY] = useState(0);
+  const [dmStoryReplyText, setDmStoryReplyText] = useState('');
   const [chatDraftText, setChatDraftText] = useState('');
   const [isRecipientTyping, setIsRecipientTyping] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
@@ -4458,6 +4463,45 @@ export function App() {
     }, 1300);
   };
 
+  // Story reaction or reply forwarded directly into Direct Messages
+  const handleStoryReplyToDM = (creatorHandle: string, replyText: string) => {
+    const cleanRecipientHandle = creatorHandle.replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const recipientUser = getUserProfile(cleanRecipientHandle);
+
+    const newMsg: DirectChatMessage = {
+      id: 'msg-' + Date.now(),
+      senderHandle: cleanMyHandle,
+      recipientHandle: cleanRecipientHandle,
+      text: replyText,
+      timeAgo: 'Just now',
+      timestamp: Date.now(),
+      reactions: {},
+      userReactions: {},
+    };
+
+    setDirectMessages((prev) => {
+      const existingThread = prev[cleanRecipientHandle] || [];
+      const updated = {
+        ...prev,
+        [cleanRecipientHandle]: [...existingThread, newMsg],
+      };
+      safeSaveStorage('privity_direct_messages_v5', updated);
+      return updated;
+    });
+
+    broadcastSyncEvent({
+      action: 'SEND_DM',
+      recipientHandle: cleanRecipientHandle,
+      senderHandle: cleanMyHandle,
+      message: newMsg,
+    });
+
+    setActiveChatUser(recipientUser);
+    setActiveTab('messages');
+    triggerToast('Opened chat with @' + cleanRecipientHandle + ' 💬');
+  };
+
   // Like or unlike comment
   const handleLikeComment = (postId: string, commentId: string, replyId?: string) => {
     let nextLikedState = false;
@@ -5450,6 +5494,23 @@ export function App() {
                 onShare={(post) => handleShare(post.id)}
                 onOpenLive={() => handleSelectFeedTab('live')}
                 onOpenCreate={() => setIsCameraOpen(true)}
+                onStoryReplyToDM={(creatorHandle, msg) => handleStoryReplyToDM(creatorHandle, msg)}
+                onAddNewPost={(newPost) => {
+                  setPosts((prev) => {
+                    const next = [newPost as any, ...prev];
+                    safeSaveStorage('privity_posts_v5', next);
+                    return next;
+                  });
+                }}
+                onRefreshFeeds={() => {
+                  try {
+                    const saved = localStorage.getItem('privity_posts_v5');
+                    if (saved) {
+                      const parsed = JSON.parse(saved);
+                      if (Array.isArray(parsed) && parsed.length > 0) setPosts(parsed);
+                    }
+                  } catch (e) {}
+                }}
                 onNavigateProfile={(handle) => navigateToProfile(handle)}
                 onNavigateTab={(tab) => {
                   if (tab === 'discover') setActiveTab('discover');
@@ -6321,6 +6382,71 @@ export function App() {
             <div className={`spatial-messages-container ${activeChatUser ? 'has-active-chat' : 'no-active-chat'}`}>
               {/* LEFT PANE: CONVERSATION CHANNELS ROSTER */}
               <div className="messages-roster-pane">
+                {/* Dedicated Stories Rail in Direct Messages */}
+                <div className="messages-stories-rail">
+                  <div
+                    className="dm-story-bubble"
+                    onClick={() => {
+                      const dmStories: StoryItem[] = (() => {
+                        try {
+                          const s = localStorage.getItem('privity_stories_v3');
+                          return s ? JSON.parse(s) : INITIAL_STORIES_V3;
+                        } catch (e) {
+                          return INITIAL_STORIES_V3;
+                        }
+                      })();
+                      const myIdx = dmStories.findIndex((st) => st.authorHandle === cleanMyHandle);
+                      if (myIdx !== -1) {
+                        setDmActiveStoryIndex(myIdx);
+                      } else {
+                        setIsCameraOpen(true);
+                      }
+                    }}
+                    title="Your Story"
+                  >
+                    <div className="dm-story-avatar-ring add">
+                      <img src={myProfile.avatar} alt="You" className="dm-story-avatar-img" />
+                      <span className="dm-story-plus-icon">+</span>
+                    </div>
+                    <span className="dm-story-name">Your Story</span>
+                  </div>
+
+                  {(() => {
+                    const dmStories: StoryItem[] = (() => {
+                      try {
+                        const s = localStorage.getItem('privity_stories_v3');
+                        return s ? JSON.parse(s) : INITIAL_STORIES_V3;
+                      } catch (e) {
+                        return INITIAL_STORIES_V3;
+                      }
+                    })();
+
+                    return dmStories
+                      .filter((st) => st.authorHandle !== cleanMyHandle)
+                      .map((st) => {
+                        const isCF = st.privacy === 'close_friends';
+                        const isFollowers = st.privacy === 'followers';
+                        const ringClass = isCF ? 'cf' : isFollowers ? 'followers' : 'public';
+                        const idx = dmStories.findIndex((x) => x.id === st.id);
+
+                        return (
+                          <div
+                            key={st.id}
+                            className="dm-story-bubble"
+                            onClick={() => setDmActiveStoryIndex(idx)}
+                            title={`View @${st.authorHandle}'s story`}
+                          >
+                            <div className={`dm-story-avatar-ring ${ringClass}`}>
+                              <img src={st.authorAvatar} alt={st.authorName} className="dm-story-avatar-img" />
+                              <span className="dm-story-online-dot" />
+                            </div>
+                            <span className="dm-story-name">{st.authorName.split(' ')[0]}</span>
+                          </div>
+                        );
+                      });
+                  })()}
+                </div>
+
                 <div className="messages-roster-header">
                   <div className="messages-roster-title-row">
                     <div className="messages-roster-title">
@@ -6451,7 +6577,35 @@ export function App() {
               </div>
 
               {/* RIGHT PANE: ACTIVE THREAD WORKSPACE */}
-              <div className="messages-active-thread-pane">
+              <div
+                className="messages-active-thread-pane"
+                onTouchStart={(e) => {
+                  (window as any).__chatTouchStartX = e.touches[0].clientX;
+                  (window as any).__chatTouchStartY = e.touches[0].clientY;
+                }}
+                onTouchEnd={(e) => {
+                  const startX = (window as any).__chatTouchStartX || 0;
+                  const startY = (window as any).__chatTouchStartY || 0;
+                  const dx = e.changedTouches[0].clientX - startX;
+                  const dy = e.changedTouches[0].clientY - startY;
+                  if (dx > 65 && dx > Math.abs(dy) * 1.1) {
+                    setActiveChatUser(null);
+                  }
+                }}
+                onMouseDown={(e) => {
+                  (window as any).__chatMouseStartX = e.clientX;
+                  (window as any).__chatMouseStartY = e.clientY;
+                }}
+                onMouseUp={(e) => {
+                  const startX = (window as any).__chatMouseStartX || 0;
+                  const startY = (window as any).__chatMouseStartY || 0;
+                  const dx = e.clientX - startX;
+                  const dy = e.clientY - startY;
+                  if (dx > 65 && dx > Math.abs(dy) * 1.1) {
+                    setActiveChatUser(null);
+                  }
+                }}
+              >
                 {/* Thread Workspace Header */}
                 <div className="messages-thread-header">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
@@ -6977,6 +7131,180 @@ export function App() {
                   )}
                 </form>
               </div>
+            
+              {/* Fullscreen Story Viewer from DM Rail (Slide Down to Dismiss) */}
+              {dmActiveStoryIndex !== null && (() => {
+                const dmStories: StoryItem[] = (() => {
+                  try {
+                    const s = localStorage.getItem('privity_stories_v3');
+                    return s ? JSON.parse(s) : INITIAL_STORIES_V3;
+                  } catch (e) {
+                    return INITIAL_STORIES_V3;
+                  }
+                })();
+                const curStory = dmStories[dmActiveStoryIndex];
+                if (!curStory) return null;
+
+                return (
+                  <div
+                    className="story-viewer-backdrop"
+                    style={{
+                      position: 'fixed',
+                      inset: 0,
+                      zIndex: 10000,
+                      backgroundColor: dmStoryDragY > 0 ? `rgba(0, 0, 0, ${Math.max(0, 1 - dmStoryDragY / 260)})` : '#000',
+                    }}
+                    onClick={() => {
+                      setDmActiveStoryIndex(null);
+                      setDmStoryDragY(0);
+                    }}
+                  >
+                    <div
+                      className="story-viewer-modal"
+                      onClick={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => {
+                        (window as any).__dmStoryTouchStartY = e.touches[0].clientY;
+                        (window as any).__dmStoryTouchStartX = e.touches[0].clientX;
+                      }}
+                      onTouchMove={(e) => {
+                        const dy = e.touches[0].clientY - ((window as any).__dmStoryTouchStartY || 0);
+                        const dx = e.touches[0].clientX - ((window as any).__dmStoryTouchStartX || 0);
+                        if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+                          setDmStoryDragY(dy);
+                        }
+                      }}
+                      onTouchEnd={() => {
+                        if (dmStoryDragY > 70) {
+                          setDmActiveStoryIndex(null);
+                          setDmStoryDragY(0);
+                        } else {
+                          setDmStoryDragY(0);
+                        }
+                      }}
+                      onMouseDown={(e) => {
+                        (window as any).__dmStoryMouseStartY = e.clientY;
+                        (window as any).__dmStoryMouseStartX = e.clientX;
+                        (window as any).__dmStoryMouseDown = true;
+                      }}
+                      onMouseMove={(e) => {
+                        if (!(window as any).__dmStoryMouseDown) return;
+                        const dy = e.clientY - ((window as any).__dmStoryMouseStartY || 0);
+                        const dx = e.clientX - ((window as any).__dmStoryMouseStartX || 0);
+                        if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+                          setDmStoryDragY(dy);
+                        }
+                      }}
+                      onMouseUp={() => {
+                        (window as any).__dmStoryMouseDown = false;
+                        if (dmStoryDragY > 70) {
+                          setDmActiveStoryIndex(null);
+                          setDmStoryDragY(0);
+                        } else {
+                          setDmStoryDragY(0);
+                        }
+                      }}
+                      style={{
+                        transform: dmStoryDragY > 0 ? `translateY(${dmStoryDragY}px) scale(${Math.max(0.75, 1 - dmStoryDragY / 900)})` : undefined,
+                        opacity: dmStoryDragY > 0 ? Math.max(0.2, 1 - dmStoryDragY / 450) : 1,
+                        borderRadius: dmStoryDragY > 0 ? `${Math.min(32, dmStoryDragY / 3)}px` : undefined,
+                      }}
+                    >
+                      <div className="story-viewer-drag-bar" title="Slide down to close story" />
+
+                      <div className="story-viewer-header" style={{ position: 'absolute', top: '24px', left: '14px', right: '14px', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div
+                          className="story-viewer-author"
+                          style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}
+                          onClick={() => {
+                            setDmActiveStoryIndex(null);
+                            navigateToProfile(curStory.authorHandle);
+                          }}
+                        >
+                          <img src={curStory.authorAvatar} alt={curStory.authorName} className="story-viewer-avatar" style={{ width: '38px', height: '38px', borderRadius: '50%', border: '1.5px solid #fff' }} />
+                          <div>
+                            <div style={{ color: '#fff', fontWeight: 700, fontSize: '14px' }}>{curStory.authorName}</div>
+                            <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '11px' }}>@{curStory.authorHandle} · {curStory.timeAgo}</div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="story-viewer-close"
+                          onClick={() => {
+                            setDmActiveStoryIndex(null);
+                            setDmStoryDragY(0);
+                          }}
+                          style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '50%', width: '32px', height: '32px', color: '#fff', cursor: 'pointer' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div className="story-viewer-media-wrap" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+                        {curStory.mediaType === 'video' ? (
+                          <video src={curStory.mediaUrl} autoPlay loop playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <img src={curStory.mediaUrl} alt={curStory.caption || 'Story'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        )}
+                        {curStory.caption && (
+                          <div className="story-viewer-caption-box">
+                            <p>{curStory.caption}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Reply & Quick Reactions */}
+                      <div className="story-viewer-bottom-bar" onClick={(e) => e.stopPropagation()}>
+                        <div className="story-quick-reactions">
+                          {['❤️', '🔥', '👏', '😂'].map((emoji, eIdx) => (
+                            <button
+                              key={eIdx}
+                              type="button"
+                              className="story-reaction-emoji-btn"
+                              onClick={() => {
+                                handleStoryReplyToDM(curStory.authorHandle, `Reacted ${emoji} to your story`);
+                                setDmActiveStoryIndex(null);
+                              }}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="story-reply-input-wrap">
+                          <input
+                            type="text"
+                            placeholder={`Reply to @${curStory.authorHandle}...`}
+                            value={dmStoryReplyText}
+                            onChange={(e) => setDmStoryReplyText(e.target.value)}
+                            className="story-reply-input"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && dmStoryReplyText.trim()) {
+                                handleStoryReplyToDM(curStory.authorHandle, `Replied to your story: "${dmStoryReplyText.trim()}"`);
+                                setDmStoryReplyText('');
+                                setDmActiveStoryIndex(null);
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            disabled={!dmStoryReplyText.trim()}
+                            className="story-reply-send-btn"
+                            onClick={() => {
+                              if (!dmStoryReplyText.trim()) return;
+                              handleStoryReplyToDM(curStory.authorHandle, `Replied to your story: "${dmStoryReplyText.trim()}"`);
+                              setDmStoryReplyText('');
+                              setDmActiveStoryIndex(null);
+                            }}
+                          >
+                            Send
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
             </div>
           );
         })()}
@@ -7150,46 +7478,32 @@ export function App() {
           });
 
           return (
-            <div className="profile-screen-container">
+            <div
+                className="profile-screen-container"
+                onTouchStart={(e) => {
+                  (window as any).__profileTouchStartX = e.touches[0].clientX;
+                  (window as any).__profileTouchStartY = e.touches[0].clientY;
+                }}
+                onTouchEnd={(e) => {
+                  const startX = (window as any).__profileTouchStartX || 0;
+                  const startY = (window as any).__profileTouchStartY || 0;
+                  const dx = e.changedTouches[0].clientX - startX;
+                  const dy = e.changedTouches[0].clientY - startY;
+                  if (dx > 70 && dx > Math.abs(dy) * 1.1) {
+                    handleProfileBack();
+                  }
+                }}
+              >
               {/* Sticky Frosted Header */}
-              <div className="profile-top-glass-nav">
-                <button className="btn-glass-back" onClick={handleProfileBack}>
-                  <IconArrowLeft size={16} />
-                  <span>
-                    {profileHistory.length > 0
-                      ? `Back to @${profileHistory[profileHistory.length - 1]}`
-                      : 'Back to Feed'}
-                  </span>
-                </button>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '15px' }}>
-                    {profile.name}
-                  </span>
-                  {profile.isVerified && (
-                    <VerifiedBadge
-                      authorName={profile.name}
-                      category={profile.verifiedCategory}
-                      since={profile.verifiedSince}
-                      proofId={profile.cryptoProofId}
-                    />
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button
-                    className="btn-glass-back"
-                    style={{ padding: '6px 12px' }}
-                    onClick={() => {
-                      navigator.clipboard?.writeText(`https://privity.app/@${profile.handle}`);
-                      triggerToast(`Profile link copied: @${profile.handle}`);
-                    }}
-                    title="Share Profile Link"
-                  >
-                    <IconShare size={15} />
-                  </button>
-                </div>
-              </div>
+              {/* Ultra-Modern Fullscreen Profile: Floating Back Button */}
+              <button
+                type="button"
+                className="profile-fullscreen-back-btn"
+                onClick={handleProfileBack}
+                title="Back to Feed"
+              >
+                <IconArrowLeft size={20} />
+              </button>
 
               {/* Cover Stage Banner */}
               {/* Cover Stage Banner */}
