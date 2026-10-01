@@ -60,7 +60,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const hostStreamer = useMemo<LiveMeStreamer>(() => ({
     id: `live-user-${currentUser.handle}`,
     handle: currentUser.handle,
-    name: `${currentUser.name} 🔴`,
+    name: currentUser.name,
     avatar: currentUser.avatar,
     isVerified: true,
     category: 'Visionary Host',
@@ -1056,8 +1056,12 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   {currentStreamer.name}
                 </div>
                 <div className="liveme-diamond-score">
-                  <span>💎</span>
-                  <span>{(currentStreamer.diamonds + diamondsEarned).toLocaleString()}</span>
+                  <span style={{ color: '#f43f5e' }}>♥</span>
+                  <span>
+                    {isHost
+                      ? (likesReceived >= 1000 ? `${(likesReceived / 1000).toFixed(1)}K` : likesReceived)
+                      : (currentStreamer.likesCount >= 1000 ? `${(currentStreamer.likesCount / 1000).toFixed(1)}K` : currentStreamer.likesCount)}
+                  </span>
                 </div>
               </div>
 
@@ -1091,9 +1095,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
           {/* Top-Right Contributors & Controls */}
           <div className="liveme-top-right-group">
-            {/* Top 3 Gifters Facepile */}
+            {/* Top Gifters Facepile (compact 2 slots) */}
             <div className="liveme-top-gifters-pile">
-              {currentStreamer.topContributors.map((c) => (
+              {currentStreamer.topContributors.slice(0, 2).map((c) => (
                 <div
                   key={c.id}
                   className="liveme-gifter-avatar-slot"
@@ -1101,7 +1105,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 >
                   <img src={c.avatar} alt={c.name} className="liveme-gifter-img" />
                   <span className="liveme-gifter-rank-crown">
-                    {c.rank === 1 ? '👑' : c.rank === 2 ? '🥈' : '🥉'}
+                    {c.rank === 1 ? '👑' : '🥈'}
                   </span>
                 </div>
               ))}
@@ -1117,19 +1121,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               <span>{isHost ? liveViewersCount : currentStreamer.viewersCount}</span>
             </div>
 
-            {/* LiveHot Catalog Link */}
-            <button
-              type="button"
-              className="liveme-audience-pill"
-              onClick={() => setShowCatalog(true)}
-              title="Explore LiveHot Catalog"
-              style={{ background: 'rgba(124, 58, 237, 0.55)', border: '1px solid rgba(168, 85, 247, 0.45)' }}
-            >
-              <span>★</span>
-              <span>LiveHot</span>
-            </button>
-
-            {/* Close Button */}
+            {/* Close / End Live Button (Prominent X button at very top right) */}
             <button
               type="button"
               className="liveme-close-btn"
