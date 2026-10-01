@@ -60,6 +60,7 @@ import {
 import './gifts/gifts.css';
 import { CameraModal } from './camera';
 import { LiveMeStreamArena } from './components/liveme';
+import { TikTokSlideFeed } from './components/feed/TikTokSlideFeed';
 
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -142,6 +143,7 @@ interface PostItem {
   thumbnailUrl?: string;
   videoUrl?: string;
   soundName?: string;
+  soundCover?: string;
   voiceMemoDuration?: string;
   caption: string;
   tags: string[];
@@ -158,6 +160,64 @@ interface PostItem {
 }
 
 const SAMPLE_POSTS: PostItem[] = [
+  {
+    id: 'p-nicole-1',
+    authorId: 'usr-nicole',
+    authorName: 'Nicole🎀🧸',
+    authorHandle: 'nicole_spicy',
+    authorAvatar: './nicole-avatar.jpg',
+    isVerified: true,
+    verifiedCategory: 'Lifestyle & Creator',
+    type: 'video',
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-on-video-call-42998-large.mp4',
+    thumbnailUrl: './nicole-spicy.jpg',
+    contentUrl: './nicole-spicy.jpg',
+    soundCover: './mvlan-cover.jpg',
+    caption: '👄 #fyp #viral #miami #video',
+    tags: ['fyp', 'viral', 'miami', 'video'],
+    soundName: 'miami svj roadster',
+    privacy: 'public',
+    likesCount: 140,
+    likersList: ['luciano', 'carlos_m', 'sarita_wave'],
+    commentsCount: 3,
+    sharesCount: 1,
+    savesCount: 6,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '2h ago',
+    comments: [
+      {
+        id: 'c-n1',
+        authorName: 'Carlos M',
+        authorHandle: 'carlos_m',
+        authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+        isVerified: false,
+        text: 'The Miami vibe is real 🔥 Looking forward to the next stream!',
+        timeAgo: '1h ago',
+        likesCount: 12,
+      },
+      {
+        id: 'c-n2',
+        authorName: 'Sarita',
+        authorHandle: 'sarita_wave',
+        authorAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
+        isVerified: false,
+        text: 'Love the spicy top! Where did you get it? 💖',
+        timeAgo: '45m ago',
+        likesCount: 5,
+      },
+      {
+        id: 'c-n3',
+        authorName: 'Luciano',
+        authorHandle: 'luciano',
+        authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+        isVerified: true,
+        text: 'Welcome to Privity! Keep the great content coming.',
+        timeAgo: '15m ago',
+        likesCount: 8,
+      },
+    ],
+  },
   {
     id: 'p-101',
     authorId: 'usr-elena',
@@ -286,7 +346,9 @@ const SAMPLE_POSTS: PostItem[] = [
     verifiedSince: 'Verified Feb 2026',
     cryptoProofId: 'priv_ed25519_119d88bb01',
     type: 'video',
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-sign-1232-large.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200&auto=format&fit=crop&q=85',
+    soundName: 'Tokyo Lofi Rain - Shinjuku',
     caption: 'Tokyo rain at twilight. 4K 60fps color grade inspired by Wong Kar-wai. Neon reflections on puddles around Shinjuku back alleys.',
     tags: ['tokyo', 'cinematography', 'video', 'streetphotography'],
     privacy: 'public',
@@ -1317,6 +1379,9 @@ export function App() {
     readStorage('privity_active_tab_v5', 'feed')
   );
   const [feedFilter, setFeedFilter] = useState<FeedFilterTab>('feed');
+  const [feedViewMode, setFeedViewMode] = useState<'slide' | 'cards'>(() =>
+    readStorage('privity_feed_view_mode_v1', 'slide')
+  );
   const [liveStreamsList, setLiveStreamsList] = useState<LiveStreamSession[]>(INITIAL_LIVE_STREAMS);
   const [activeLiveIndex, setActiveLiveIndex] = useState(0);
   const [liveLayoutMode, setLiveLayoutMode] = useState<'battle' | '4way'>('battle');
@@ -1594,6 +1659,10 @@ export function App() {
     safeSaveStorage('privity_active_tab_v5', activeTab);
   }, [activeTab]);
 
+  useEffect(() => {
+    safeSaveStorage('privity_feed_view_mode_v1', feedViewMode);
+  }, [feedViewMode]);
+
   // Save photo likes registry
   useEffect(() => {
     safeSaveStorage('privity_photo_likes_v5', photoLikesMap);
@@ -1612,7 +1681,22 @@ export function App() {
   // 2. Persistent Posts State (sanitizes any auto-synthesized p-media- posts from private clicks)
   const [posts, setPosts] = useState<PostItem[]>(() => {
     const loaded = readStorage<PostItem[]>('privity_posts_v5', SAMPLE_POSTS);
-    return Array.isArray(loaded) ? loaded.filter((p) => !p.id.startsWith('p-media-')) : SAMPLE_POSTS;
+    const sanitized = Array.isArray(loaded) ? loaded.filter((p) => !p.id.startsWith('p-media-')) : SAMPLE_POSTS;
+    const nicoleIdx = sanitized.findIndex((p) => p.id === 'p-nicole-1');
+    if (nicoleIdx === -1) {
+      return [SAMPLE_POSTS[0], ...sanitized];
+    }
+    const updated = [...sanitized];
+    updated[nicoleIdx] = {
+      ...SAMPLE_POSTS[0],
+      ...updated[nicoleIdx],
+      authorAvatar: SAMPLE_POSTS[0].authorAvatar,
+      contentUrl: SAMPLE_POSTS[0].contentUrl,
+      thumbnailUrl: SAMPLE_POSTS[0].thumbnailUrl,
+      soundCover: SAMPLE_POSTS[0].soundCover,
+      caption: SAMPLE_POSTS[0].caption,
+    };
+    return updated;
   });
 
   // 3. Persistent Following Map
@@ -4823,7 +4907,7 @@ export function App() {
             </button>
           </div>
         </header>
-      ) : activeTab === 'feed' && feedFilter === 'live' ? null : (
+      ) : activeTab === 'feed' && (feedFilter === 'live' || feedViewMode === 'slide') ? null : (
         <header className="mobile-top-header">
           <div className="mobile-header-left" onClick={() => { setActiveTab('feed'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
             <div className="brand-emblem-box" style={{ width: '36px', height: '36px', borderRadius: '10px' }}>
@@ -4997,7 +5081,7 @@ export function App() {
             onPointerDown={handleFeedPointerDown}
             onPointerUp={handleFeedPointerUp}
           >
-            {feedFilter !== 'live' && (
+            {feedFilter !== 'live' && feedViewMode === 'cards' && (
               <header className="feed-sticky-nav">
                 <div className="feed-title-line">
                   <div className="feed-main-heading">
@@ -5010,6 +5094,28 @@ export function App() {
                     <span className="live-green-orb"></span>
                     <span>Chronological Feed • Synced</span>
                   </div>
+                  <button
+                    type="button"
+                    className="btn-toggle-slide-feed"
+                    onClick={() => setFeedViewMode('slide')}
+                    title="Switch to Fullscreen Slide Feed"
+                    style={{
+                      marginLeft: 'auto',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '5px 12px',
+                      borderRadius: '16px',
+                      background: 'linear-gradient(135deg, rgba(254, 44, 85, 0.2), rgba(37, 244, 238, 0.2))',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      color: '#ffffff',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📱 Slide Feed
+                  </button>
                 </div>
 
                 {/* Feed Audience Tabs: 1st Live, 2nd Feed, 3rd All Circles, 4th Close Friends, 5th Followers Only */}
@@ -5093,6 +5199,36 @@ export function App() {
                 userCoins={userSparksBalance}
                 onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
                 showToast={triggerToast}
+              />
+            ) : feedViewMode === 'slide' ? (
+              <TikTokSlideFeed
+                posts={posts}
+                currentUser={{
+                  name: myProfile.name,
+                  handle: myProfile.handle,
+                  avatar: myProfile.avatar,
+                }}
+                onLike={(postId) => handleLike(postId)}
+                onSave={(postId) => handleSave(postId)}
+                onAddComment={(postId, text) => handleAddComment(postId, text)}
+                onShare={(post) => handleShare(post.id)}
+                onOpenLive={() => handleSelectFeedTab('live')}
+                onOpenCreate={() => setIsCameraOpen(true)}
+                onNavigateProfile={(handle) => navigateToProfile(handle)}
+                onNavigateTab={(tab) => {
+                  if (tab === 'discover') setActiveTab('discover');
+                  else if (tab === 'messages') setActiveTab('messages');
+                  else if (tab === 'profile') navigateToProfile('luciano');
+                  else setActiveTab('feed');
+                }}
+                currentNavTab={activeTab === 'feed' ? 'feed' : activeTab === 'discover' ? 'discover' : activeTab === 'messages' ? 'messages' : 'profile'}
+                activeFilter={feedFilter === 'close_friends' ? 'circles' : feedFilter === 'followers' ? 'following' : 'foryou'}
+                onSelectFilter={(f) => {
+                  if (f === 'circles') handleSelectFeedTab('close_friends');
+                  else if (f === 'following') handleSelectFeedTab('followers');
+                  else handleSelectFeedTab('feed');
+                }}
+                onSwitchToCardView={() => setFeedViewMode('cards')}
               />
             ) : (
               <>
@@ -9937,7 +10073,7 @@ export function App() {
       )}
 
       {/* 5. MOBILE BOTTOM NAVIGATION (<= 768px) */}
-      {!(activeTab === 'messages' && activeChatUser) && !(activeTab === 'feed' && feedFilter === 'live') && (
+      {!(activeTab === 'messages' && activeChatUser) && !(activeTab === 'feed' && (feedFilter === 'live' || feedViewMode === 'slide')) && (
         <nav className="mobile-bottom-nav">
           <button
             type="button"
