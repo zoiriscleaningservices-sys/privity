@@ -1723,6 +1723,8 @@ export function App() {
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupSelectedMembers, setNewGroupSelectedMembers] = useState<string[]>([]);
   const [isProfileDrawerOpen, setIsProfileDrawerOpen] = useState(false);
+  const [isFeedCommentsOpen, setIsFeedCommentsOpen] = useState(false);
+  const [isFeedStoryOpen, setIsFeedStoryOpen] = useState(false);
   const [chatChannelFilter, setChatChannelFilter] = useState<'all' | 'close_friends' | 'unread'>('all');
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [chatMediaAttachment, setChatMediaAttachment] = useState<string | null>(null);
@@ -5569,6 +5571,8 @@ export function App() {
                 stories={stories}
                 onAddStory={handleAddStory}
                 onDeleteStory={handleDeleteStory}
+                onCommentsOpenChange={setIsFeedCommentsOpen}
+                onStoryViewerOpenChange={setIsFeedStoryOpen}
                 onStoryReplyToDM={(creatorHandle, msg) => handleStoryReplyToDM(creatorHandle, msg)}
                 onAddNewPost={(newPost) => {
                   setPosts((prev) => {
@@ -10864,81 +10868,104 @@ export function App() {
       )}
 
       {/* 5. MOBILE BOTTOM NAVIGATION (<= 768px) */}
-      {!(activeTab === 'messages' && activeChatUser) && !(activeTab === 'feed' && feedFilter === 'live') && (
-        <nav className="mobile-bottom-nav">
-          <button
-            type="button"
-            className={`mobile-nav-item ${activeTab === 'feed' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('feed');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            title="Home Feed"
-          >
-            <IconHome size={22} color={activeTab === 'feed' ? '#ffffff' : 'currentColor'} />
-            <span className="mobile-nav-label">Feed</span>
-            {activeTab === 'feed' && <span className="mobile-nav-indicator" />}
-          </button>
+      {(() => {
+        const shouldHideMobileBottomNav = Boolean(
+          isCameraOpen ||
+          activeLiveStream ||
+          isHostBroadcasting ||
+          activeChatUser ||
+          lightboxUrl ||
+          isModalOpen ||
+          isEditProfileOpen ||
+          isSettingsOpen ||
+          rosterModal ||
+          postMenuModal ||
+          isProfileDrawerOpen ||
+          isFeedCommentsOpen ||
+          isFeedStoryOpen ||
+          dmActiveStoryIndex !== null ||
+          isViewersModalOpen ||
+          (activeTab === 'feed' && feedFilter === 'live')
+        );
 
-          <button
-            type="button"
-            className={`mobile-nav-item ${activeTab === 'discover' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('discover');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            title="Discover Creators"
-          >
-            <IconDiscover size={22} />
-            <span className="mobile-nav-label">Discover</span>
-            {activeTab === 'discover' && <span className="mobile-nav-indicator" />}
-          </button>
+        if (shouldHideMobileBottomNav) return null;
 
-          <button
-            type="button"
-            className="mobile-nav-item mobile-nav-compose-center"
-            onClick={() => setIsCameraOpen(true)}
-            title="Open Camera & Studio"
-          >
-            <div className="mobile-compose-orb">
-              <IconPlus size={22} color="#ffffff" />
-            </div>
-          </button>
+        return (
+          <nav className="mobile-bottom-nav">
+            <button
+              type="button"
+              className={`mobile-nav-item ${activeTab === 'feed' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('feed');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              title="Home Feed"
+            >
+              <IconHome size={22} color={activeTab === 'feed' ? '#ffffff' : 'currentColor'} />
+              <span className="mobile-nav-label">Feed</span>
+              {activeTab === 'feed' && <span className="mobile-nav-indicator" />}
+            </button>
 
-          <button
-            type="button"
-            className={`mobile-nav-item ${activeTab === 'messages' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('messages');
-              setActiveChatUser(null);
-            }}
-            title="Encrypted Messages"
-          >
-            <div style={{ position: 'relative' }}>
-              <IconChat size={22} color={activeTab === 'messages' ? '#ffffff' : 'currentColor'} />
-              <span className="mobile-badge-dot" />
-            </div>
-            <span className="mobile-nav-label">Messages</span>
-            {activeTab === 'messages' && <span className="mobile-nav-indicator" />}
-          </button>
+            <button
+              type="button"
+              className={`mobile-nav-item ${activeTab === 'discover' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('discover');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              title="Discover Creators"
+            >
+              <IconDiscover size={22} />
+              <span className="mobile-nav-label">Discover</span>
+              {activeTab === 'discover' && <span className="mobile-nav-indicator" />}
+            </button>
 
-          <button
-            type="button"
-            className={`mobile-nav-item ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}
-            onClick={() => {
-              navigateToProfile('luciano');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            title="Your Profile"
-          >
-            <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}>
-              <img src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" />
-            </div>
-            <span className="mobile-nav-label">Profile</span>
-            {activeTab === 'profile' && viewedUserHandle === 'luciano' && <span className="mobile-nav-indicator" />}
-          </button>
-        </nav>
-      )}
+            <button
+              type="button"
+              className="mobile-nav-item mobile-nav-compose-center"
+              onClick={() => setIsCameraOpen(true)}
+              title="Open Camera & Studio"
+            >
+              <div className="mobile-compose-orb">
+                <IconPlus size={22} color="#ffffff" />
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-nav-item ${activeTab === 'messages' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('messages');
+                setActiveChatUser(null);
+              }}
+              title="Encrypted Messages"
+            >
+              <div style={{ position: 'relative' }}>
+                <IconChat size={22} color={activeTab === 'messages' ? '#ffffff' : 'currentColor'} />
+                <span className="mobile-badge-dot" />
+              </div>
+              <span className="mobile-nav-label">Messages</span>
+              {activeTab === 'messages' && <span className="mobile-nav-indicator" />}
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-nav-item ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}
+              onClick={() => {
+                navigateToProfile('luciano');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              title="Your Profile"
+            >
+              <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}>
+                <img src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" />
+              </div>
+              <span className="mobile-nav-label">Profile</span>
+              {activeTab === 'profile' && viewedUserHandle === 'luciano' && <span className="mobile-nav-indicator" />}
+            </button>
+          </nav>
+        );
+      })()}
     </div>
   );
 }

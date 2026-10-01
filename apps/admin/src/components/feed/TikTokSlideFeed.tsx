@@ -239,6 +239,8 @@ export interface TikTokSlideFeedProps {
   stories?: StoryItem[];
   onAddStory?: (story: StoryItem) => void;
   onDeleteStory?: (storyId: string) => void;
+  onCommentsOpenChange?: (isOpen: boolean) => void;
+  onStoryViewerOpenChange?: (isOpen: boolean) => void;
 }
 
 export interface StoryRailItem {
@@ -881,6 +883,8 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   stories: propStories,
   onAddStory,
   onDeleteStory,
+  onCommentsOpenChange,
+  onStoryViewerOpenChange,
 }) => {
   // Channel Navigation: ['live', 'birdie', 'circles', 'following', 'foryou']
   const CHANNELS: SlideFeedChannel[] = ['live', 'birdie', 'circles', 'following', 'foryou'];
@@ -1120,6 +1124,15 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   const [soundTracks, setSoundTracks] = useState<ItunesTrack[]>(DEFAULT_ITUNES_TRACKS);
   const [isLoadingSounds, setIsLoadingSounds] = useState(false);
   const [previewingTrackId, setPreviewingTrackId] = useState<string | number | null>(null);
+
+  // Broadcast overlay state to hide bottom navigation dock
+  useEffect(() => {
+    onCommentsOpenChange?.(Boolean(activeCommentsPostId) || isSoundHubOpen);
+  }, [activeCommentsPostId, isSoundHubOpen, onCommentsOpenChange]);
+
+  useEffect(() => {
+    onStoryViewerOpenChange?.(activeStoryViewerIndex !== null || isAddStoryModalOpen);
+  }, [activeStoryViewerIndex, isAddStoryModalOpen, onStoryViewerOpenChange]);
 
   // Active post for comments drawer & active slide
   const activeCommentPost = displayPosts.find((p) => p.id === activeCommentsPostId) || posts.find((p) => p.id === activeCommentsPostId);

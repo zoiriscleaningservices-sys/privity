@@ -4943,9 +4943,31 @@ textarea::placeholder {
     backdrop-filter: blur(32px) saturate(200%);
     -webkit-backdrop-filter: blur(32px) saturate(200%);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
-    z-index: 50000 !important;
+    z-index: 5000 !important;
     box-shadow: 0 -6px 28px rgba(0, 0, 0, 0.75);
     pointer-events: auto !important;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+  }
+
+  /* Automatic Bottom Nav Suppression: Hide dock whenever camera, live studio, comment drawer, story viewer, message thread, or modal is open */
+  body:has(.camera-studio-overlay) .mobile-bottom-nav,
+  body:has(.liveme-room-root) .mobile-bottom-nav,
+  body:has(.tiktok-comments-drawer-backdrop) .mobile-bottom-nav,
+  body:has(.tiktok-soundhub-backdrop) .mobile-bottom-nav,
+  body:has(.story-viewer-backdrop) .mobile-bottom-nav,
+  body:has(.lightbox-backdrop) .mobile-bottom-nav,
+  body:has(.lightbox-comments-drawer) .mobile-bottom-nav,
+  body:has(.frosted-modal-backdrop) .mobile-bottom-nav,
+  body:has(.direct-chat-backdrop) .mobile-bottom-nav,
+  body:has(.profile-slideover-drawer.open) .mobile-bottom-nav,
+  body:has(.roster-modal-backdrop) .mobile-bottom-nav,
+  body:has(.post-menu-modal-backdrop) .mobile-bottom-nav,
+  body:has(.spatial-messages-container.has-active-chat) .mobile-bottom-nav {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transform: translateY(120%) !important;
   }
 
   .mobile-nav-item {
