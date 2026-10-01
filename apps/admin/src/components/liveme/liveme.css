@@ -2042,31 +2042,18 @@
   }
 
   .liveme-pk-stage-wrap {
-    top: calc(max(8px, env(safe-area-inset-top, 8px)) + 54px);
-    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 120px);
-  }
-
-  .liveme-host-dock {
-    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 46px);
-    left: 6px;
-    right: 6px;
-    padding: 5px 8px;
-    border-radius: 14px;
-    gap: 4px;
-  }
-
-  .liveme-host-btn {
-    padding: 5px 7px;
-    font-size: 10px;
+    top: calc(max(8px, env(safe-area-inset-top, 8px)) + 52px);
+    height: 290px;
+    bottom: auto;
   }
 
   .liveme-bottom-bar {
-    padding: 6px 10px max(10px, env(safe-area-inset-bottom, 10px));
+    padding: 8px 12px max(12px, env(safe-area-inset-bottom, 12px));
   }
 
   .liveme-chat-stream-layer {
-    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 95px);
-    max-height: 120px;
+    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 62px);
+    max-height: 190px;
     left: 8px;
     width: calc(100% - 16px);
   }
@@ -2083,3 +2070,530 @@
 }
 
 
+
+/* ========================================================================== */
+/* PK MATCHMAKER MODAL & RADAR SCANNER STYLES                                */
+/* ========================================================================== */
+.liveme-match-trigger {
+  position: relative;
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.45), rgba(139, 92, 246, 0.45)) !important;
+  border-color: rgba(236, 72, 153, 0.5) !important;
+  box-shadow: 0 0 14px rgba(236, 72, 153, 0.4);
+}
+
+.liveme-match-trigger.active {
+  background: linear-gradient(135deg, #ec4899, #f43f5e) !important;
+  border-color: #fff !important;
+  box-shadow: 0 0 20px rgba(244, 63, 94, 0.8);
+  animation: liveme-match-pulse 1.4s infinite alternate;
+}
+
+@keyframes liveme-match-pulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.1); box-shadow: 0 0 24px #ec4899; }
+}
+
+.liveme-pk-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: livemeFadeIn 0.2s ease;
+}
+
+@keyframes livemeFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.liveme-pk-modal-sheet {
+  width: 100%;
+  max-width: 480px;
+  background: #111420;
+  border-top: 1.5px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24px 24px 0 0;
+  padding: 18px 18px max(24px, env(safe-area-inset-bottom, 24px));
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 80vh;
+  overflow-y: auto;
+  animation: livemeSlideUp 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes livemeSlideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.liveme-pk-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.liveme-pk-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.liveme-pk-modal-swords {
+  font-size: 24px;
+}
+
+.liveme-pk-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.liveme-pk-modal-subtitle {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.liveme-pk-modal-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.liveme-pk-modal-close:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.liveme-pk-tabs-bar {
+  display: flex;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 4px;
+  border-radius: 12px;
+  gap: 4px;
+}
+
+.liveme-pk-tab-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.liveme-pk-tab-btn.active {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Radar Animation */
+.liveme-pk-quick-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+}
+
+.liveme-pk-radar-box {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, rgba(16, 185, 129, 0.15), rgba(15, 23, 42, 0.8));
+  border: 1.5px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  margin: 10px auto;
+}
+
+.liveme-pk-radar-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(16, 185, 129, 0.5) 60deg, transparent 65deg);
+  animation: livemeRadarRotate 1.8s linear infinite;
+}
+
+@keyframes livemeRadarRotate {
+  to { transform: rotate(360deg); }
+}
+
+.liveme-pk-radar-circle {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px dashed rgba(16, 185, 129, 0.3);
+}
+
+.liveme-pk-radar-circle.r1 { width: 60px; height: 60px; }
+.liveme-pk-radar-circle.r2 { width: 110px; height: 110px; }
+.liveme-pk-radar-circle.r3 { width: 155px; height: 155px; }
+
+.liveme-pk-radar-core {
+  position: relative;
+  z-index: 2;
+  font-size: 28px;
+  animation: livemePulseCore 1s infinite alternate;
+}
+
+@keyframes livemePulseCore {
+  from { transform: scale(0.9); }
+  to { transform: scale(1.15); filter: drop-shadow(0 0 10px #10b981); }
+}
+
+.liveme-pk-radar-status {
+  position: absolute;
+  bottom: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #10b981;
+  text-align: center;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 2px 8px;
+  border-radius: 9999px;
+}
+
+/* Candidate Card */
+.liveme-pk-candidate-card {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.liveme-pk-candidate-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.liveme-pk-candidate-avatar-wrap {
+  position: relative;
+  width: 60px;
+  height: 60px;
+}
+
+.liveme-pk-candidate-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #ec4899;
+}
+
+.liveme-pk-live-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid #f43f5e;
+  animation: livemeRingPulse 1.2s infinite;
+}
+
+@keyframes livemeRingPulse {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+
+.liveme-pk-candidate-meta {
+  flex: 1;
+}
+
+.liveme-pk-candidate-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.liveme-pk-candidate-cat {
+  font-size: 12px;
+  color: #a78bfa;
+  margin-top: 2px;
+}
+
+.liveme-pk-candidate-viewers {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 2px;
+}
+
+.liveme-pk-candidate-preview-box {
+  background: rgba(236, 72, 153, 0.12);
+  border: 1px dashed rgba(236, 72, 153, 0.35);
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #f472b6;
+  text-align: center;
+  font-weight: 600;
+}
+
+.liveme-pk-candidate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liveme-pk-start-btn {
+  width: 100%;
+  padding: 12px 18px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
+  border: none;
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(236, 72, 153, 0.4);
+  transition: all 0.2s ease;
+}
+
+.liveme-pk-start-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 22px rgba(236, 72, 153, 0.6);
+}
+
+.liveme-pk-reroll-btn {
+  width: 100%;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+}
+
+.liveme-pk-reroll-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Roster List */
+.liveme-pk-roster-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.liveme-pk-search-box {
+  width: 100%;
+}
+
+.liveme-pk-search-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 12px;
+  outline: none;
+}
+
+.liveme-pk-search-input:focus {
+  border-color: #ec4899;
+}
+
+.liveme-pk-roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.liveme-pk-roster-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.liveme-pk-roster-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.liveme-pk-roster-avatar-box {
+  position: relative;
+  width: 42px;
+  height: 42px;
+}
+
+.liveme-pk-roster-avatar-box img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid #ec4899;
+}
+
+.liveme-roster-pulse-dot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  border: 2px solid #111420;
+}
+
+.liveme-pk-roster-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.liveme-pk-roster-cat {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.liveme-pk-challenge-btn {
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #ec4899, #f43f5e);
+  border: none;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(236, 72, 153, 0.4);
+  transition: all 0.18s ease;
+}
+
+.liveme-pk-challenge-btn:hover {
+  transform: scale(1.05);
+}
+
+/* Active Battle Card */
+.liveme-pk-active-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.liveme-pk-active-duelists {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.liveme-pk-active-user {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.liveme-pk-active-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #3b82f6;
+}
+
+.liveme-pk-active-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.liveme-pk-active-score {
+  font-size: 14px;
+  font-weight: 900;
+  color: #fbbf24;
+}
+
+.liveme-pk-active-vs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.liveme-pk-vs-text {
+  font-size: 18px;
+  font-weight: 900;
+  color: #f43f5e;
+  letter-spacing: 0.1em;
+}
+
+.liveme-pk-active-timer {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.liveme-pk-active-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liveme-pk-action-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.liveme-pk-action-btn.rematch {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+}
+
+.liveme-pk-action-btn.danger {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.liveme-pk-action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.35);
+}

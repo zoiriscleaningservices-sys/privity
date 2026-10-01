@@ -10,6 +10,7 @@ import {
 import { LiveMeRechargeModal } from './LiveMeRechargeModal';
 import { LiveMeCoinGamesModal } from './LiveMeCoinGamesModal';
 import { LiveMeHotCatalog } from './LiveMeHotCatalog';
+import { LiveMePkMatchModal } from './LiveMePkMatchModal';
 import { GiftAnimationPlayer, globalGiftQueue, DEFAULT_GIFTS, GiftEvent } from '../../gifts';
 import './liveme.css';
 
@@ -134,26 +135,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [likesReceived, setLikesReceived] = useState(1420);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
 
-  // PK Battle Duel State (100% Match to Real LiveMe Room)
-  const [isPkBattleActive, setIsPkBattleActive] = useState(true);
+  // PK Battle Duel State (Default false: Stream starts in full-screen solo mode!)
+  const [isPkBattleActive, setIsPkBattleActive] = useState(false);
+  const [isPkMatchModalOpen, setIsPkMatchModalOpen] = useState(false);
   const [hostPkScore, setHostPkScore] = useState(1850);
   const [rivalPkScore, setRivalPkScore] = useState(1420);
   const [battleRoundTimer, setBattleRoundTimer] = useState(60);
   const [battleWinner, setBattleWinner] = useState<'host' | 'rival' | 'draw' | null>(null);
   const [pkDamageFloating, setPkDamageFloating] = useState<Array<{ id: number; text: string; color: string }>>([]);
 
-  // Rival Streamer in PK Battle
-  const pkRival = useMemo(() => ({
-    name: 'Elena Rodriguez ⚡',
-    handle: 'elena_rodriguez',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=500',
-    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-dj-mixing-music-in-a-club-41712-large.mp4',
-    chairs: [
-      { id: 'op1', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', rank: 1 },
-      { id: 'op2', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120', rank: 2 },
-      { id: 'op3', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120', rank: 3 },
-    ],
-  }), []);
+  // Dynamic Rival Streamer in PK Battle
+  const [pkRival, setPkRival] = useState<LiveMeStreamer>(() => {
+    return LIVEME_STREAMERS.find((s) => s.handle === 'elena_rodriguez') || LIVEME_STREAMERS[0];
+  });
 
   // Followed creators map
   const [followedMap, setFollowedMap] = useState<Record<string, boolean>>({});
@@ -947,8 +941,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
                 {/* Rival Video Stream */}
                 <video
-                  src={pkRival.videoUrl}
-                  poster={pkRival.avatar}
+                  src={pkRival.videoStreamUrl}
+                  poster={pkRival.posterUrl || pkRival.avatar}
                   autoPlay
                   loop
                   muted
@@ -958,8 +952,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
                 {/* Contributor Chairs under Rival */}
                 <div className="liveme-pk-chairs-row">
-                  {pkRival.chairs.map((chair, i) => (
-                    <div key={chair.id} className="liveme-pk-chair-circle" title={`#${i + 1} Rival Gifter`}>
+                  {(pkRival.topContributors || []).slice(0, 3).map((chair, i) => (
+                    <div key={chair.id || i} className="liveme-pk-chair-circle" title={`#${i + 1} Rival Gifter`}>
                       <img src={chair.avatar} alt="Rival Gifter" />
                       <span className="liveme-pk-chair-rank">{i === 0 ? '👑' : i + 1}</span>
                     </div>
@@ -1039,14 +1033,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               )}
             </div>
 
-            {/* Host LIVE Status Beacon or Sub-stats */}
-            {isHost ? (
-              <div className="liveme-host-status-badge">
-                <span className="liveme-pulse-dot" />
-                <span>LIVE</span>
-                <span className="liveme-host-timer-text">{formatTimer(streamDurationSec)}</span>
-              </div>
-            ) : (
+            {/* Sub-stats for viewers (Clean top bar without overlapping red badge for host) */}
+            {!isHost && (
               <div className="liveme-sub-stats-row">
                 <div className="liveme-stat-item">
                   <span>👁️ Views:</span>
@@ -1140,68 +1128,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         </div>
 
         {/* ================================================================ */}
-        {/* 6. HOST BROADCASTER FLOATING CONTROLS DOCK                        */}
-        {/* ================================================================ */}
-        {isHost && (
-          <div className="liveme-host-dock">
-            <button
-              type="button"
-              className="liveme-host-btn"
-              onClick={handleFlipCamera}
-              title="Flip Webcam Front/Back"
-            >
-              🔄 {cameraFacing === 'user' ? 'Front' : 'Back'}
-            </button>
-
-            <button
-              type="button"
-              className={`liveme-host-btn ${isMirrored ? 'active' : ''}`}
-              onClick={handleToggleMirror}
-              title="Toggle Mirror Reflection for Best Angle"
-            >
-              🪞 {isMirrored ? 'Mirrored' : 'True'}
-            </button>
-
-            <button
-              type="button"
-              className={`liveme-host-btn ${isMicMuted ? 'danger' : ''}`}
-              onClick={handleToggleMic}
-              title={isMicMuted ? 'Unmute Mic' : 'Mute Mic'}
-            >
-              {isMicMuted ? '🔇 Muted' : '🎙️ Mic'}
-            </button>
-
-            <button
-              type="button"
-              className={`liveme-host-btn ${isVideoOff ? 'danger' : ''}`}
-              onClick={handleToggleVideo}
-              title={isVideoOff ? 'Enable Video' : 'Pause Video'}
-            >
-              {isVideoOff ? '🚫 Cam Off' : '📹 Cam'}
-            </button>
-
-            <button
-              type="button"
-              className={`liveme-host-btn ${isPkBattleActive ? 'active' : ''}`}
-              onClick={() => setIsPkBattleActive(!isPkBattleActive)}
-              title="Toggle PK Battle Duel Mode"
-            >
-              ⚔️ PK {isPkBattleActive ? 'ON' : 'OFF'}
-            </button>
-
-            <button
-              type="button"
-              className="liveme-host-btn danger"
-              onClick={handleEndBroadcastClick}
-              title="End Broadcast Session"
-            >
-              ⏹️ End
-            </button>
-          </div>
-        )}
-
-        {/* ================================================================ */}
-        {/* 7. BOTTOM CONTROLS BAR: CHAT INPUT & RIGHT TOOLBAR               */}
+        {/* 6. UNIFIED MODERN BOTTOM CONTROLS BAR                             */}
         {/* ================================================================ */}
         <div className="liveme-bottom-bar">
           {/* Chat Input Form */}
@@ -1209,7 +1136,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             <input
               type="text"
               className="liveme-chat-input"
-              placeholder="Say hi..."
+              placeholder={isHost ? "Say something to your room..." : "Say hi..."}
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
             />
@@ -1224,45 +1151,101 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
           {/* Right Toolbar Action Icons */}
           <div className="liveme-toolbar-actions">
-            {/* Share Button */}
-            <button
-              type="button"
-              className="liveme-tool-btn"
-              onClick={handleShareStream}
-              title="Share Stream"
-            >
-              ↗️
-            </button>
+            {isHost ? (
+              <>
+                {/* 1. PK Battle Matchmaker Trigger (Clean, modern icon button) */}
+                <button
+                  type="button"
+                  className={`liveme-tool-btn liveme-match-trigger ${isPkBattleActive ? 'active' : ''}`}
+                  onClick={() => setIsPkMatchModalOpen(true)}
+                  title={isPkBattleActive ? "Manage PK Battle" : "Find PK Battle Match"}
+                >
+                  ⚔️
+                </button>
 
-            {/* Mute Button */}
-            <button
-              type="button"
-              className="liveme-tool-btn"
-              onClick={() => setIsMuted(!isMuted)}
-              title={isMuted ? 'Unmute' : 'Mute'}
-            >
-              {isMuted ? '🔇' : '🔊'}
-            </button>
+                {/* 2. Flip Camera Front/Back */}
+                <button
+                  type="button"
+                  className="liveme-tool-btn"
+                  onClick={handleFlipCamera}
+                  title="Flip Camera (Front/Back)"
+                >
+                  🔄
+                </button>
 
-            {/* Fullscreen Button */}
-            <button
-              type="button"
-              className="liveme-tool-btn"
-              onClick={handleToggleFullscreen}
-              title="Toggle Fullscreen"
-            >
-              {isFullscreen ? '⤦' : '⛶'}
-            </button>
+                {/* 3. Mirror Angle Reflection */}
+                <button
+                  type="button"
+                  className={`liveme-tool-btn ${isMirrored ? 'active' : ''}`}
+                  onClick={handleToggleMirror}
+                  title="Toggle Mirror Reflection for Best Angle"
+                >
+                  🪞
+                </button>
 
-            {/* 3D Glowing Pink Gift Box Button (Toggles Gift Tray) */}
-            <button
-              type="button"
-              className="liveme-gift-box-trigger"
-              onClick={() => setIsGiftTrayOpen(!isGiftTrayOpen)}
-              title="Open Gift Tray"
-            >
-              🎁
-            </button>
+                {/* 4. Mute Microphone */}
+                <button
+                  type="button"
+                  className={`liveme-tool-btn ${isMicMuted ? 'danger' : ''}`}
+                  onClick={handleToggleMic}
+                  title={isMicMuted ? "Unmute Mic" : "Mute Mic"}
+                >
+                  {isMicMuted ? '🔇' : '🎙️'}
+                </button>
+
+                {/* 5. Toggle Video Camera */}
+                <button
+                  type="button"
+                  className={`liveme-tool-btn ${isVideoOff ? 'danger' : ''}`}
+                  onClick={handleToggleVideo}
+                  title={isVideoOff ? "Enable Video" : "Pause Video"}
+                >
+                  {isVideoOff ? '🚫' : '📹'}
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Share Button */}
+                <button
+                  type="button"
+                  className="liveme-tool-btn"
+                  onClick={handleShareStream}
+                  title="Share Stream"
+                >
+                  ↗️
+                </button>
+
+                {/* Mute Button */}
+                <button
+                  type="button"
+                  className="liveme-tool-btn"
+                  onClick={() => setIsMuted(!isMuted)}
+                  title={isMuted ? 'Unmute' : 'Mute'}
+                >
+                  {isMuted ? '🔇' : '🔊'}
+                </button>
+
+                {/* Fullscreen Button */}
+                <button
+                  type="button"
+                  className="liveme-tool-btn"
+                  onClick={handleToggleFullscreen}
+                  title="Toggle Fullscreen"
+                >
+                  {isFullscreen ? '⤦' : '⛶'}
+                </button>
+
+                {/* 3D Glowing Pink Gift Box Button (Viewers only, NOT host) */}
+                <button
+                  type="button"
+                  className="liveme-gift-box-trigger"
+                  onClick={() => setIsGiftTrayOpen(!isGiftTrayOpen)}
+                  title="Open Gift Tray"
+                >
+                  🎁
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -1422,7 +1405,38 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       </div>
 
       {/* ================================================================ */}
-      {/* 9. AUTHENTIC LIVEME RECHARGE MODAL                               */}
+      {/* 9. PK BATTLE CREATOR MATCHMAKER MODAL                            */}
+      {/* ================================================================ */}
+      <LiveMePkMatchModal
+        isOpen={isPkMatchModalOpen}
+        onClose={() => setIsPkMatchModalOpen(false)}
+        isPkBattleActive={isPkBattleActive}
+        currentRival={pkRival}
+        hostScore={hostPkScore}
+        rivalScore={rivalPkScore}
+        roundTimer={battleRoundTimer}
+        onStartPkBattle={(rival) => {
+          setPkRival(rival);
+          setIsPkBattleActive(true);
+          setHostPkScore(150);
+          setRivalPkScore(120);
+          setBattleRoundTimer(60);
+          setBattleWinner(null);
+        }}
+        onEndPkBattle={() => {
+          setIsPkBattleActive(false);
+        }}
+        onRematch={() => {
+          setHostPkScore(150);
+          setRivalPkScore(120);
+          setBattleRoundTimer(60);
+          setBattleWinner(null);
+        }}
+        showToast={showToast}
+      />
+
+      {/* ================================================================ */}
+      {/* 10. AUTHENTIC LIVEME RECHARGE MODAL                              */}
       {/* ================================================================ */}
       <LiveMeRechargeModal
         isOpen={isRechargeOpen}
