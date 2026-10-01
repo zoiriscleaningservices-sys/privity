@@ -4589,6 +4589,12 @@ textarea::placeholder {
   display: none;
 }
 
+@media (min-width: 769px) {
+  .nav-sidebar {
+    z-index: 50000;
+  }
+}
+
 .btn-chat-mobile-back {
   display: none;
 }
@@ -4799,7 +4805,7 @@ textarea::placeholder {
 
   /* 3. Mobile Bottom Frosted Specular Dock */
   .mobile-bottom-nav {
-    display: flex;
+    display: flex !important;
     align-items: center;
     justify-content: space-around;
     position: fixed;
@@ -4808,12 +4814,13 @@ textarea::placeholder {
     right: 0;
     height: calc(58px + env(safe-area-inset-bottom, 0px));
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    background: rgba(7, 10, 18, 0.92);
+    background: rgba(7, 10, 18, 0.94);
     backdrop-filter: blur(32px) saturate(200%);
     -webkit-backdrop-filter: blur(32px) saturate(200%);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    z-index: 120;
-    box-shadow: 0 -6px 28px rgba(0, 0, 0, 0.65);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    z-index: 50000 !important;
+    box-shadow: 0 -6px 28px rgba(0, 0, 0, 0.75);
+    pointer-events: auto !important;
   }
 
   .mobile-nav-item {
