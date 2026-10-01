@@ -2683,6 +2683,8 @@ export function App() {
   // Modal Composer State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [hostLiveCameraStream, setHostLiveCameraStream] = useState<MediaStream | null>(null);
+  const [isHostBroadcasting, setIsHostBroadcasting] = useState<boolean>(false);
   const [modalCaption, setModalCaption] = useState('');
   const [modalTags, setModalTags] = useState('');
   const [modalPrivacy, setModalPrivacy] = useState<PostPrivacy>('close_friends');
@@ -4620,12 +4622,15 @@ export function App() {
     title,
     category,
     goal,
+    cameraStream,
   }: {
     title: string;
     category: string;
     goal: string;
     cameraStream?: MediaStream | null;
   }) => {
+    setHostLiveCameraStream(cameraStream || null);
+    setIsHostBroadcasting(true);
     const userStream: LiveStreamSession = {
       id: `live-user-${Date.now()}`,
       creatorHandle: myProfile.handle,
@@ -7748,7 +7753,24 @@ export function App() {
       {activeLiveStream && (
         <LiveMeStreamArena
           initialStreamerId={activeLiveStream.id}
-          onClose={() => setActiveLiveStream(null)}
+          isHostBroadcast={isHostBroadcasting}
+          userMediaStream={hostLiveCameraStream}
+          onClose={() => {
+            setActiveLiveStream(null);
+            setIsHostBroadcasting(false);
+            if (hostLiveCameraStream) {
+              hostLiveCameraStream.getTracks().forEach((t) => t.stop());
+              setHostLiveCameraStream(null);
+            }
+          }}
+          onEndBroadcast={() => {
+            setActiveLiveStream(null);
+            setIsHostBroadcasting(false);
+            if (hostLiveCameraStream) {
+              hostLiveCameraStream.getTracks().forEach((t) => t.stop());
+              setHostLiveCameraStream(null);
+            }
+          }}
           currentUser={{
             name: myProfile.name,
             handle: myProfile.handle,

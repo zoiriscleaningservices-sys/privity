@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LIVEME_STREAMERS } from './liveMeData';
 import { LiveMeRechargeModal } from './LiveMeRechargeModal';
 import { LiveMeCoinGamesModal } from './LiveMeCoinGamesModal';
@@ -9,6 +9,7 @@ interface LiveMeHotCatalogProps {
   userCoins: number;
   onCoinsChange: (delta: number) => void;
   showToast: (msg: string) => void;
+  onGoLive?: () => void;
   currentUser?: {
     name: string;
     handle: string;
@@ -22,6 +23,7 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   userCoins,
   onCoinsChange,
   showToast,
+  onGoLive,
   currentUser = {
     name: 'LUCIANO 4E 🥷',
     handle: 'luciano',
@@ -32,6 +34,33 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
   const [isCoinGamesOpen, setIsCoinGamesOpen] = useState(false);
+
+  // Cross-tab active live host detection
+  const [activeHost, setActiveHost] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('privity_current_live_host');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    let bus: BroadcastChannel | null = null;
+    try {
+      bus = new BroadcastChannel('privity_sync_bus');
+      bus.onmessage = (e) => {
+        if (e.data?.type === 'LIVE_HOST_STARTED') {
+          setActiveHost(e.data.host);
+        } else if (e.data?.type === 'LIVE_HOST_ENDED') {
+          setActiveHost(null);
+        }
+      };
+    } catch {}
+    return () => {
+      if (bus) bus.close();
+    };
+  }, []);
 
   const heroStreamer = LIVEME_STREAMERS[3] || LIVEME_STREAMERS[0]; // 5KJesss or Jasmine
 
@@ -80,6 +109,27 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
           <div className="liveme-cat-action-link" onClick={() => setIsRechargeOpen(true)}>
             <span>🪙</span>
             <span>Coins ({userCoins.toLocaleString()})</span>
+          </div>
+
+          <div
+            className="liveme-cat-action-link"
+            style={{
+              background: 'linear-gradient(135deg, #ef4444 0%, #ec4899 100%)',
+              padding: '6px 14px',
+              borderRadius: '9999px',
+              fontWeight: 800,
+              color: '#fff',
+              cursor: 'pointer',
+              boxShadow: '0 0 14px rgba(239, 68, 68, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+            onClick={onGoLive || (() => onOpenStream(`live-user-${currentUser.handle}`))}
+            title="Start Live Broadcast"
+          >
+            <span style={{ fontSize: 10 }}>🔴</span>
+            <span>Go LIVE</span>
           </div>
 
           <img
@@ -243,6 +293,48 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
           </div>
 
           <div className="liveme-cards-grid">
+            {/* Active Host Live Broadcast Card if Host is Live */}
+            {activeHost && (
+              <div
+                key={activeHost.id || 'active-live-host'}
+                className="liveme-stream-grid-card"
+                onClick={() => onOpenStream(activeHost.id || `live-user-${activeHost.handle}`)}
+                style={{
+                  border: '2px solid #ef4444',
+                  boxShadow: '0 0 24px rgba(239, 68, 68, 0.6)',
+                }}
+              >
+                <img
+                  src={activeHost.avatar}
+                  alt={activeHost.name}
+                  className="liveme-card-cover-media"
+                  style={{ filter: 'brightness(0.9)' }}
+                />
+                <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ background: '#ef4444', color: '#fff', fontSize: 11, fontWeight: 900, padding: '3px 8px', borderRadius: 9999, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span className="liveme-pulse-dot" style={{ width: 6, height: 6 }} />
+                    LIVE NOW
+                  </span>
+                </div>
+                <div className="liveme-card-overlay-gradient" />
+                <div className="liveme-card-bottom-info">
+                  <img
+                    src={activeHost.avatar}
+                    alt={activeHost.name}
+                    className="liveme-card-avatar"
+                    style={{ border: '2px solid #ef4444' }}
+                  />
+                  <div className="liveme-card-text-block">
+                    <span className="liveme-card-streamer-name">{activeHost.name} 🔴</span>
+                    <div className="liveme-card-stats">
+                      <span>👁️ {activeHost.viewersCount || 185}</span>
+                      <span>🔥 3.2K</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {filteredStreamers.map((streamer) => (
               <div
                 key={streamer.id}

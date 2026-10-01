@@ -459,11 +459,17 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         clearInterval(countdown);
         setLiveCountDown(null);
         playCountdownBeep(true);
+        const liveStreamToHandOver = mediaStreamRef.current;
+        // Detach stream reference so stopCameraStream won't kill active tracks during handover
+        mediaStreamRef.current = null;
+        if (videoRef.current) {
+          videoRef.current.srcObject = null;
+        }
         onGoLive({
           title: liveTitle.trim() || 'Live Broadcast · Sovereign Node',
           category: 'Visionary Host',
           goal: liveGoal,
-          cameraStream: mediaStreamRef.current,
+          cameraStream: liveStreamToHandOver,
         });
         onClose();
       }

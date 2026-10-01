@@ -12,9 +12,11 @@ export interface LiveMeStreamer {
   popularity: string;
   diamonds: number;
   likesCount: number;
-  videoStreamUrl: string;
+  videoStreamUrl?: string;
   posterUrl: string;
   tags: string[];
+  isHost?: boolean;
+  isCameraStream?: boolean;
   topContributors: Array<{
     id: string;
     name: string;
@@ -38,6 +40,7 @@ export interface LiveMeChatMessage {
   giftInfo?: {
     name: string;
     icon: string;
+    imageIcon?: string;
     count: number;
     coins: number;
   };
@@ -49,6 +52,8 @@ export interface LiveMeGiftItem {
   name: string;
   coins: number;
   icon: string;
+  imageIcon?: string;
+  soundUrl?: string;
   category: 'popular' | 'special' | 'pranks' | 'nvip' | 'celebrity';
   isAnimation?: boolean;
   animationKey?: 'rose' | 'dragon' | 'super-galaxy' | 'tropical-mosquito';
