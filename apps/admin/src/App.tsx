@@ -5122,62 +5122,7 @@ export function App() {
       {/* ======================================================== */}
       {/* MOBILE TOP STATUS & BRAND HEADER (<= 768px)             */}
       {/* ======================================================== */}
-      {activeTab === 'messages' && activeChatUser ? (
-        <header className="mobile-top-header mobile-chat-top-header">
-          <div className="mobile-chat-header-left">
-            <button
-              type="button"
-              className="btn-chat-mobile-back"
-              onClick={() => setActiveChatUser(null)}
-              title="Back to all channels"
-            >
-              <IconArrowLeft size={18} />
-            </button>
-            <div
-              className="mobile-chat-partner-info"
-              onClick={() => navigateToProfile(activeChatUser.handle)}
-              title={`View @${activeChatUser.handle}'s profile`}
-            >
-              <div className="mobile-chat-avatar-wrap">
-                <img src={activeChatUser.avatar} alt={activeChatUser.name} className="mobile-chat-avatar" />
-                <span className="online-presence-dot" />
-              </div>
-              <div className="mobile-chat-text-col">
-                <div className="mobile-chat-name">
-                  <span>{activeChatUser.name}</span>
-                  {activeChatUser.isVerified && (
-                    <VerifiedBadge authorName={activeChatUser.name} category={activeChatUser.verifiedCategory} />
-                  )}
-                </div>
-                <div className="mobile-chat-status">
-                  <span className="status-indicator-dot" />
-                  <span>{isRecipientTyping ? 'Typing in real-time...' : 'Active Now · 🔒 Encrypted'}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mobile-chat-header-right">
-            <button
-              type="button"
-              className="mobile-header-icon-btn"
-              onClick={() => navigateToProfile(activeChatUser.handle)}
-              title="View creator profile"
-            >
-              <IconUser size={18} />
-            </button>
-            <button
-              type="button"
-              className="mobile-header-icon-btn"
-              style={{ color: '#f87171' }}
-              onClick={() => handleClearConversation(activeChatUser.handle.replace(/^@/, ''))}
-              title="Clear channel conversation"
-            >
-              <IconTrash size={16} />
-            </button>
-          </div>
-        </header>
-      ) : activeTab === 'feed' && (feedFilter === 'live' || feedViewMode === 'slide') ? null : (
+      {activeTab === 'discover' || activeTab === 'messages' || activeTab === 'profile' || (activeTab === 'feed' && (feedFilter === 'live' || feedViewMode === 'slide')) ? null : (
         <header className="mobile-top-header">
           <div className="mobile-header-left" onClick={() => { setActiveTab('feed'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
             <div className="brand-emblem-box" style={{ width: '36px', height: '36px', borderRadius: '10px' }}>
@@ -5197,10 +5142,7 @@ export function App() {
                 feedFilter === 'close_friends' ? 'Close Friends' :
                 feedFilter === 'followers' ? 'Followers' : feedFilter === 'birdie' ? 'Birdie Feed' : 'All Circles'
               )}
-              {activeTab === 'discover' && 'Discover'}
               {activeTab === 'activity' && 'Activity'}
-              {activeTab === 'messages' && 'Direct Messages'}
-              {activeTab === 'profile' && `@${viewedUserHandle}`}
               {activeTab === 'safety' && 'Security'}
             </span>
           </div>
@@ -5341,7 +5283,7 @@ export function App() {
       {/* ======================================================== */}
       {/* 2. CENTER FEED COLUMN                                    */}
       {/* ======================================================== */}
-      <main className={`feed-column ${activeTab === 'messages' ? 'messages-expanded-view' : ''}`}>
+      <main className={`feed-column ${activeTab === 'messages' ? 'messages-expanded-view' : ''} ${activeTab === 'discover' || activeTab === 'profile' ? 'fullscreen-top-view' : ''}`}>
         {/* --- VIEW 1: HOME FEED --- */}
         {activeTab === 'feed' && (
           <div
