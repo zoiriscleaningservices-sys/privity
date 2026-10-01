@@ -134,6 +134,115 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [diamondsEarned, setDiamondsEarned] = useState(0);
   const [likesReceived, setLikesReceived] = useState(1420);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [isConfirmEndOpen, setIsConfirmEndOpen] = useState(false);
+  const broadcastStartTimestampRef = useRef<number>(Date.now());
+
+  // Initialize start timestamp from stored session if present
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('privity_current_live_host');
+      if (saved) {
+        const p = JSON.parse(saved);
+        if (p.startedAt && typeof p.startedAt === 'number') {
+          broadcastStartTimestampRef.current = p.startedAt;
+        }
+      }
+    } catch {}
+  }, []);
+
+  // 1A. Mobile Scroll Lock & Interaction Isolation (Only comments scroll)
+  useEffect(() => {
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevBodyPosition = document.body.style.position;
+    const prevBodyWidth = document.body.style.width;
+    const prevBodyHeight = document.body.style.height;
+    const prevBodyTouchAction = document.body.style.touchAction;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const prevHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.height = '100%';
+    document.body.style.touchAction = 'none';
+    document.documentElement.style.overflow = 'hidden';
+    document.documentElement.style.overscrollBehavior = 'none';
+
+    const handleTouchMove = (e: TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Allow scrolling strictly inside comments scroll container or interactive modals
+      const isScrollable = target && target.closest(
+        '.liveme-chat-scroll-box, .liveme-gift-tray-scroll, .liveme-pk-radar-scroll, .liveme-sub-pills-row, .liveme-games-modal-body, .liveme-recharge-modal-body, .liveme-summary-card'
+      );
+      if (!isScrollable && e.cancelable) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.body.style.position = prevBodyPosition;
+      document.body.style.width = prevBodyWidth;
+      document.body.style.height = prevBodyHeight;
+      document.body.style.touchAction = prevBodyTouchAction;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      document.documentElement.style.overscrollBehavior = prevHtmlOverscroll;
+      document.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, []);
+
+  // 1B. Camera & Stream Reconnection on App Wake / Multitasking Return
+  useEffect(() => {
+    if (!isHost) return;
+
+    const handleAppWake = async () => {
+      if (document.visibilityState === 'visible') {
+        // Resume paused video elements if paused by mobile OS
+        if (videoRef.current && videoRef.current.paused) {
+          videoRef.current.play().catch(() => {});
+        }
+        if (ambientVideoRef.current && ambientVideoRef.current.paused) {
+          ambientVideoRef.current.play().catch(() => {});
+        }
+
+        // Check if camera tracks died in background
+        const tracks = localStreamRef.current?.getVideoTracks() || [];
+        const isAlive = tracks.length > 0 && tracks[0].readyState === 'live';
+        if (!isAlive && !isVideoOff && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          try {
+            const newStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: { ideal: cameraFacing } },
+              audio: !isMicMuted,
+            });
+            localStreamRef.current = newStream;
+            if (videoRef.current) {
+              videoRef.current.srcObject = newStream;
+              videoRef.current.play().catch(() => {});
+            }
+            if (ambientVideoRef.current) {
+              ambientVideoRef.current.srcObject = newStream;
+              ambientVideoRef.current.play().catch(() => {});
+            }
+            showToastRef.current('🔴 Live Stream Restored · You are Live');
+          } catch (err) {
+            console.warn('Live camera wake recovery error:', err);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleAppWake);
+    window.addEventListener('pageshow', handleAppWake);
+    window.addEventListener('focus', handleAppWake);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleAppWake);
+      window.removeEventListener('pageshow', handleAppWake);
+      window.removeEventListener('focus', handleAppWake);
+    };
+  }, [isHost, cameraFacing, isMicMuted, isVideoOff]);
 
   // PK Battle Duel State (Default false: Stream starts in full-screen solo mode!)
   const [isPkBattleActive, setIsPkBattleActive] = useState(false);
@@ -387,9 +496,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   useEffect(() => {
     if (!isHost) return;
 
-    const timer = setInterval(() => {
-      setStreamDurationSec((prev) => prev + 1);
-    }, 1000);
+    const updateTimer = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - broadcastStartTimestampRef.current) / 1000));
+      setStreamDurationSec(elapsed);
+    };
+
+    updateTimer();
+    const timer = setInterval(updateTimer, 1000);
 
     // Occasional simulated audience updates
     const audienceTimer = setInterval(() => {
@@ -478,16 +591,18 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         e.preventDefault();
         handlePrevStream();
       } else if (e.key === 'Escape') {
-        if (isSummaryOpen) setIsSummaryOpen(false);
+        if (isConfirmEndOpen) setIsConfirmEndOpen(false);
+        else if (isSummaryOpen) setIsSummaryOpen(false);
         else if (isRechargeOpen) setIsRechargeOpen(false);
         else if (isCoinGamesOpen) setIsCoinGamesOpen(false);
         else if (isGiftTrayOpen) setIsGiftTrayOpen(false);
+        else if (isHost) setIsConfirmEndOpen(true);
         else onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNextStream, handlePrevStream, isSummaryOpen, isRechargeOpen, isCoinGamesOpen, isGiftTrayOpen, onClose]);
+  }, [handleNextStream, handlePrevStream, isSummaryOpen, isConfirmEndOpen, isRechargeOpen, isCoinGamesOpen, isGiftTrayOpen, isHost, onClose]);
 
   // Tap / Double-tap heart reaction
   const spawnHeartReaction = (x?: number, y?: number) => {
@@ -590,6 +705,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_HOST_ENDED', handle: currentUser.handle });
       localStorage.removeItem('privity_current_live_host');
+      localStorage.removeItem('privity_is_host_broadcasting');
+      localStorage.removeItem('privity_active_live_session');
     } catch {}
 
     setIsSummaryOpen(true);
@@ -1037,60 +1154,42 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         </div>
 
         {/* ================================================================ */}
-        {/* 4. TOP BAR: STREAMER INFO (LEFT) & CONTRIBUTORS/CONTROLS (RIGHT) */}
+        {/* 4. TOP BAR: STREAMER INFO (LEFT) & CLOSE / AUDIENCE (RIGHT)      */}
         {/* ================================================================ */}
         <div className="liveme-top-bar">
-          {/* Top-Left Streamer Capsule */}
-          <div className="liveme-streamer-capsule">
-            <div className="liveme-capsule-main">
-              <div className="liveme-streamer-avatar-wrap">
-                <img
-                  src={currentStreamer.avatar}
-                  alt={currentStreamer.name}
-                  className="liveme-streamer-avatar"
-                />
-              </div>
-
-              <div className="liveme-streamer-meta">
-                <div className="liveme-streamer-name">
-                  {currentStreamer.name}
-                </div>
-                <div className="liveme-diamond-score">
-                  <span style={{ color: '#f43f5e' }}>♥</span>
-                  <span>
-                    {isHost
-                      ? (likesReceived >= 1000 ? `${(likesReceived / 1000).toFixed(1)}K` : likesReceived)
-                      : (currentStreamer.likesCount >= 1000 ? `${(currentStreamer.likesCount / 1000).toFixed(1)}K` : currentStreamer.likesCount)}
-                  </span>
-                </div>
-              </div>
-
-              {!isHost && (
-                <button
-                  type="button"
-                  className={`liveme-follow-btn ${isFollowing ? 'following' : ''}`}
-                  onClick={handleToggleFollow}
-                >
-                  {isFollowing ? 'Following' : '+ Join'}
-                </button>
-              )}
+          {/* Top-Left Streamer Capsule (Only Avatar + Name + Likes) */}
+          <div className="liveme-capsule-main">
+            <div className="liveme-streamer-avatar-wrap">
+              <img
+                src={currentStreamer.avatar}
+                alt={currentStreamer.name}
+                className="liveme-streamer-avatar"
+              />
             </div>
 
-            {/* Sub-pills row (Exact TikTok LIVE Spec: Daily Ranking, Goal, Gallery) */}
-            <div className="liveme-sub-pills-row">
-              <div className="liveme-sub-pill ranking">
-                <span>🔥</span>
-                <span>Daily Ranking</span>
+            <div className="liveme-streamer-meta">
+              <div className="liveme-streamer-name">
+                {currentStreamer.name}
               </div>
-              <div className="liveme-sub-pill goal">
-                <span>🎆</span>
-                <span>0/1</span>
-              </div>
-              <div className="liveme-sub-pill gallery">
-                <span>Gift Gallery...</span>
-                <span>🏎️</span>
+              <div className="liveme-diamond-score">
+                <span style={{ color: '#f43f5e' }}>♥</span>
+                <span>
+                  {isHost
+                    ? (likesReceived >= 1000 ? `${(likesReceived / 1000).toFixed(1)}K` : likesReceived)
+                    : (currentStreamer.likesCount >= 1000 ? `${(currentStreamer.likesCount / 1000).toFixed(1)}K` : currentStreamer.likesCount)}
+                </span>
               </div>
             </div>
+
+            {!isHost && (
+              <button
+                type="button"
+                className={`liveme-follow-btn ${isFollowing ? 'following' : ''}`}
+                onClick={handleToggleFollow}
+              >
+                {isFollowing ? 'Following' : '+ Join'}
+              </button>
+            )}
           </div>
 
           {/* Top-Right Contributors & Controls */}
@@ -1124,12 +1223,30 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             {/* Close / End Live Button (Prominent X button at very top right) */}
             <button
               type="button"
+              id="liveme-end-broadcast-btn"
               className="liveme-close-btn"
-              onClick={isHost ? handleEndBroadcastClick : onClose}
+              onClick={isHost ? () => setIsConfirmEndOpen(true) : onClose}
               title={isHost ? 'End Broadcast' : 'Close Stream'}
+              aria-label={isHost ? 'End Broadcast' : 'Close Stream'}
             >
               ✕
             </button>
+          </div>
+        </div>
+
+        {/* Row 2: Sub-pills row (Exact TikTok LIVE Spec: Daily Ranking, Goal, Gallery) */}
+        <div className="liveme-sub-pills-row">
+          <div className="liveme-sub-pill ranking">
+            <span>🔥</span>
+            <span>Daily Ranking</span>
+          </div>
+          <div className="liveme-sub-pill goal">
+            <span>🎆</span>
+            <span>0/1</span>
+          </div>
+          <div className="liveme-sub-pill gallery">
+            <span>Gift Gallery...</span>
+            <span>🏎️</span>
           </div>
         </div>
 
@@ -1515,6 +1632,40 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         onCoinsChange={onCoinsChange}
         showToast={showToast}
       />
+
+      {/* ================================================================ */}
+      {/* 10. HOST END LIVE CONFIRMATION MODAL                             */}
+      {/* ================================================================ */}
+      {isConfirmEndOpen && (
+        <div className="liveme-confirm-end-backdrop" onClick={() => setIsConfirmEndOpen(false)}>
+          <div className="liveme-confirm-end-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="liveme-confirm-end-icon">⚠️</div>
+            <div className="liveme-confirm-end-title">End LIVE Broadcast?</div>
+            <div className="liveme-confirm-end-desc">
+              Your viewers are currently watching. Are you sure you want to end your live stream?
+            </div>
+            <div className="liveme-confirm-end-actions">
+              <button
+                type="button"
+                className="liveme-confirm-resume-btn"
+                onClick={() => setIsConfirmEndOpen(false)}
+              >
+                Resume LIVE
+              </button>
+              <button
+                type="button"
+                className="liveme-confirm-terminate-btn"
+                onClick={() => {
+                  setIsConfirmEndOpen(false);
+                  handleEndBroadcastClick();
+                }}
+              >
+                End Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ================================================================ */}
       {/* 11. LIVE BROADCAST SUMMARY REPORT MODAL                          */}

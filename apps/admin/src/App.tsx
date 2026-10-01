@@ -1346,7 +1346,36 @@ export function App() {
   const [isGloveClashing, setIsGloveClashing] = useState(false);
   const [screenScoreFloaters, setScreenScoreFloaters] = useState<Array<{ id: number; text: string; x: number; y: number; side: 'host' | 'rival' }>>([]);
 
-  const [activeLiveStream, setActiveLiveStream] = useState<LiveStreamSession | null>(null);
+  const [activeLiveStream, setActiveLiveStream] = useState<LiveStreamSession | null>(() => {
+    try {
+      const savedHost = localStorage.getItem('privity_current_live_host');
+      const savedSession = localStorage.getItem('privity_active_live_session');
+      if (savedSession) {
+        return JSON.parse(savedSession);
+      }
+      if (savedHost) {
+        const meta = JSON.parse(savedHost);
+        return {
+          id: meta.id || `live-user-${meta.handle || 'host'}`,
+          creatorHandle: meta.handle || 'host',
+          creatorName: meta.name || 'Live Host',
+          creatorAvatar: meta.avatar || '',
+          isVerified: true,
+          category: 'Visionary Host',
+          title: meta.title || 'Live Broadcast · Sovereign Node',
+          description: 'Streaming live directly to authorized circles.',
+          viewersCount: meta.viewersCount || 185,
+          likesCount: 1420,
+          dailyRank: '🔥 Genesis Host',
+          previewUrl: meta.avatar || '',
+          multiGuests: [],
+          participants: [{ name: meta.name || 'Host', avatar: meta.avatar || '', role: 'Host' }],
+          tags: ['Live', 'P2P', 'Privity'],
+        };
+      }
+    } catch {}
+    return null;
+  });
   const [liveChatInput, setLiveChatInput] = useState('');
   const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; badge?: string; level?: number; isHost?: boolean; isJoin?: boolean; giftName?: string; giftIcon?: string }>>([
     { id: '1', user: 'Carlos', text: 'became the No. 19 fan in the Fan Club ⭐', isJoin: true },
@@ -2684,7 +2713,15 @@ export function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [hostLiveCameraStream, setHostLiveCameraStream] = useState<MediaStream | null>(null);
-  const [isHostBroadcasting, setIsHostBroadcasting] = useState<boolean>(false);
+  const [isHostBroadcasting, setIsHostBroadcasting] = useState<boolean>(() => {
+    try {
+      return (
+        localStorage.getItem('privity_is_host_broadcasting') === 'true' ||
+        !!localStorage.getItem('privity_current_live_host')
+      );
+    } catch {}
+    return false;
+  });
   const [modalCaption, setModalCaption] = useState('');
   const [modalTags, setModalTags] = useState('');
   const [modalPrivacy, setModalPrivacy] = useState<PostPrivacy>('close_friends');
@@ -4672,6 +4709,22 @@ export function App() {
     setActiveLiveIndex(0);
     setActiveLiveStream(userStream);
     setIsCameraOpen(false);
+    try {
+      localStorage.setItem('privity_is_host_broadcasting', 'true');
+      localStorage.setItem('privity_active_live_session', JSON.stringify(userStream));
+      localStorage.setItem(
+        'privity_current_live_host',
+        JSON.stringify({
+          id: userStream.id,
+          handle: myProfile.handle,
+          name: myProfile.name,
+          avatar: myProfile.avatar,
+          title: userStream.title,
+          startedAt: Date.now(),
+          viewersCount: userStream.viewersCount,
+        })
+      );
+    } catch {}
     triggerToast(`Broadcast started: ${userStream.title}`);
   };
 
@@ -7766,6 +7819,11 @@ export function App() {
           onClose={() => {
             setActiveLiveStream(null);
             setIsHostBroadcasting(false);
+            try {
+              localStorage.removeItem('privity_is_host_broadcasting');
+              localStorage.removeItem('privity_active_live_session');
+              localStorage.removeItem('privity_current_live_host');
+            } catch {}
             if (hostLiveCameraStream) {
               hostLiveCameraStream.getTracks().forEach((t) => t.stop());
               setHostLiveCameraStream(null);
@@ -7774,6 +7832,11 @@ export function App() {
           onEndBroadcast={() => {
             setActiveLiveStream(null);
             setIsHostBroadcasting(false);
+            try {
+              localStorage.removeItem('privity_is_host_broadcasting');
+              localStorage.removeItem('privity_active_live_session');
+              localStorage.removeItem('privity_current_live_host');
+            } catch {}
             if (hostLiveCameraStream) {
               hostLiveCameraStream.getTracks().forEach((t) => t.stop());
               setHostLiveCameraStream(null);
