@@ -144,6 +144,8 @@ interface PostItem {
   videoUrl?: string;
   soundName?: string;
   soundCover?: string;
+  soundUrl?: string;
+  soundArtist?: string;
   voiceMemoDuration?: string;
   caption: string;
   tags: string[];
@@ -175,7 +177,9 @@ const SAMPLE_POSTS: PostItem[] = [
     soundCover: './mvlan-cover.jpg',
     caption: '👄 #fyp #viral #miami #video',
     tags: ['fyp', 'viral', 'miami', 'video'],
-    soundName: 'miami svj roadster',
+    soundName: 'Brazilian Phonk - Miami Night Racing Pulse',
+    soundArtist: 'PHONK, OCD F42',
+    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/a2/9d/6e/a29d6ee7-34dc-a5d5-aab6-e2eb426dcf4e/mzaf_11998626548754457567.plus.aac.p.m4a',
     privacy: 'public',
     likesCount: 140,
     likersList: ['luciano', 'carlos_m', 'sarita_wave'],
@@ -232,6 +236,10 @@ const SAMPLE_POSTS: PostItem[] = [
     contentUrl: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1200&auto=format&fit=crop&q=85',
     caption: 'Quiet morning in the northern studio. Painting and shooting without the invisible pressure of an engagement algorithm. Here is a study on natural window diffusion and quiet space.',
     tags: ['photography', 'mindful', 'studio', 'analogue'],
+    soundName: 'Aesthetic Lofi Study Chill',
+    soundArtist: 'Lofi Fruits Music',
+    soundCover: 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/ef/a0/0b/efa00b65-ea9a-0e9e-56aa-a3ce25ee7a89/194491795057.jpg/100x100bb.jpg',
+    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/71/61/8b/71618b76-47eb-fa2e-cb42-2b635677dca7/mzaf_15783307567888741369.plus.aac.p.m4a',
     privacy: 'close_friends',
     likesCount: 5,
     likersList: ['marcus_dev', 'sara_architecture', 'julian_analogue', 'chloe_visuals', 'luciano'],
@@ -348,7 +356,10 @@ const SAMPLE_POSTS: PostItem[] = [
     type: 'video',
     videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-sign-1232-large.mp4',
     thumbnailUrl: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200&auto=format&fit=crop&q=85',
-    soundName: 'Tokyo Lofi Rain - Shinjuku',
+    soundName: 'Tokyo Rain Neon Pulse',
+    soundArtist: 'The Weeknd ft. Daft Punk',
+    soundCover: 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/0c/eb/54/0ceb545d-75e1-8848-8df0-e64e525a7a70/16UMGIM56422.rgb.jpg/100x100bb.jpg',
+    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/b8/b5/e0/b8b5e0ee-5878-5a63-7186-b4bc48f3fb8f/mzaf_1170799797003463870.plus.aac.p.m4a',
     caption: 'Tokyo rain at twilight. 4K 60fps color grade inspired by Wong Kar-wai. Neon reflections on puddles around Shinjuku back alleys.',
     tags: ['tokyo', 'cinematography', 'video', 'streetphotography'],
     privacy: 'public',
@@ -1694,6 +1705,9 @@ export function App() {
       contentUrl: SAMPLE_POSTS[0].contentUrl,
       thumbnailUrl: SAMPLE_POSTS[0].thumbnailUrl,
       soundCover: SAMPLE_POSTS[0].soundCover,
+      soundName: SAMPLE_POSTS[0].soundName,
+      soundArtist: SAMPLE_POSTS[0].soundArtist,
+      soundUrl: SAMPLE_POSTS[0].soundUrl,
       caption: SAMPLE_POSTS[0].caption,
     };
     return updated;
@@ -5229,6 +5243,24 @@ export function App() {
                   else handleSelectFeedTab('feed');
                 }}
                 onSwitchToCardView={() => setFeedViewMode('cards')}
+                onUpdatePostSound={(postId, sound) => {
+                  setPosts((prev) => {
+                    const next = prev.map((p) =>
+                      p.id === postId
+                        ? {
+                            ...p,
+                            soundName: sound.name,
+                            soundArtist: sound.artist,
+                            soundUrl: sound.previewUrl,
+                            soundCover: sound.coverUrl || p.soundCover,
+                          }
+                        : p
+                    );
+                    safeSaveStorage('privity_posts_v5', next);
+                    return next;
+                  });
+                  triggerToast(`Sound updated: ${sound.name} 🎵`);
+                }}
               />
             ) : (
               <>

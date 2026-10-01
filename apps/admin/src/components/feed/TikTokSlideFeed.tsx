@@ -35,6 +35,8 @@ export interface PostItem {
   videoUrl?: string;
   soundName?: string;
   soundCover?: string;
+  soundUrl?: string;
+  soundArtist?: string;
   caption: string;
   tags: string[];
   privacy: 'close_friends' | 'followers' | 'public';
@@ -47,6 +49,64 @@ export interface PostItem {
   timeAgo: string;
   comments: PostComment[];
 }
+
+export interface ItunesTrack {
+  id: number | string;
+  trackName: string;
+  artistName: string;
+  artworkUrl: string;
+  previewUrl: string;
+  collectionName?: string;
+  genre?: string;
+}
+
+export const DEFAULT_ITUNES_TRACKS: ItunesTrack[] = [
+  {
+    id: 'itunes-phonk-1',
+    trackName: 'Brazilian Phonk Night Racing Pulse',
+    artistName: 'PHONK, OCD F42',
+    artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/b4/28/dc/b428dc15-dfc4-bb25-c525-1c314d4ff493/cover.jpg/100x100bb.jpg',
+    previewUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/a2/9d/6e/a29d6ee7-34dc-a5d5-aab6-e2eb426dcf4e/mzaf_11998626548754457567.plus.aac.p.m4a',
+    collectionName: 'Night Racing Pulse',
+    genre: '🏎️ Phonk Drift',
+  },
+  {
+    id: 'itunes-miami-1',
+    trackName: 'Miami',
+    artistName: 'Will Smith',
+    artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/83/86/2b/83862bab-beb9-5736-509e-74eb6f261e83/dj.qtjkodwa.jpg/100x100bb.jpg',
+    previewUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/91/32/83/913283b0-4e0d-ef0a-68c8-770b16d635be/mzaf_13116975505489704547.plus.aac.p.m4a',
+    collectionName: 'Greatest Hits',
+    genre: '🌴 Miami Vibes',
+  },
+  {
+    id: 'itunes-trap-1',
+    trackName: 'Starboy',
+    artistName: 'The Weeknd ft. Daft Punk',
+    artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/0c/eb/54/0ceb545d-75e1-8848-8df0-e64e525a7a70/16UMGIM56422.rgb.jpg/100x100bb.jpg',
+    previewUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/b8/b5/e0/b8b5e0ee-5878-5a63-7186-b4bc48f3fb8f/mzaf_1170799797003463870.plus.aac.p.m4a',
+    collectionName: 'Starboy',
+    genre: '🔥 Top Hits',
+  },
+  {
+    id: 'itunes-lofi-1',
+    trackName: 'Aesthetic Lofi Study Chill',
+    artistName: 'Lofi Fruits Music',
+    artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/ef/a0/0b/efa00b65-ea9a-0e9e-56aa-a3ce25ee7a89/194491795057.jpg/100x100bb.jpg',
+    previewUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/71/61/8b/71618b76-47eb-fa2e-cb42-2b635677dca7/mzaf_15783307567888741369.plus.aac.p.m4a',
+    collectionName: 'Lofi Chill Study',
+    genre: '🎧 Lo-Fi Beats',
+  },
+  {
+    id: 'itunes-latin-1',
+    trackName: 'Tití Me Preguntó',
+    artistName: 'Bad Bunny',
+    artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music122/v4/3e/26/5a/3e265a6b-c743-34e8-4fd6-0814bbcefa69/196626945068.jpg/100x100bb.jpg',
+    previewUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview122/v4/eb/fa/d7/ebfad7ea-31fa-e91b-689e-2708b50e5ee2/mzaf_6135688560064560183.plus.aac.p.m4a',
+    collectionName: 'Un Verano Sin Ti',
+    genre: '🌴 Latin Hits',
+  },
+];
 
 export interface TikTokSlideFeedProps {
   posts: PostItem[];
@@ -67,6 +127,7 @@ export interface TikTokSlideFeedProps {
   activeFilter?: 'foryou' | 'following' | 'circles';
   onSelectFilter?: (filter: 'foryou' | 'following' | 'circles') => void;
   onSwitchToCardView?: () => void;
+  onUpdatePostSound?: (postId: string, sound: { name: string; artist: string; previewUrl: string; coverUrl?: string }) => void;
 }
 
 export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
@@ -84,13 +145,19 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   activeFilter = 'foryou',
   onSelectFilter,
   onSwitchToCardView,
+  onUpdatePostSound,
 }) => {
   // Active slide index tracked via IntersectionObserver / scroll position
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
 
-  // Play / Pause per post video
+  // Play / Pause per post media
   const [pausedMap, setPausedMap] = useState<Record<string, boolean>>({});
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+
+  // Real Audio Playback Engine
+  const [isMuted, setIsMuted] = useState(true);
+  const bgAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Floating heart burst particles on double-tap
   const [burstHearts, setBurstHearts] = useState<Array<{ id: number; x: number; y: number; rot: number }>>([]);
@@ -106,10 +173,18 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Sound Hub Drawer State (free iTunes 30s previews)
+  const [isSoundHubOpen, setIsSoundHubOpen] = useState(false);
+  const [soundSearchTerm, setSoundSearchTerm] = useState('');
+  const [soundTracks, setSoundTracks] = useState<ItunesTrack[]>(DEFAULT_ITUNES_TRACKS);
+  const [isLoadingSounds, setIsLoadingSounds] = useState(false);
+  const [previewingTrackId, setPreviewingTrackId] = useState<string | number | null>(null);
+
   // Active post for comments drawer
   const activeCommentPost = posts.find((p) => p.id === activeCommentsPostId);
+  const activeCurrentPost = posts[activeSlideIndex] || posts[0];
 
-  // Video autoplay/pause intersection observer
+  // Video and audio sync intersection observer
   const containerRef = useRef<HTMLDivElement>(null);
   const slideRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -147,6 +222,29 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     return () => observer.disconnect();
   }, [posts, pausedMap]);
 
+  // Synchronize Background Music with Active Slide & Mute state
+  useEffect(() => {
+    const post = posts[activeSlideIndex];
+    const bgAudio = bgAudioRef.current;
+    if (!bgAudio) return;
+
+    if (post?.soundUrl) {
+      if (bgAudio.src !== post.soundUrl) {
+        bgAudio.src = post.soundUrl;
+      }
+      bgAudio.loop = true;
+      const isPaused = !!pausedMap[post.id];
+
+      if (!isMuted && !isPaused) {
+        bgAudio.play().catch(() => {});
+      } else {
+        bgAudio.pause();
+      }
+    } else {
+      bgAudio.pause();
+    }
+  }, [activeSlideIndex, posts, isMuted, pausedMap]);
+
   // Keyboard Up / Down arrows for desktop snap navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -162,27 +260,74 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         const prevIdx = Math.max(0, activeSlideIndex - 1);
         const targetEl = slideRefs.current[posts[prevIdx]?.id];
         targetEl?.scrollIntoView({ behavior: 'smooth' });
+      } else if (e.key === 'm') {
+        e.preventDefault();
+        toggleSound();
       } else if (e.key === 'Escape') {
         if (activeCommentsPostId) setActiveCommentsPostId(null);
         if (isSearchOpen) setIsSearchOpen(false);
+        if (isSoundHubOpen) {
+          setIsSoundHubOpen(false);
+          stopPreview();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [posts, activeSlideIndex, activeCommentsPostId, isSearchOpen]);
+  }, [posts, activeSlideIndex, activeCommentsPostId, isSearchOpen, isSoundHubOpen, isMuted]);
 
-  // Toggle Video Play / Pause on Single Tap
+  // Toggle Sound ON / OFF
+  const toggleSound = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+
+    const post = posts[activeSlideIndex];
+    const bgAudio = bgAudioRef.current;
+    if (!bgAudio) return;
+
+    if (!nextMuted) {
+      if (post?.soundUrl) {
+        if (bgAudio.src !== post.soundUrl) {
+          bgAudio.src = post.soundUrl;
+        }
+        bgAudio.play().catch(() => {});
+      }
+    } else {
+      bgAudio.pause();
+    }
+  };
+
+  // Toggle Video / Photo Play & Pause on Single Tap
   const handleTogglePlay = (postId: string) => {
     const video = videoRefs.current[postId];
-    if (!video) return;
+    const bgAudio = bgAudioRef.current;
+    const isThisActive = posts[activeSlideIndex]?.id === postId;
 
-    if (video.paused) {
-      video.play().catch(() => {});
-      setPausedMap((prev) => ({ ...prev, [postId]: false }));
+    if (video) {
+      if (video.paused) {
+        video.play().catch(() => {});
+        setPausedMap((prev) => ({ ...prev, [postId]: false }));
+        if (isThisActive && !isMuted && bgAudio) {
+          bgAudio.play().catch(() => {});
+        }
+      } else {
+        video.pause();
+        setPausedMap((prev) => ({ ...prev, [postId]: true }));
+        if (isThisActive && bgAudio) {
+          bgAudio.pause();
+        }
+      }
     } else {
-      video.pause();
-      setPausedMap((prev) => ({ ...prev, [postId]: true }));
+      const isCurrentlyPaused = !!pausedMap[postId];
+      setPausedMap((prev) => ({ ...prev, [postId]: !isCurrentlyPaused }));
+      if (isThisActive && bgAudio) {
+        if (!isCurrentlyPaused) {
+          bgAudio.pause();
+        } else if (!isMuted) {
+          bgAudio.play().catch(() => {});
+        }
+      }
     }
   };
 
@@ -214,7 +359,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       lastTapRef.current = { time: 0, x: 0, y: 0 };
     } else {
       lastTapRef.current = { time: now, x, y };
-      // Optional toggle play on single tap after small debounce
+      // Toggle play/pause on single tap
       setTimeout(() => {
         if (lastTapRef.current.time === now) {
           handleTogglePlay(post.id);
@@ -241,8 +386,90 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     setNewCommentText('');
   };
 
+  // iTunes Free 30-Second Music Preview Search
+  const searchItunes = async (query: string) => {
+    setSoundSearchTerm(query);
+    if (!query.trim()) {
+      setSoundTracks(DEFAULT_ITUNES_TRACKS);
+      return;
+    }
+    setIsLoadingSounds(true);
+    try {
+      const res = await fetch(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=15`
+      );
+      const data = await res.json();
+      if (data && Array.isArray(data.results)) {
+        const mapped: ItunesTrack[] = data.results.map((r: any) => ({
+          id: r.trackId,
+          trackName: r.trackName,
+          artistName: r.artistName,
+          artworkUrl: r.artworkUrl100 || r.artworkUrl60,
+          previewUrl: r.previewUrl,
+          collectionName: r.collectionName,
+          genre: r.primaryGenreName,
+        }));
+        setSoundTracks(mapped);
+      }
+    } catch (err) {
+      console.warn('iTunes free search error:', err);
+    } finally {
+      setIsLoadingSounds(false);
+    }
+  };
+
+  // Toggle preview of an iTunes sample in the Sound Hub
+  const togglePreviewTrack = (track: ItunesTrack) => {
+    const prevAudio = previewAudioRef.current;
+    if (!prevAudio) return;
+
+    if (previewingTrackId === track.id) {
+      prevAudio.pause();
+      setPreviewingTrackId(null);
+    } else {
+      prevAudio.src = track.previewUrl;
+      prevAudio.play().catch(() => {});
+      setPreviewingTrackId(track.id);
+    }
+  };
+
+  const stopPreview = () => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      setPreviewingTrackId(null);
+    }
+  };
+
+  // Apply chosen real sound to the active post
+  const handleApplySound = (track: ItunesTrack) => {
+    stopPreview();
+    const currentPost = posts[activeSlideIndex];
+    if (!currentPost) return;
+
+    if (bgAudioRef.current) {
+      bgAudioRef.current.src = track.previewUrl;
+      bgAudioRef.current.loop = true;
+      setIsMuted(false);
+      bgAudioRef.current.play().catch(() => {});
+    }
+
+    onUpdatePostSound?.(currentPost.id, {
+      name: track.trackName,
+      artist: track.artistName,
+      previewUrl: track.previewUrl,
+      coverUrl: track.artworkUrl,
+    });
+
+    setIsSoundHubOpen(false);
+  };
+
   return (
     <div className="tiktok-feed-wrapper">
+      {/* Background loop audio element */}
+      <audio ref={bgAudioRef} loop preload="auto" />
+      {/* Sound Hub preview audio element */}
+      <audio ref={previewAudioRef} preload="auto" onEnded={() => setPreviewingTrackId(null)} />
+
       {/* ======================================================== */}
       {/* 1. TOP FLOATING NAVIGATION BAR (EXACT TIKTOK SPEC)      */}
       {/* ======================================================== */}
@@ -274,7 +501,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           </svg>
         </button>
 
-        {/* Center Tabs: Community / Following / For You */}
+        {/* Center Tabs: Circles / Following / For You */}
         <div className="tiktok-top-tabs">
           <button
             type="button"
@@ -304,8 +531,31 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           </button>
         </div>
 
-        {/* Right: Search 🔍 and optional Card view switcher */}
+        {/* Right: Speaker 🔊, Search 🔍, and Card view switcher */}
         <div className="tiktok-top-right-actions">
+          {/* Sound / Volume Toggle */}
+          <button
+            type="button"
+            className={`tiktok-volume-btn ${!isMuted ? 'unmuted' : 'muted'}`}
+            onClick={toggleSound}
+            title={isMuted ? 'Unmute Real Music (🔊)' : 'Mute Music (🔇)'}
+            aria-label="Toggle Sound"
+          >
+            {isMuted ? (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <line x1="23" y1="9" x2="17" y2="15" />
+                <line x1="17" y1="9" x2="23" y2="15" />
+              </svg>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 5" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+              </svg>
+            )}
+          </button>
+
           {onSwitchToCardView && (
             <button
               type="button"
@@ -332,13 +582,21 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
         </div>
       </header>
 
+      {/* Subtle "Tap for sound 🔊" hint banner when muted */}
+      {isMuted && (
+        <div className="tiktok-sound-hint-banner" onClick={toggleSound} title="Click to play real soundtrack">
+          <span className="sound-hint-wave">🔊</span>
+          <span>Tap to unmute real music</span>
+        </div>
+      )}
+
       {/* ======================================================== */}
       {/* 2. FULLSCREEN VERTICAL SNAP-SCROLL SLIDE CONTAINER       */}
       {/* ======================================================== */}
       <div className="tiktok-slides-container" ref={containerRef}>
         {posts.map((post) => {
           const isVideo = post.type === 'video' || !!post.videoUrl;
-          const mediaUrl = post.videoUrl || post.contentUrl || post.thumbnailUrl || 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-on-video-call-42998-large.mp4';
+          const mediaUrl = post.videoUrl || post.contentUrl || post.thumbnailUrl || './nicole-spicy.jpg';
           const isPaused = !!pausedMap[post.id];
           const isFollowed = !!followedMap[post.authorHandle];
 
@@ -363,7 +621,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     loop
                     playsInline
                     webkit-playsinline="true"
-                    muted={false}
+                    muted={true}
                   />
                 ) : (
                   <img
@@ -377,7 +635,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                 <div className="tiktok-scrim-overlay" />
 
                 {/* Pause Indicator overlay (when video is paused by single tap) */}
-                {isVideo && isPaused && (
+                {isPaused && (
                   <div className="tiktok-pause-indicator">
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)">
                       <polygon points="5 3 19 12 5 21 5 3" />
@@ -511,8 +769,12 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
                 {/* 6. Rotating Vinyl Sound Record with Grooves and Center Album Art */}
                 <div
-                  className={`tiktok-rail-sound-disc ${isPaused ? 'paused' : 'spinning'}`}
-                  title={post.soundName || 'Original Sound'}
+                  className={`tiktok-rail-sound-disc ${isPaused || isMuted ? 'paused' : 'spinning'}`}
+                  title={`Sound: ${post.soundName || 'Original Sound'} · Click for Sound Hub`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsSoundHubOpen(true);
+                  }}
                 >
                   <div className="tiktok-vinyl-ring-outer">
                     <img
@@ -566,13 +828,13 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                 {/* Interactive Search / Sound Marquee Pill */}
                 <div
                   className="tiktok-sound-pill"
-                  onClick={() => setIsSearchOpen(true)}
-                  title="Search audio and related dispatches"
+                  onClick={() => setIsSoundHubOpen(true)}
+                  title="Search audio on Apple Music / iTunes and change sound"
                 >
-                  <span className="tiktok-sound-icon">🔍</span>
+                  <span className="tiktok-sound-icon">🎵</span>
                   <div className="tiktok-sound-ticker-wrap">
                     <span className="tiktok-sound-ticker-text">
-                      {post.soundName ? `Search · ${post.soundName}` : 'Search · miami svj roadster'}
+                      {post.soundName ? `${post.soundName} ${post.soundArtist ? `· ${post.soundArtist}` : ''}` : 'Brazilian Phonk · Miami Night Pulse'}
                     </span>
                   </div>
                   <span className="tiktok-sound-chevron">&gt;</span>
@@ -701,28 +963,17 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     <div className="tiktok-comment-content">
                       <div className="tiktok-comment-author">
                         <span>{comment.authorName}</span>
-                        {comment.isVerified && <span className="verified-dot">✓</span>}
+                        {comment.isVerified && <span style={{ color: '#38bdf8' }}>✓</span>}
                       </div>
                       <p className="tiktok-comment-text">{comment.text}</p>
                       <div className="tiktok-comment-sub">
                         <span>{comment.timeAgo}</span>
                         <button type="button" className="tiktok-reply-btn">Reply</button>
                       </div>
-
-                      {/* Nested Replies */}
-                      {comment.replies && comment.replies.map((reply) => (
-                        <div key={reply.id} className="tiktok-reply-row">
-                          <img src={reply.authorAvatar} alt={reply.authorName} className="tiktok-reply-avatar" />
-                          <div className="tiktok-reply-content">
-                            <span className="tiktok-reply-author">{reply.authorName}</span>
-                            <p className="tiktok-reply-text">{reply.text}</p>
-                            <span className="tiktok-comment-sub">{reply.timeAgo}</span>
-                          </div>
-                        </div>
-                      ))}
                     </div>
                     <button type="button" className="tiktok-comment-like-btn">
-                      ♥ <span>{comment.likesCount || 1}</span>
+                      <span>♥</span>
+                      <span>{comment.likesCount || 0}</span>
                     </button>
                   </div>
                 ))
@@ -730,19 +981,19 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             </div>
 
             {/* Bottom Add Comment Bar */}
-            <form className="tiktok-comments-input-bar" onSubmit={handleCommentSubmit}>
+            <form onSubmit={handleCommentSubmit} className="tiktok-comments-input-bar">
               <img src={currentUser.avatar} alt="You" className="tiktok-input-avatar" />
               <input
                 type="text"
-                placeholder="Add comment..."
+                placeholder="Add a comment..."
                 value={newCommentText}
                 onChange={(e) => setNewCommentText(e.target.value)}
                 className="tiktok-comment-input-field"
               />
               <button
                 type="submit"
-                className="tiktok-comment-send-btn"
                 disabled={!newCommentText.trim()}
+                className="tiktok-comment-send-btn"
               >
                 Send
               </button>
@@ -752,7 +1003,156 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       )}
 
       {/* ======================================================== */}
-      {/* 7. SEARCH MODAL OVERLAY                                  */}
+      {/* 7. SOUND HUB & APPLE MUSIC FREE PREVIEW DRAWER           */}
+      {/* ======================================================== */}
+      {isSoundHubOpen && (
+        <div
+          className="tiktok-soundhub-backdrop"
+          onClick={() => {
+            setIsSoundHubOpen(false);
+            stopPreview();
+          }}
+        >
+          <div className="tiktok-soundhub-sheet" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="tiktok-soundhub-header">
+              <div className="tiktok-soundhub-title-wrap">
+                <span className="soundhub-badge">Free Preview API</span>
+                <h3 className="tiktok-soundhub-title">🎵 Sound Hub & Free Music</h3>
+              </div>
+              <button
+                type="button"
+                className="tiktok-soundhub-close-btn"
+                onClick={() => {
+                  setIsSoundHubOpen(false);
+                  stopPreview();
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Currently Playing Sound Banner */}
+            <div className="tiktok-soundhub-now-playing">
+              <div className="now-playing-disc-wrap">
+                <div className={`now-playing-disc ${!isMuted ? 'spinning' : 'paused'}`}>
+                  <img
+                    src={activeCurrentPost.soundCover || activeCurrentPost.authorAvatar}
+                    alt="Cover"
+                    className="now-playing-cover-img"
+                  />
+                </div>
+              </div>
+              <div className="now-playing-info">
+                <div className="now-playing-label">Currently Playing On This Post</div>
+                <div className="now-playing-name">
+                  {activeCurrentPost.soundName || 'Brazilian Phonk - Miami Night Racing Pulse'}
+                </div>
+                <div className="now-playing-artist">
+                  {activeCurrentPost.soundArtist || 'Original Free Sound · 0:30'}
+                </div>
+              </div>
+              <button
+                type="button"
+                className={`now-playing-volume-btn ${!isMuted ? 'active' : ''}`}
+                onClick={toggleSound}
+              >
+                {isMuted ? 'Unmute 🔊' : 'Playing 🎶'}
+              </button>
+            </div>
+
+            {/* iTunes Real Music Search Bar */}
+            <div className="tiktok-soundhub-search-box">
+              <span className="soundhub-search-icon">🔍</span>
+              <input
+                type="text"
+                placeholder="Search real songs on iTunes (e.g. Drake, Miami, Phonk)..."
+                value={soundSearchTerm}
+                onChange={(e) => searchItunes(e.target.value)}
+                className="tiktok-soundhub-input"
+              />
+              {soundSearchTerm && (
+                <button
+                  type="button"
+                  className="soundhub-search-clear"
+                  onClick={() => searchItunes('')}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Quick Genre Filter Chips */}
+            <div className="tiktok-soundhub-chips-row">
+              {['🔥 Trending', '🌴 Miami Vibes', '🏎️ Phonk Drift', '🎧 Lo-Fi Chill', '⭐ Viral Hits', '⚡ House / EDM'].map((chip, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className="tiktok-soundhub-chip"
+                  onClick={() => searchItunes(chip.replace(/^[^\s]+\s+/, ''))}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            {/* Tracks List */}
+            <div className="tiktok-soundhub-tracks-list">
+              {isLoadingSounds && (
+                <div className="soundhub-loading-state">
+                  <div className="soundhub-spinner" />
+                  <span>Searching free official audio previews...</span>
+                </div>
+              )}
+
+              {!isLoadingSounds && soundTracks.length === 0 && (
+                <div className="soundhub-empty-state">
+                  No preview tracks found. Try searching for another artist or song!
+                </div>
+              )}
+
+              {!isLoadingSounds &&
+                soundTracks.map((track) => {
+                  const isPlaying = previewingTrackId === track.id;
+                  const isSelected = activeCurrentPost.soundUrl === track.previewUrl;
+
+                  return (
+                    <div key={track.id} className={`soundhub-track-card ${isSelected ? 'active-track' : ''}`}>
+                      <div className="soundhub-track-artwork-wrap" onClick={() => togglePreviewTrack(track)}>
+                        <img src={track.artworkUrl} alt={track.trackName} className="soundhub-artwork-img" />
+                        <div className="soundhub-play-overlay">
+                          {isPlaying ? '⏸' : '▶'}
+                        </div>
+                      </div>
+
+                      <div className="soundhub-track-details" onClick={() => togglePreviewTrack(track)}>
+                        <div className="soundhub-track-title">{track.trackName}</div>
+                        <div className="soundhub-track-artist">{track.artistName}</div>
+                        <div className="soundhub-track-meta">
+                          <span className="soundhub-duration-badge">0:30 Free Preview</span>
+                          {track.genre && <span className="soundhub-genre-pill">{track.genre}</span>}
+                        </div>
+                      </div>
+
+                      <div className="soundhub-track-actions">
+                        <button
+                          type="button"
+                          className={`soundhub-use-sound-btn ${isSelected ? 'selected' : ''}`}
+                          onClick={() => handleApplySound(track)}
+                        >
+                          {isSelected ? '✓ In Use' : 'Use Sound'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 8. SEARCH MODAL OVERLAY                                  */}
       {/* ======================================================== */}
       {isSearchOpen && (
         <div className="tiktok-search-backdrop" onClick={() => setIsSearchOpen(false)}>
