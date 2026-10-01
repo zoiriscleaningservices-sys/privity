@@ -159,7 +159,19 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     setIsCameraActive(false);
   }, []);
 
-  // Start real camera stream via getUserMedia
+  // Callback ref for camera video element to guarantee immediate stream binding
+  const bindVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node;
+    if (node && mediaStreamRef.current) {
+      node.srcObject = mediaStreamRef.current;
+      node.setAttribute('playsinline', 'true');
+      node.setAttribute('webkit-playsinline', 'true');
+      node.muted = true;
+      node.play().catch((err) => console.warn('Autoplay error on bind:', err));
+    }
+  }, []);
+
+  // Start real camera stream via getUserMedia with mobile-first multi-tier fallback
   const startCameraStream = useCallback(async () => {
     try {
       setCameraError(null);
@@ -168,29 +180,57 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       }
 
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: cameraFacing,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: true,
-        });
+        let stream: MediaStream | null = null;
 
-        mediaStreamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => {});
+        // Tier 1: Ideal HD with audio
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: cameraFacing,
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: true,
+          });
+        } catch (tier1Err) {
+          console.warn('Tier 1 camera+mic failed, trying video only:', tier1Err);
+          try {
+            // Tier 2: Video only (bypasses microphone permission restrictions on iOS Safari)
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: cameraFacing,
+              },
+              audio: false,
+            });
+          } catch (tier2Err) {
+            console.warn('Tier 2 facingMode failed, trying generic video:', tier2Err);
+            // Tier 3: Basic generic video constraint
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+            });
+          }
         }
-        setIsCameraActive(true);
+
+        if (stream) {
+          mediaStreamRef.current = stream;
+          setIsCameraActive(true);
+
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.setAttribute('playsinline', 'true');
+            videoRef.current.setAttribute('webkit-playsinline', 'true');
+            videoRef.current.muted = true;
+            videoRef.current.play().catch(() => {});
+          }
+        }
       } else {
         setIsCameraActive(false);
-        setCameraError('Webcam not detected, operating in live simulated feed');
+        setCameraError('Camera API not supported on this device');
       }
     } catch (err: any) {
       console.warn('Camera access denied or unavailable:', err);
       setIsCameraActive(false);
-      setCameraError('Operating in live stream mode (Click to connect webcam)');
+      setCameraError('Camera permission needed. Tap to enable');
     }
   }, [cameraFacing]);
 
@@ -512,18 +552,24 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         )}
 
         {/* 1. CAMERA VIDEO SURFACE (Hardware Camera or Alive Looping Motion Stream) */}
-        {isCameraActive ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className={`camera-video-surface ${cameraFacing === 'user' ? 'mirrored' : ''}`}
-            style={{
-              filter: FILTER_PRESETS.find((f) => f.id === activeFilter)?.filterStyle || 'none',
-            }}
-          />
-        ) : (
+        <video
+          ref={bindVideoRef}
+          autoPlay
+          playsInline
+          muted
+          onLoadedMetadata={() => {
+            if (videoRef.current) {
+              videoRef.current.play().catch(() => {});
+            }
+          }}
+          className={`camera-video-surface ${cameraFacing === 'user' ? 'mirrored' : ''}`}
+          style={{
+            filter: FILTER_PRESETS.find((f) => f.id === activeFilter)?.filterStyle || 'none',
+            display: isCameraActive ? 'block' : 'none',
+          }}
+        />
+
+        {!isCameraActive && (
           <div className="camera-simulated-layer">
             <video
               src="https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4"
@@ -536,9 +582,9 @@ export const CameraModal: React.FC<CameraModalProps> = ({
                 filter: FILTER_PRESETS.find((f) => f.id === activeFilter)?.filterStyle || 'none',
               }}
             />
-            <button className="camera-sim-badge" onClick={startCameraStream}>
+            <button className="camera-sim-badge" onClick={startCameraStream} title="Tap to start webcam">
               <span className="camera-sim-dot" />
-              <span>{cameraError || '🟢 Camera Feed Active'}</span>
+              <span>{cameraError || '🔴 Tap to Enable Camera'}</span>
             </button>
           </div>
         )}
@@ -669,7 +715,16 @@ export const CameraModal: React.FC<CameraModalProps> = ({
             </button>
           )}
 
-          {activeTab !== 'LIVE' && <div style={{ width: '36px' }} />}
+          {activeTab !== 'LIVE' && (
+            <button
+              type="button"
+              className="camera-header-live-btn"
+              onClick={() => setActiveTab('LIVE')}
+              title="Switch to Live Broadcast Studio"
+            >
+              🔴 LIVE
+            </button>
+          )}
         </header>
 
         {/* ================================================================ */}
@@ -1058,7 +1113,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         {/* ================================================================ */}
         {activeTab === 'POST' && (
           <div className="camera-bottom-deck">
-            {/* Submode Duration Slider: 10m, 60s, 15s, PHOTO, TEXT */}
+            {/* Submode Duration Slider: 10m, 60s, 15s, PHOTO, TEXT, 🔴 LIVE */}
             <div className="camera-duration-selector">
               {(['10m', '60s', '15s', 'PHOTO', 'TEXT'] as DurationMode[]).map((mode) => (
                 <button
@@ -1069,6 +1124,14 @@ export const CameraModal: React.FC<CameraModalProps> = ({
                   {mode}
                 </button>
               ))}
+              <button
+                type="button"
+                className="camera-duration-tab live-mode-tab"
+                onClick={() => setActiveTab('LIVE')}
+                title="Go Live Broadcast"
+              >
+                🔴 LIVE
+              </button>
             </div>
 
             {/* Shutter Controls Row */}

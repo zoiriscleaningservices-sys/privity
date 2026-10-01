@@ -2004,3 +2004,76 @@
   transform: translateY(-2px);
 }
 
+/* ========================================================================== */
+/* MOBILE RESPONSIVE ADAPTATIONS (iOS & Android Handhelds)                    */
+/* ========================================================================== */
+@media (max-width: 600px) {
+  .liveme-room-root {
+    height: 100dvh;
+  }
+
+  .liveme-center-stage {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .liveme-ambient-wings {
+    display: none;
+  }
+
+  .liveme-switcher-pill {
+    display: none;
+  }
+
+  .liveme-top-bar {
+    top: max(8px, env(safe-area-inset-top, 8px));
+    left: 8px;
+    right: 8px;
+  }
+
+  .liveme-pk-stage-wrap {
+    top: calc(max(8px, env(safe-area-inset-top, 8px)) + 54px);
+    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 120px);
+  }
+
+  .liveme-host-dock {
+    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 46px);
+    left: 6px;
+    right: 6px;
+    padding: 5px 8px;
+    border-radius: 14px;
+    gap: 4px;
+  }
+
+  .liveme-host-btn {
+    padding: 5px 7px;
+    font-size: 10px;
+  }
+
+  .liveme-bottom-bar {
+    padding: 6px 10px max(10px, env(safe-area-inset-bottom, 10px));
+  }
+
+  .liveme-chat-stream-layer {
+    bottom: calc(max(10px, env(safe-area-inset-bottom, 10px)) + 95px);
+    max-height: 120px;
+    left: 8px;
+    width: calc(100% - 16px);
+  }
+
+  .liveme-gift-tray-panel {
+    width: 100vw;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-width: 100vw;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 16px));
+  }
+}
+
+

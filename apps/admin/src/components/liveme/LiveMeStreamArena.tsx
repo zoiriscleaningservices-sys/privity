@@ -107,6 +107,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const ambientVideoRef = useRef<HTMLVideoElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(userMediaStream || null);
 
+  const bindHostVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node;
+    if (node && localStreamRef.current) {
+      node.srcObject = localStreamRef.current;
+      node.setAttribute('playsinline', 'true');
+      node.setAttribute('webkit-playsinline', 'true');
+      node.muted = true;
+      node.play().catch((err) => console.warn('Autoplay error on host bind:', err));
+    }
+  }, []);
+
   // Host Camera Hardware Controls
   const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
   const [isMicMuted, setIsMicMuted] = useState(false);
@@ -201,7 +212,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [chatInput, setChatInput] = useState('');
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // 1. HARDWARE WEBCAM & MEDIA STREAM CONNECTION ENGINE
+  // 1. HARDWARE WEBCAM & MEDIA STREAM CONNECTION ENGINE (MOBILE COMPATIBLE)
   useEffect(() => {
     if (!isHost) return;
 
@@ -212,10 +223,16 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       localStreamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        videoRef.current.muted = true;
+        videoRef.current.play().catch((err) => console.warn('Host video play error:', err));
       }
       if (ambientVideoRef.current) {
         ambientVideoRef.current.srcObject = stream;
+        ambientVideoRef.current.setAttribute('playsinline', 'true');
+        ambientVideoRef.current.setAttribute('webkit-playsinline', 'true');
+        ambientVideoRef.current.muted = true;
         ambientVideoRef.current.play().catch(() => {});
       }
     };
@@ -224,23 +241,44 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       bindStreamToVideos(activeStream);
     } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       didRequestCamera = true;
-      navigator.mediaDevices
-        .getUserMedia({
-          video: {
-            facingMode: cameraFacing,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: true,
-        })
-        .then((stream) => {
+      const acquireStream = async () => {
+        let stream: MediaStream | null = null;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: cameraFacing,
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: true,
+          });
+        } catch (tier1Err) {
+          console.warn('LiveMe Tier 1 failed, trying video only:', tier1Err);
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: cameraFacing,
+              },
+              audio: false,
+            });
+          } catch (tier2Err) {
+            console.warn('LiveMe Tier 2 failed, trying generic video:', tier2Err);
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: true,
+            });
+          }
+        }
+
+        if (stream) {
           bindStreamToVideos(stream);
           showToast('🔴 Live Camera & Mic Connected!');
-        })
-        .catch((err) => {
-          console.warn('Camera stream error:', err);
-          showToast('Broadcasting in live simulation mode (Camera unavailable)');
-        });
+        }
+      };
+
+      acquireStream().catch((err) => {
+        console.warn('Camera stream error:', err);
+        showToast('Broadcasting in live simulation mode');
+      });
     }
 
     return () => {
@@ -763,10 +801,15 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {!isPkBattleActive && (
           isHost ? (
             <video
-              ref={videoRef}
+              ref={bindHostVideoRef}
               autoPlay
               playsInline
-              muted={isMicMuted}
+              muted={true}
+              onLoadedMetadata={() => {
+                if (videoRef.current) {
+                  videoRef.current.play().catch(() => {});
+                }
+              }}
               className="liveme-video-canvas"
             />
           ) : (
@@ -822,10 +865,15 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 {/* Host Video Stream (Webcam or Video) */}
                 {isHost ? (
                   <video
-                    ref={videoRef}
+                    ref={bindHostVideoRef}
                     autoPlay
                     playsInline
-                    muted={isMicMuted}
+                    muted={true}
+                    onLoadedMetadata={() => {
+                      if (videoRef.current) {
+                        videoRef.current.play().catch(() => {});
+                      }
+                    }}
                     className="liveme-pk-video-layer"
                   />
                 ) : (
