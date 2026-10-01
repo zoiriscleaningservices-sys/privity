@@ -196,23 +196,482 @@ export const STORIES_DATA: StoryRailItem[] = [
   },
 ];
 
-export const EXTRA_BIRDIE_DISPATCHES: PostItem[] = [
+// 1. FOR YOU FEED: High-Energy Viral Discovery Videos (100% Exclusive to For You)
+export const EXCLUSIVE_FORYOU_POSTS: PostItem[] = [
   {
-    id: 'p-birdie-sara',
+    id: 'p-nicole-1',
+    authorId: 'usr-nicole',
+    authorName: 'Nicole🎀🧸',
+    authorHandle: 'nicole_spicy',
+    authorAvatar: './nicole-avatar.jpg',
+    isVerified: true,
+    verifiedCategory: 'Lifestyle & Creator',
+    type: 'video',
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-on-video-call-42998-large.mp4',
+    thumbnailUrl: './nicole-spicy.jpg',
+    contentUrl: './nicole-spicy.jpg',
+    soundCover: './mvlan-cover.jpg',
+    caption: '👄 #fyp #viral #miami #video',
+    tags: ['fyp', 'viral', 'miami', 'video'],
+    soundName: 'Brazilian Phonk - Miami Night Racing Pulse',
+    soundArtist: 'PHONK, OCD F42',
+    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/a2/9d/6e/a29d6ee7-34dc-a5d5-aab6-e2eb426dcf4e/mzaf_11998626548754457567.plus.aac.p.m4a',
+    privacy: 'public',
+    likesCount: 141,
+    commentsCount: 2,
+    sharesCount: 1,
+    savesCount: 6,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '2h ago',
+    comments: [
+      {
+        id: 'c-n1',
+        authorName: 'Carlos M',
+        authorHandle: 'carlos_m',
+        authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+        isVerified: false,
+        text: 'The Miami vibe is real 🔥 Looking forward to the next stream!',
+        timeAgo: '1h ago',
+        likesCount: 12,
+      },
+    ],
+  },
+  {
+    id: 'p-104',
+    authorId: 'usr-chloe',
+    authorName: 'Chloe Kim',
+    authorHandle: 'chloe_visuals',
+    authorAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
+    isVerified: true,
+    verifiedCategory: 'Cinematographer & Director',
+    type: 'video',
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-sign-1232-large.mp4',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200&auto=format&fit=crop&q=85',
+    contentUrl: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200',
+    soundName: 'Starboy · Night Tokyo Neon Pulse',
+    soundArtist: 'The Weeknd ft. Daft Punk',
+    soundCover: 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/0c/eb/54/0ceb545d-75e1-8848-8df0-e64e525a7a70/16UMGIM56422.rgb.jpg/100x100bb.jpg',
+    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/b8/b5/e0/b8b5e0ee-5878-5a63-7186-b4bc48f3fb8f/mzaf_1170799797003463870.plus.aac.p.m4a',
+    caption: 'Tokyo rain at twilight. 4K 60fps color grade inspired by Wong Kar-wai. Neon reflections on puddles around Shinjuku back alleys. #tokyo #cinematography #neon #nightdrive',
+    tags: ['tokyo', 'cinematography', 'neon', 'nightdrive'],
+    privacy: 'public',
+    likesCount: 89,
+    commentsCount: 6,
+    sharesCount: 54,
+    savesCount: 104,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '4h ago',
+    comments: [],
+  },
+  {
+    id: 'p-fy-kai',
+    authorId: 'usr-kai',
+    authorName: 'Kai Tanaka',
+    authorHandle: 'kai_drift',
+    authorAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
+    isVerified: true,
+    verifiedCategory: 'Automotive & Cinema',
+    type: 'video',
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-car-driving-through-a-city-at-night-42861-large.mp4',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=1200&auto=format&fit=crop&q=85',
+    contentUrl: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=1200',
+    soundName: 'Brazilian Phonk Night Racing Pulse',
+    soundArtist: 'PHONK, OCD F42',
+    soundCover: 'https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/b4/28/dc/b428dc15-dfc4-bb25-c525-1c314d4ff493/cover.jpg/100x100bb.jpg',
+    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/a2/9d/6e/a29d6ee7-34dc-a5d5-aab6-e2eb426dcf4e/mzaf_11998626548754457567.plus.aac.p.m4a',
+    caption: 'Hakone mountain pass midnight run. Twin-turbo sound and damp tarmac reflections. #jdm #hakone #drift #phonk #nightcity',
+    tags: ['jdm', 'hakone', 'drift', 'phonk', 'nightcity'],
+    privacy: 'public',
+    likesCount: 230,
+    commentsCount: 14,
+    sharesCount: 88,
+    savesCount: 142,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '6h ago',
+    comments: [],
+  },
+  {
+    id: 'p-fy-isabella',
+    authorId: 'usr-isabella',
+    authorName: 'Isabella Rossi',
+    authorHandle: 'isabella_dance',
+    authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    isVerified: true,
+    verifiedCategory: 'Movement Artist',
+    type: 'video',
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-dancing-in-a-parking-lot-41122-large.mp4',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1547153760-18fc86324498?w=1200&auto=format&fit=crop&q=85',
+    contentUrl: 'https://images.unsplash.com/photo-1547153760-18fc86324498?w=1200',
+    soundName: 'Tití Me Preguntó',
+    soundArtist: 'Bad Bunny',
+    soundCover: 'https://is1-ssl.mzstatic.com/image/thumb/Music122/v4/3e/26/5a/3e265a6b-c743-34e8-4fd6-0814bbcefa69/196626945068.jpg/100x100bb.jpg',
+    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview122/v4/eb/fa/d7/ebfad7ea-31fa-e91b-689e-2708b50e5ee2/mzaf_6135688560064560183.plus.aac.p.m4a',
+    caption: 'Golden hour freestyle session on Barcelona rooftops. Keep your energy high and authentic! 💃🌇 #dance #freestyle #barcelona #vibes',
+    tags: ['dance', 'freestyle', 'barcelona', 'vibes'],
+    privacy: 'public',
+    likesCount: 312,
+    commentsCount: 19,
+    sharesCount: 65,
+    savesCount: 198,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '8h ago',
+    comments: [],
+  },
+  {
+    id: 'p-fy-leo',
+    authorId: 'usr-leo',
+    authorName: 'Leo Sterling',
+    authorHandle: 'leo_surfing',
+    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+    isVerified: true,
+    verifiedCategory: 'Oceanographer & Big Wave Surfer',
+    type: 'video',
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-surfer-catching-a-wave-in-the-afternoon-42589-large.mp4',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200&auto=format&fit=crop&q=85',
+    contentUrl: 'https://images.unsplash.com/photo-1502680390469-be75c86b636f?w=1200',
+    soundName: 'Midnight Surf & Ocean Echoes',
+    soundArtist: 'Surf Wave Orchestra',
+    soundCover: 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/0c/eb/54/0ceb545d-75e1-8848-8df0-e64e525a7a70/16UMGIM56422.rgb.jpg/100x100bb.jpg',
+    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/b8/b5/e0/b8b5e0ee-5878-5a63-7186-b4bc48f3fb8f/mzaf_1170799797003463870.plus.aac.p.m4a',
+    caption: 'Sunset sets rolling in at Uluwatu reef. The offshore wind was holding the barrels open all evening. 🌊🏄‍♂️ #surf #bali #uluwatu #ocean',
+    tags: ['surf', 'bali', 'uluwatu', 'ocean'],
+    privacy: 'public',
+    likesCount: 420,
+    commentsCount: 28,
+    sharesCount: 112,
+    savesCount: 245,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '10h ago',
+    comments: [],
+  },
+];
+
+// 2. FOLLOWING FEED: Handcraft, Architecture & Documentary (100% Exclusive to Following)
+export const EXCLUSIVE_FOLLOWING_POSTS: PostItem[] = [
+  {
+    id: 'p-105',
     authorId: 'sc-1',
     authorName: 'Sara Lin',
     authorHandle: 'sara_architecture',
-    authorAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
+    authorAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
     isVerified: true,
     verifiedCategory: 'Spatial & Minimal Architecture',
-    type: 'text',
-    caption: 'Space without noise is true luxury. We sculpt courtyards to invite silence, just as we design cryptographic protocols to protect human presence from algorithmic noise.\n\nPrivity restores that physical sanctuary online.',
-    tags: ['architecture', 'slowtech', 'privity', 'manifesto'],
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1200&auto=format&fit=crop&q=85',
+    caption: 'Finished the rammed-earth guest sanctuary pavilion in northern Kyoto. Hand-compacted local river clay, charred cypress eaves, and indirect southern light that breathes through the courtyards.',
+    tags: ['architecture', 'kyoto', 'minimalism', 'naturalmaterials'],
+    privacy: 'followers',
+    likesCount: 64,
+    commentsCount: 8,
+    sharesCount: 22,
+    savesCount: 51,
+    isLiked: false,
+    isSaved: true,
+    timeAgo: '5h ago',
+    comments: [
+      {
+        id: 'c-501',
+        authorName: 'Elena Rodriguez',
+        authorHandle: 'elena_rodriguez',
+        authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+        isVerified: true,
+        text: 'The shadow interplay on the cypress beams is sublime Sara!',
+        timeAgo: '3h ago',
+        likesCount: 5,
+      },
+    ],
+  },
+  {
+    id: 'p-106',
+    authorId: 'sc-3',
+    authorName: 'Oliver Craft',
+    authorHandle: 'oliver_wood',
+    authorAvatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=400',
+    isVerified: false,
+    verifiedCategory: 'Traditional Joinery',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1200&auto=format&fit=crop&q=85',
+    caption: 'Hand-cut through-tenon and wedged mortise joints for a 200-year-old salvaged Oregon white oak dining slab. No fasteners, no metal hardware. Only timber friction and precise hand chiseling.',
+    tags: ['woodworking', 'joinery', 'craftsmanship', 'handtools'],
+    privacy: 'followers',
+    likesCount: 47,
+    commentsCount: 5,
+    sharesCount: 7,
+    savesCount: 19,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '7h ago',
+    comments: [],
+  },
+  {
+    id: 'p-108',
+    authorId: 'fr-2',
+    authorName: 'Jessica Vance',
+    authorHandle: 'jess_film',
+    authorAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
+    isVerified: true,
+    verifiedCategory: 'Documentary Filmmaker',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200&auto=format&fit=crop&q=85',
+    caption: 'Production still from our master textile weaver documentary in Arashiyama. 35mm motion picture film negative scanned at 4K. Natural morning backlight.',
+    tags: ['cinema', 'documentary', '35mm', 'japan'],
+    privacy: 'followers',
+    likesCount: 78,
+    commentsCount: 9,
+    sharesCount: 38,
+    savesCount: 77,
+    isLiked: true,
+    isSaved: false,
+    timeAgo: '1d ago',
+    comments: [],
+  },
+  {
+    id: 'p-foll-liam',
+    authorId: 'usr-liam',
+    authorName: 'Liam Thorne',
+    authorHandle: 'liam_ceramics',
+    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+    isVerified: false,
+    verifiedCategory: 'Woodfire Ceramicist',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1565193566173-7a0ee3dbe261?w=1200&auto=format&fit=crop&q=85',
+    caption: 'Wood-fired Shino-glazed stoneware tea bowl pulled from the anagama kiln after a 72-hour continuous pine burn. Natural ash glaze crystallized into amber hues.',
+    tags: ['ceramics', 'anagama', 'wabisabi', 'craft'],
+    privacy: 'followers',
+    likesCount: 38,
+    commentsCount: 4,
+    sharesCount: 11,
+    savesCount: 42,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '1d ago',
+    comments: [],
+  },
+  {
+    id: 'p-foll-hannah',
+    authorId: 'usr-hannah',
+    authorName: 'Hannah Ward',
+    authorHandle: 'hannah_botanics',
+    authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    isVerified: true,
+    verifiedCategory: 'Botanical Conservator',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?w=1200&auto=format&fit=crop&q=85',
+    caption: 'First blooms in the conservatory atrium. We preserved rare alpine ferns under controlled moisture chambers. Dedicated to our patient horticultural followers.',
+    tags: ['botany', 'greenhouse', 'flora', 'conservation'],
+    privacy: 'followers',
+    likesCount: 52,
+    commentsCount: 7,
+    sharesCount: 15,
+    savesCount: 61,
+    isLiked: false,
+    isSaved: true,
+    timeAgo: '2d ago',
+    comments: [],
+  },
+];
+
+// 3. CIRCLES FEED: Intimate Close Friends Moments & Alpine Treks (100% Exclusive to Circles)
+export const EXCLUSIVE_CIRCLES_POSTS: PostItem[] = [
+  {
+    id: 'p-101',
+    authorId: 'usr-elena',
+    authorName: 'Elena Rodriguez',
+    authorHandle: 'elena_rodriguez',
+    authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+    isVerified: true,
+    verifiedCategory: 'Visual Artist & Photographer',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1200&auto=format&fit=crop&q=85',
+    caption: 'Quiet morning in the northern studio. Painting and shooting without the invisible pressure of an engagement algorithm. Here is a study on natural window diffusion and quiet space.',
+    tags: ['photography', 'mindful', 'studio', 'analogue'],
     privacy: 'close_friends',
-    likesCount: 18,
+    likesCount: 29,
+    commentsCount: 3,
+    sharesCount: 1,
+    savesCount: 14,
+    isLiked: true,
+    isSaved: true,
+    timeAgo: '14m ago',
+    comments: [
+      {
+        id: 'c-1',
+        authorName: 'Marcus Vance',
+        authorHandle: 'marcus_dev',
+        authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+        isVerified: true,
+        text: 'The warm tones on that cedar frame are breathtaking. Was this natural light from the skylight?',
+        timeAgo: '10m ago',
+        likesCount: 3,
+      },
+    ],
+  },
+  {
+    id: 'p-107',
+    authorId: 'fr-1',
+    authorName: 'Sam Archer',
+    authorHandle: 'sam_arch',
+    authorAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400',
+    isVerified: false,
+    verifiedCategory: 'Wilderness Guide',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1200&auto=format&fit=crop&q=85',
+    caption: 'First light crossing Fisher Chimneys on Mount Shuksan. High alpine ice conditions were crystalline and still. Privileged to share this exclusively with close circle friends.',
+    tags: ['alpinism', 'cascades', 'mountaineering', 'sunrise'],
+    privacy: 'close_friends',
+    likesCount: 24,
     commentsCount: 2,
-    sharesCount: 5,
-    savesCount: 29,
+    sharesCount: 0,
+    savesCount: 14,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '12h ago',
+    comments: [],
+  },
+  {
+    id: 'p-cf-maya',
+    authorId: 'usr-maya',
+    authorName: 'Maya Lin',
+    authorHandle: 'maya_art',
+    authorAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
+    isVerified: true,
+    verifiedCategory: 'Sculptor & Painter',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=1200&auto=format&fit=crop&q=85',
+    caption: 'Midnight ink wash on raw linen canvas. Testing pigment diffusion for the private winter showcase. Grateful for our intimate circle feedback.',
+    tags: ['contemporaryart', 'studio', 'inkwash', 'process'],
+    privacy: 'close_friends',
+    likesCount: 19,
+    commentsCount: 3,
+    sharesCount: 0,
+    savesCount: 22,
+    isLiked: false,
+    isSaved: true,
+    timeAgo: '16h ago',
+    comments: [],
+  },
+  {
+    id: 'p-cf-carlos',
+    authorId: 'usr-carlos',
+    authorName: 'Carlos Mendez',
+    authorHandle: 'carlos_m',
+    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+    isVerified: false,
+    verifiedCategory: 'Acoustic Guitarist',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1200&auto=format&fit=crop&q=85',
+    caption: 'Sunset jam on the terrace overlooking the bay. No mics, no post-processing—just unvarnished chords for close friends.',
+    tags: ['acoustic', 'guitar', 'sunset', 'unplugged'],
+    privacy: 'close_friends',
+    likesCount: 31,
+    commentsCount: 5,
+    sharesCount: 0,
+    savesCount: 18,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '1d ago',
+    comments: [],
+  },
+  {
+    id: 'p-cf-zoe',
+    authorId: 'usr-zoe',
+    authorName: 'Zoe Brooks',
+    authorHandle: 'zoe_candid',
+    authorAvatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150',
+    isVerified: false,
+    verifiedCategory: 'Candid Film Photographer',
+    type: 'image',
+    contentUrl: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=1200&auto=format&fit=crop&q=85',
+    caption: 'Secret backyard dinner with childhood polaroids scattered across the table. These unscripted, uncurated evenings are the exact reason Privity exists—real human trust without the performance.',
+    tags: ['closefriends', 'dinner', 'memories', 'offline'],
+    privacy: 'close_friends',
+    likesCount: 35,
+    commentsCount: 6,
+    sharesCount: 0,
+    savesCount: 20,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '2d ago',
+    comments: [],
+  },
+];
+
+// 4. BIRDIE FEED: Pure Text Manifestos & Intellectual Discourse (100% Exclusive to Birdie)
+export const EXCLUSIVE_BIRDIE_POSTS: PostItem[] = [
+  {
+    id: 'p-102',
+    authorId: 'usr-marcus',
+    authorName: 'Marcus Vance',
+    authorHandle: 'marcus_dev',
+    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
+    isVerified: true,
+    verifiedCategory: 'Systems Architect & Writer',
+    type: 'text',
+    caption: 'The fundamental flaw of 2010s social media was measuring human connection through infinite reach metrics (followers, impressions, virality). When you make distribution algorithmic, creators are forced to perform for the machine.\n\nPrivity restores human agency: explicit audience circles, zero recommendation tampering, and transparent privacy.',
+    tags: ['privacy', 'software', 'social', 'manifesto'],
+    privacy: 'followers',
+    likesCount: 52,
+    commentsCount: 7,
+    sharesCount: 16,
+    savesCount: 42,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '1h ago',
+    comments: [
+      {
+        id: 'c-3',
+        authorName: 'Luciano',
+        authorHandle: 'luciano',
+        authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
+        isVerified: true,
+        text: 'Spot on Marcus. Privacy by default is how we restore authentic trust.',
+        timeAgo: '42m ago',
+        likesCount: 9,
+      },
+    ],
+  },
+  {
+    id: 'p-103',
+    authorId: 'usr-julian',
+    authorName: 'Julian Thorne',
+    authorHandle: 'julian_analogue',
+    authorAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
+    isVerified: true,
+    verifiedCategory: 'Field Audio Recordist',
+    type: 'text',
+    caption: 'Recorded dawn mist reverberations near Big Sur coastal pines. Ambient binaural audio snippet shared with close friends.\n\nMicrophone diaphragms set 17cm apart at 110 degrees—pure stereo imaging without artificial spatialization.',
+    tags: ['ambient', 'binaural', 'soundscape', 'california'],
+    privacy: 'close_friends',
+    likesCount: 38,
+    commentsCount: 3,
+    sharesCount: 4,
+    savesCount: 26,
+    isLiked: false,
+    isSaved: true,
+    timeAgo: '2h ago',
+    comments: [],
+  },
+  {
+    id: 'p-birdie-aris',
+    authorId: 'usr-aris',
+    authorName: 'Dr. Aris Thorne',
+    authorHandle: 'aris_thought',
+    authorAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150',
+    isVerified: true,
+    verifiedCategory: 'Cognitive Neuroscientist & Author',
+    type: 'text',
+    caption: 'Attention isn\'t merely time spent; it is the currency of human consciousness. When an algorithmic feed fragments your mind into 3-second bursts, it doesn\'t just entertain you—it rewires your capacity for deep contemplation.\n\nPrivity\'s chronological feed isn\'t a design preference; it is a cognitive sanctuary.',
+    tags: ['cognition', 'focus', 'slowtech', 'philosophy'],
+    privacy: 'close_friends',
+    likesCount: 63,
+    commentsCount: 8,
+    sharesCount: 19,
+    savesCount: 52,
     isLiked: false,
     isSaved: true,
     timeAgo: '3h ago',
@@ -230,13 +689,55 @@ export const EXTRA_BIRDIE_DISPATCHES: PostItem[] = [
     caption: 'Cryptographic sovereignty is non-negotiable: Ed25519 signatures, zero trackers, peer-to-peer verification. Privity is proving that social media doesn\'t have to be an ad-tech panopticon.\n\nOwn your keys. Own your circles.',
     tags: ['buildinpublic', 'privacy', 'decentralized', 'ed25519'],
     privacy: 'public',
-    likesCount: 34,
-    commentsCount: 4,
-    sharesCount: 12,
-    savesCount: 45,
+    likesCount: 68,
+    commentsCount: 11,
+    sharesCount: 24,
+    savesCount: 58,
     isLiked: false,
     isSaved: false,
     timeAgo: '5h ago',
+    comments: [],
+  },
+  {
+    id: 'p-birdie-david',
+    authorId: 'usr-david',
+    authorName: 'David Kahr',
+    authorHandle: 'david_sound',
+    authorAvatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
+    isVerified: false,
+    verifiedCategory: 'Acoustic Researcher',
+    type: 'text',
+    caption: 'Why do we let platforms compress human nuance into 5-second dopamine hits? The best conversations in history happened in quiet rooms with trusted friends.\n\nBuild your circle with intention, not metrics.',
+    tags: ['culture', 'focus', 'slowsocial', 'reflection'],
+    privacy: 'public',
+    likesCount: 27,
+    commentsCount: 4,
+    sharesCount: 9,
+    savesCount: 31,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '7h ago',
+    comments: [],
+  },
+  {
+    id: 'p-birdie-nadia',
+    authorId: 'usr-nadia',
+    authorName: 'Nadia Chen',
+    authorHandle: 'nadia_lexicon',
+    authorAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
+    isVerified: true,
+    verifiedCategory: 'Linguist & Digital Culture Critic',
+    type: 'text',
+    caption: 'When platforms optimize for engagement, vocabulary degenerates into hyperbole and rage-bait. We lose the subtle gradients of human feeling.\n\nIn closed trust circles, we regain the liberty to speak with nuance, doubt, and humility.',
+    tags: ['language', 'nuance', 'trust', 'culture'],
+    privacy: 'public',
+    likesCount: 81,
+    commentsCount: 14,
+    sharesCount: 33,
+    savesCount: 76,
+    isLiked: false,
+    isSaved: false,
+    timeAgo: '8h ago',
     comments: [],
   },
 ];
@@ -244,8 +745,8 @@ export const EXTRA_BIRDIE_DISPATCHES: PostItem[] = [
 export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   posts,
   currentUser,
-  followingMap,
-  closeFriendsList,
+  followingMap: _followingMap,
+  closeFriendsList: _closeFriendsList,
   onLike,
   onSave,
   onAddComment,
@@ -271,16 +772,6 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     return 'foryou';
   });
 
-  useEffect(() => {
-    if (activeFilter) {
-      if (activeFilter === 'circles') setActiveChannel('circles');
-      else if (activeFilter === 'following') setActiveChannel('following');
-      else if (activeFilter === 'birdie') setActiveChannel('birdie');
-      else if (activeFilter === 'live') setActiveChannel('live');
-      else setActiveChannel('foryou');
-    }
-  }, [activeFilter]);
-
   // Real Audio Playback Engine
   const [isMuted, setIsMuted] = useState(false);
   const bgAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -305,10 +796,21 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     });
   };
 
+  const resetFeedScroll = () => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    }
+    const birdieContainer = document.querySelector('.birdie-feed-scroll-container');
+    if (birdieContainer) {
+      birdieContainer.scrollTop = 0;
+    }
+  };
+
   const handleSelectChannel = (channel: SlideFeedChannel) => {
     stopAllAudio();
     setActiveChannel(channel);
     setActiveSlideIndex(0);
+    resetFeedScroll();
     if (channel === 'live') {
       onOpenLive();
       return;
@@ -316,96 +818,86 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     onSelectFilter?.(channel);
   };
 
+  useEffect(() => {
+    if (activeFilter) {
+      const channel =
+        activeFilter === 'circles' ? 'circles' :
+        activeFilter === 'following' ? 'following' :
+        activeFilter === 'birdie' ? 'birdie' :
+        activeFilter === 'live' ? 'live' : 'foryou';
+      if (channel !== activeChannel) {
+        stopAllAudio();
+        setActiveChannel(channel);
+        setActiveSlideIndex(0);
+        resetFeedScroll();
+      }
+    }
+  }, [activeFilter]);
+
   // Followed creators map (clicking '+' button)
   const [followedMap, setFollowedMap] = useState<Record<string, boolean>>({});
 
   // Filtered posts strictly according to user circles & following rules
-  // Each channel features a completely distinct algorithm, lead creator, and curation!
+  // 100% MUTUALLY EXCLUSIVE FEEDS: ZERO REPEATED POSTS ACROSS FOR YOU, FOLLOWING, CIRCLES, AND BIRDIE!
   const displayPosts = React.useMemo(() => {
-    if (activeChannel === 'circles') {
-      // 1. Circles Feed: Exclusively intimate Close Friends dispatches
-      // Lead: Elena Rodriguez studio window diffusion study [★ Close Friends]
-      const cfPosts = posts.filter(
-        (p) =>
-          p.privacy === 'close_friends' ||
-          (closeFriendsList && closeFriendsList.includes(p.authorHandle.replace(/^@/, '')))
-      );
-      const list = cfPosts.length > 0 ? cfPosts : posts.filter((p) => p.privacy === 'close_friends');
-      return [...list].sort((a, b) => {
-        if (a.authorHandle === 'elena_rodriguez') return -1;
-        if (b.authorHandle === 'elena_rodriguez') return 1;
-        if (a.authorHandle === 'sam_arch') return -1;
-        if (b.authorHandle === 'sam_arch') return 1;
-        return 0;
+    // Helper to merge stateful overrides (likes, comments, bookmarks, sounds) from the live `posts` prop
+    // without overriding the post's core feed identity, privacy, or media type
+    const mergeOverrides = (baseList: PostItem[]) => {
+      return baseList.map((base) => {
+        const live = posts.find((p) => p.id === base.id);
+        if (!live) return base;
+        return {
+          ...base,
+          likesCount: live.likesCount ?? base.likesCount,
+          isLiked: live.isLiked ?? base.isLiked,
+          commentsCount: live.commentsCount ?? base.commentsCount,
+          comments: live.comments ?? base.comments,
+          savesCount: live.savesCount ?? base.savesCount,
+          isSaved: live.isSaved ?? base.isSaved,
+          sharesCount: live.sharesCount ?? base.sharesCount,
+          soundName: live.soundName ?? base.soundName,
+          soundArtist: live.soundArtist ?? base.soundArtist,
+          soundUrl: live.soundUrl ?? base.soundUrl,
+          soundCover: live.soundCover ?? base.soundCover,
+        };
       });
+    };
+
+    // User-created dynamic dispatches
+    const allExclusiveIds = new Set([
+      ...EXCLUSIVE_FORYOU_POSTS.map((x) => x.id),
+      ...EXCLUSIVE_FOLLOWING_POSTS.map((x) => x.id),
+      ...EXCLUSIVE_CIRCLES_POSTS.map((x) => x.id),
+      ...EXCLUSIVE_BIRDIE_POSTS.map((x) => x.id),
+    ]);
+    const customUserPosts = posts.filter((p) => !allExclusiveIds.has(p.id));
+
+    if (activeChannel === 'circles') {
+      // 100% EXCLUSIVE TO CIRCLES: Elena Rodriguez studio study, Sam Archer alpine, Maya Lin, Carlos Mendez, Zoe Brooks
+      const userCf = customUserPosts.filter((p) => p.privacy === 'close_friends' && p.type !== 'text');
+      return [...userCf, ...mergeOverrides(EXCLUSIVE_CIRCLES_POSTS)];
     }
 
     if (activeChannel === 'following') {
-      // 2. Following Feed: Authentic feed from creators you follow
-      // Lead: Sara Lin Kyoto pavilion, Oliver Craft joinery, Jessica Vance 35mm
-      // Excludes Elena Rodriguez and Nicole from leading here to eliminate duplication!
-      const followedList = posts.filter(
-        (p) =>
-          ((followingMap && followingMap[p.authorHandle.replace(/^@/, '')]) ||
-           followedMap[p.authorHandle] ||
-           p.authorHandle === 'sara_architecture' ||
-           p.authorHandle === 'oliver_wood' ||
-           p.authorHandle === 'jess_film') &&
-          p.authorHandle !== 'elena_rodriguez' &&
-          p.authorHandle !== 'nicole_spicy'
+      // 100% EXCLUSIVE TO FOLLOWING: Sara Lin Kyoto pavilion, Oliver Craft joinery, Jessica Vance 35mm, Liam ceramics, Hannah botanics
+      const userFollowing = customUserPosts.filter(
+        (p) => p.privacy === 'followers' && p.type !== 'text'
       );
-      const list = followedList.length > 0 ? followedList : posts;
-      return [...list].sort((a, b) => {
-        if (a.authorHandle === 'sara_architecture') return -1;
-        if (b.authorHandle === 'sara_architecture') return 1;
-        if (a.authorHandle === 'oliver_wood') return -1;
-        if (b.authorHandle === 'oliver_wood') return 1;
-        if (a.authorHandle === 'jess_film') return -1;
-        if (b.authorHandle === 'jess_film') return 1;
-        return 0;
-      });
+      return [...userFollowing, ...mergeOverrides(EXCLUSIVE_FOLLOWING_POSTS)];
     }
 
     if (activeChannel === 'birdie') {
-      // 3. Birdie Feed: Pure thought, text & manifesto discussions!
-      // Lead: Marcus Vance's manifesto (Matching user screenshot!), Julian Thorne field notes, Sara Lin reflections, Luciano
-      // Excludes photo/video cards (Elena's photo study, Nicole's video, etc.)
-      const textPosts = posts.filter(
-        (p) =>
-          (p.type === 'text' || p.authorHandle === 'marcus_dev' || p.authorHandle === 'julian_analogue') &&
-          p.authorHandle !== 'elena_rodriguez' &&
-          p.authorHandle !== 'nicole_spicy'
-      );
-      const merged = [...textPosts];
-      EXTRA_BIRDIE_DISPATCHES.forEach((extra) => {
-        if (!merged.some((p) => p.id === extra.id)) {
-          merged.push(extra);
-        }
-      });
-      return merged.sort((a, b) => {
-        if (a.authorHandle === 'marcus_dev') return -1;
-        if (b.authorHandle === 'marcus_dev') return 1;
-        if (a.authorHandle === 'julian_analogue') return -1;
-        if (b.authorHandle === 'julian_analogue') return 1;
-        if (a.authorHandle === 'sara_architecture') return -1;
-        if (b.authorHandle === 'sara_architecture') return 1;
-        return 0;
-      });
+      // 100% EXCLUSIVE TO BIRDIE: Marcus Vance manifesto, Julian Thorne field notes, Dr. Aris Thorne reflection, Luciano crypto, David Kahr, Nadia Chen
+      const userText = customUserPosts.filter((p) => p.type === 'text');
+      return [...userText, ...mergeOverrides(EXCLUSIVE_BIRDIE_POSTS)];
     }
 
-    // 4. Default: 'foryou' (Viral Discovery stream)
-    // Lead: Nicole (#fyp #viral #miami #video) with Brazilian Phonk, Chloe Kim Tokyo neon video, Jessica Vance 35mm
-    const forYouPosts = posts.filter((p) => p.authorHandle !== 'marcus_dev');
-    return [...forYouPosts].sort((a, b) => {
-      if (a.authorHandle === 'nicole_spicy') return -1;
-      if (b.authorHandle === 'nicole_spicy') return 1;
-      if (a.authorHandle === 'chloe_visuals') return -1;
-      if (b.authorHandle === 'chloe_visuals') return 1;
-      if (a.authorHandle === 'jess_film') return -1;
-      if (b.authorHandle === 'jess_film') return 1;
-      return 0;
-    });
-  }, [posts, activeChannel, followingMap, followedMap, closeFriendsList]);
+    // 100% EXCLUSIVE TO FOR YOU: Nicole viral video, Chloe Kim Tokyo neon, Kai Tanaka drifting, Isabella Rossi dance, Leo Sterling surf
+    const userForYou = customUserPosts.filter(
+      (p) => p.privacy === 'public' && p.type !== 'text'
+    );
+    return [...userForYou, ...mergeOverrides(EXCLUSIVE_FORYOU_POSTS)];
+  }, [posts, activeChannel]);
 
   // Active slide index tracked via IntersectionObserver / scroll position
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);

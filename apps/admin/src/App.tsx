@@ -387,7 +387,7 @@ const SAMPLE_POSTS: PostItem[] = [
     contentUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1200&auto=format&fit=crop&q=85',
     caption: 'Finished the rammed-earth guest sanctuary pavilion in northern Kyoto. Hand-compacted local river clay, charred cypress eaves, and indirect southern light that breathes through the courtyards.',
     tags: ['architecture', 'kyoto', 'minimalism', 'naturalmaterials'],
-    privacy: 'public',
+    privacy: 'followers',
     likesCount: 3,
     likersList: ['elena_rodriguez', 'marcus_dev', 'oliver_wood'],
     commentsCount: 1,
@@ -421,7 +421,7 @@ const SAMPLE_POSTS: PostItem[] = [
     contentUrl: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1200&auto=format&fit=crop&q=85',
     caption: 'Hand-cut through-tenon and wedged mortise joints for a 200-year-old salvaged Oregon white oak dining slab. No fasteners, no metal hardware. Only timber friction and precise hand chiseling.',
     tags: ['woodworking', 'joinery', 'craftsmanship', 'handtools'],
-    privacy: 'public',
+    privacy: 'followers',
     likesCount: 2,
     likersList: ['sara_architecture', 'sam_arch'],
     commentsCount: 0,
@@ -469,7 +469,7 @@ const SAMPLE_POSTS: PostItem[] = [
     contentUrl: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200&auto=format&fit=crop&q=85',
     caption: 'Production still from our master textile weaver documentary in Arashiyama. 35mm motion picture film negative scanned at 4K.',
     tags: ['cinema', 'documentary', '35mm', 'japan'],
-    privacy: 'public',
+    privacy: 'followers',
     likesCount: 4,
     likersList: ['marcus_dev', 'elena_rodriguez', 'chloe_visuals', 'luciano'],
     commentsCount: 0,
@@ -5425,7 +5425,13 @@ export function App() {
             {/* Posts Stream */}
             <div>
               {posts
-                .filter((p) => feedFilter === 'feed' || feedFilter === 'all' || p.privacy === feedFilter)
+                .filter((p) => {
+                  if (feedFilter === 'close_friends') return p.privacy === 'close_friends' && p.type !== 'text';
+                  if (feedFilter === 'followers') return p.privacy === 'followers' && p.type !== 'text';
+                  if (feedFilter === 'birdie') return p.type === 'text';
+                  if (feedFilter === 'all') return true;
+                  return p.privacy === 'public' && p.type !== 'text';
+                })
                 .filter((p) => {
                   if (!activeTagFilter) return true;
                   return p.tags && p.tags.map((t) => t.toLowerCase()).includes(activeTagFilter.toLowerCase());
