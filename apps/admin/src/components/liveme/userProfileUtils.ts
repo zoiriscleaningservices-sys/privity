@@ -28,8 +28,27 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-// All users start from Level 0 with 0 XP unless earned or stored
-export function getDeterministicLevel(_handle: string): number {
+// Return authentic real-time account level based on actual progression
+export function getDeterministicLevel(handle: string): number {
+  if (!handle) return 0;
+  try {
+    const clean = handle.replace(/^@/, '').toLowerCase().trim();
+    const stored = localStorage.getItem('privity_accounts_v1');
+    if (stored) {
+      const accs = JSON.parse(stored);
+      if (accs[clean]?.level) return Number(accs[clean].level);
+    }
+    const session = localStorage.getItem('privity_auth_session_v1');
+    if (session) {
+      const cur = JSON.parse(session);
+      if (cur.handle?.toLowerCase() === clean && cur.level) return Number(cur.level);
+    }
+    const profs = localStorage.getItem('privity_profiles_v5');
+    if (profs) {
+      const parsed = JSON.parse(profs);
+      if (parsed[clean]?.level) return Number(parsed[clean].level);
+    }
+  } catch {}
   return 0;
 }
 

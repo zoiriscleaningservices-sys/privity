@@ -69,3 +69,54 @@ export function getSupabaseClient(): SupabaseClient | null {
 export const isSupabaseConfigured = (): boolean => {
   return Boolean(getSupabaseAnonKey());
 };
+
+let realtimeSyncChannel: any = null;
+
+export function getSupabaseRealtimeChannel() {
+  const sb = getSupabaseClient();
+  if (!sb) return null;
+  if (!realtimeSyncChannel) {
+    try {
+      realtimeSyncChannel = sb.channel('privity_sync_hub', {
+        config: { broadcast: { self: false } },
+      });
+      realtimeSyncChannel.subscribe((status: string) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Supabase Realtime] Connected to privity_sync_hub');
+        }
+      });
+    } catch (e) {
+      console.warn('[Supabase Realtime] Failed to create channel:', e);
+      return null;
+    }
+  }
+  return realtimeSyncChannel;
+}
+
+export function broadcastViaSupabase(payload: any) {
+  try {
+    const ch = getSupabaseRealtimeChannel();
+    if (ch) {
+      ch.send({
+        type: 'broadcast',
+        event: 'privity_event',
+        payload,
+      });
+    }
+  } catch (e) {
+    console.warn('[Supabase Realtime] Broadcast failed:', e);
+  }
+}
+
+export function onSupabaseBroadcast(callback: (payload: any) => void): () => void {
+  try {
+    const ch = getSupabaseRealtimeChannel();
+    if (!ch) return () => {};
+    ch.on('broadcast', { event: 'privity_event' }, ({ payload }: any) => {
+      callback(payload);
+    });
+    return () => {};
+  } catch {
+    return () => {};
+  }
+}

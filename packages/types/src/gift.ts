@@ -33,6 +33,7 @@ export interface GiftEvent {
   giftIcon?: string;
   quantity: number;
   coinValue: number;
+  senderLevel?: number;
   createdAt: string;
 }
 

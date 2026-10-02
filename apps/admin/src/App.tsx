@@ -69,7 +69,8 @@ import {
   StoryItem,
 } from './components/feed/TikTokSlideFeed';
 import { authService, UserAccount } from './services/authService';
-import { getSupabaseClient } from './services/supabaseClient';
+import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast } from './services/supabaseClient';
+import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
 
 export const BANNED_MOCK_HANDLES = new Set([
@@ -878,6 +879,7 @@ export function App() {
     return sanitizeStoredDirectMessages(loaded);
   });
   const [stories, setStories] = useState<StoryItem[]>(() => loadValidStories());
+  const broadcastSyncEventRef = React.useRef<(event: any) => void>(() => {});
 
   const handleAddStory = (newStory: StoryItem) => {
     setStories((prev) => {
@@ -888,6 +890,10 @@ export function App() {
       } catch (e) {}
       return next;
     });
+    broadcastSyncEventRef.current({
+      action: 'NEW_STORY',
+      story: newStory,
+    });
   };
 
   const handleDeleteStory = (storyId: string) => {
@@ -897,6 +903,10 @@ export function App() {
         localStorage.setItem('privity_stories_v3', JSON.stringify(next));
       } catch (e) {}
       return next;
+    });
+    broadcastSyncEventRef.current({
+      action: 'DELETE_STORY',
+      storyId,
     });
   };
 
@@ -1330,7 +1340,14 @@ export function App() {
       console.warn('Local bus post failed', e);
     }
 
-    // 2. Cloud broadcast to all active devices (phones, laptops, tablets)
+    // 2. Cloud broadcast via Supabase Realtime WebSockets for instant sub-50ms sync
+    try {
+      broadcastViaSupabase(payload);
+    } catch (e) {
+      console.warn('Supabase broadcast failed', e);
+    }
+
+    // 3. Cloud broadcast to all active devices (ntfy fallback)
     try {
       fetch(SYNC_ENDPOINT, {
         method: 'POST',
@@ -1341,6 +1358,8 @@ export function App() {
       console.warn('Cloud sync err', e);
     }
   };
+
+  broadcastSyncEventRef.current = broadcastSyncEvent;
 
   // Handler to apply incoming remote sync events
   const applyRemoteSyncEvent = React.useCallback(
@@ -1365,6 +1384,8 @@ export function App() {
           const pts = (gift.coinCost || 10) * (giftEvent.quantity || 1) * 2;
           setBattleScoreHost((prev) => prev + pts);
 
+          const senderLevel = giftEvent.senderLevel || getDeterministicLevel(giftEvent.senderId) || 1;
+
           setLiveComments((prev) => [
             ...prev,
             {
@@ -1372,7 +1393,7 @@ export function App() {
               user: giftEvent.senderName,
               text: `sent ${gift.name} ${giftEvent.quantity > 1 ? `x${giftEvent.quantity} ` : ''}(+${pts} pts)!`,
               badge: gift.rarity === 'legendary' ? 'Crown VIP' : 'Top Gifter',
-              level: 30,
+              level: senderLevel,
               giftName: gift.name,
               giftIcon: gift.icon,
             },
@@ -1683,19 +1704,70 @@ export function App() {
         }
 
         case 'TOGGLE_FOLLOW': {
-          const { targetHandle, targetId, isFollowing } = event;
+          const { targetHandle, targetId, followerHandle, followerName, isFollowing } = event;
           if (!targetHandle) return;
-          const clean = targetHandle.replace(/^@/, '');
-          setFollowingMap((prev) => {
-            const next: Record<string, boolean> = {
-              ...prev,
-              [clean]: isFollowing,
-              [clean.toLowerCase()]: isFollowing,
-            };
-            if (targetId) next[targetId] = isFollowing;
-            safeSaveStorage('privity_following_v5', next);
-            return next;
+          const cleanTarget = targetHandle.replace(/^@/, '').toLowerCase();
+          const cleanFollower = (followerHandle || '').replace(/^@/, '').toLowerCase();
+
+          // 1. If this device is the follower (e.g. user logged in on 2 devices/tabs)
+          if (cleanFollower && cleanFollower === cleanMyHandle.toLowerCase()) {
+            setFollowingMap((prev) => {
+              const next: Record<string, boolean> = {
+                ...prev,
+                [cleanTarget]: isFollowing,
+              };
+              if (targetId) next[targetId] = isFollowing;
+              safeSaveStorage('privity_following_v5', next);
+              return next;
+            });
+          }
+
+          // 2. Dual-profile real-time follower/following list updates across all users
+          setProfiles((prev) => {
+            let changed = false;
+            const nextProfs = { ...prev };
+
+            // Update Target's followers list
+            const targetProf = nextProfs[cleanTarget] || getUserProfile(cleanTarget);
+            if (targetProf && cleanFollower) {
+              const curFollowers = targetProf.followersList || [];
+              const updatedFollowers = isFollowing
+                ? Array.from(new Set([...curFollowers, cleanFollower]))
+                : curFollowers.filter((h) => h.toLowerCase() !== cleanFollower);
+              nextProfs[cleanTarget] = {
+                ...targetProf,
+                followersList: updatedFollowers,
+              };
+              changed = true;
+            }
+
+            // Update Follower's following list
+            if (cleanFollower) {
+              const followerProf = nextProfs[cleanFollower] || getUserProfile(cleanFollower);
+              if (followerProf) {
+                const curFollowing = followerProf.followingList || [];
+                const updatedFollowing = isFollowing
+                  ? Array.from(new Set([...curFollowing, cleanTarget]))
+                  : curFollowing.filter((h) => h.toLowerCase() !== cleanTarget);
+                nextProfs[cleanFollower] = {
+                  ...followerProf,
+                  followingList: updatedFollowing,
+                };
+                changed = true;
+              }
+            }
+
+            if (changed) {
+              safeSaveStorage('privity_profiles_v5', nextProfs);
+              return nextProfs;
+            }
+            return prev;
           });
+
+          // 3. Instant toast notification if someone just followed the logged-in user
+          if (isFollowing && cleanTarget === cleanMyHandle.toLowerCase() && cleanFollower !== cleanMyHandle.toLowerCase()) {
+            triggerToast(`✨ ${followerName ? `${followerName} (@${cleanFollower})` : `@${cleanFollower || 'A user'}`} followed you!`);
+          }
           break;
         }
 
@@ -1775,14 +1847,187 @@ export function App() {
           const { profile } = event;
           if (!profile || !profile.handle) return;
           const clean = profile.handle.replace(/^@/, '');
+          const cleanLower = clean.toLowerCase();
+
+          // 1. Update profiles dictionary
           setProfiles((prev) => {
             const next = {
               ...prev,
               [clean]: { ...prev[clean], ...profile },
+              [cleanLower]: { ...prev[cleanLower], ...profile },
             };
             safeSaveStorage('privity_profiles_v5', next);
             return next;
           });
+
+          // 2. Instantly update all existing dispatches / posts / comments authored by this user
+          setPosts((prev) => {
+            let changed = false;
+            const nextPosts = prev.map((p) => {
+              const isPostAuthor =
+                (p.authorHandle && p.authorHandle.replace(/^@/, '').toLowerCase() === cleanLower) ||
+                (profile.id && p.authorId === profile.id);
+
+              let postCommentsChanged = false;
+              const updatedComments = (p.comments || []).map((c) => {
+                const isCommentAuthor =
+                  c.authorHandle && c.authorHandle.replace(/^@/, '').toLowerCase() === cleanLower;
+                let repliesChanged = false;
+                const updatedReplies = (c.replies || []).map((r) => {
+                  const isReplyAuthor =
+                    r.authorHandle && r.authorHandle.replace(/^@/, '').toLowerCase() === cleanLower;
+                  if (isReplyAuthor) {
+                    repliesChanged = true;
+                    return {
+                      ...r,
+                      authorName: profile.name || r.authorName,
+                      authorAvatar: profile.avatar || r.authorAvatar,
+                      authorHandle: profile.handle || r.authorHandle,
+                    };
+                  }
+                  return r;
+                });
+
+                if (isCommentAuthor || repliesChanged) {
+                  postCommentsChanged = true;
+                  return {
+                    ...c,
+                    authorName: isCommentAuthor ? (profile.name || c.authorName) : c.authorName,
+                    authorAvatar: isCommentAuthor ? (profile.avatar || c.authorAvatar) : c.authorAvatar,
+                    authorHandle: isCommentAuthor ? (profile.handle || c.authorHandle) : c.authorHandle,
+                    replies: updatedReplies,
+                  };
+                }
+                return c;
+              });
+
+              if (isPostAuthor || postCommentsChanged) {
+                changed = true;
+                return {
+                  ...p,
+                  authorName: isPostAuthor ? (profile.name || p.authorName) : p.authorName,
+                  authorAvatar: isPostAuthor ? (profile.avatar || p.authorAvatar) : p.authorAvatar,
+                  authorHandle: isPostAuthor ? (profile.handle || p.authorHandle) : p.authorHandle,
+                  comments: updatedComments,
+                };
+              }
+              return p;
+            });
+            if (changed) {
+              safeSaveStorage('privity_posts_v5', nextPosts);
+              return nextPosts;
+            }
+            return prev;
+          });
+
+          // 3. Update stories authored by this user
+          setStories((prev) => {
+            let changed = false;
+            const nextStories = prev.map((s) => {
+              const sHandle = (s.authorHandle || '').replace(/^@/, '').toLowerCase();
+              if (sHandle === cleanLower) {
+                changed = true;
+                return {
+                  ...s,
+                  authorName: profile.name || s.authorName,
+                  authorAvatar: profile.avatar || s.authorAvatar,
+                };
+              }
+              return s;
+            });
+            if (changed) {
+              safeSaveStorage('privity_stories_v3', nextStories);
+              return nextStories;
+            }
+            return prev;
+          });
+
+          // 4. Update active chat user if open
+          setActiveChatUser((prev) => {
+            if (!prev) return null;
+            const chatHandle = (prev.handle || '').replace(/^@/, '').toLowerCase();
+            if (chatHandle === cleanLower) {
+              return { ...prev, ...profile };
+            }
+            return prev;
+          });
+
+          // 5. Update network live streamers if this user is streaming
+          setNetworkLiveStreamers((prev) =>
+            prev.map((s) => {
+              const sHandle = ((s as any).creatorHandle || s.handle || '').replace(/^@/, '').toLowerCase();
+              if (sHandle === cleanLower) {
+                return {
+                  ...s,
+                  name: `${profile.name} (LIVE NOW 🔴)`,
+                  avatar: profile.avatar || s.avatar,
+                  posterUrl: profile.avatar || s.posterUrl,
+                };
+              }
+              return s;
+            })
+          );
+          break;
+        }
+
+        case 'NEW_STORY': {
+          const { story } = event;
+          if (!story || !story.id) return;
+          setStories((prev) => {
+            if (prev.some((s) => s.id === story.id)) return prev;
+            const next = [story, ...prev];
+            safeSaveStorage('privity_stories_v3', next);
+            return next;
+          });
+          break;
+        }
+
+        case 'DELETE_STORY': {
+          const { storyId } = event;
+          if (!storyId) return;
+          setStories((prev) => {
+            const next = prev.filter((s) => s.id !== storyId);
+            safeSaveStorage('privity_stories_v3', next);
+            return next;
+          });
+          break;
+        }
+
+        case 'LIVE_STARTED': {
+          const { host } = event;
+          if (!host || !host.id) return;
+          liveStreamSync.notifyStreamStarted(host);
+          setNetworkLiveStreamers((prev) => {
+            const cleanHostHandle = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
+            const filtered = prev.filter((s) => {
+              const sHandle = ((s as any).creatorHandle || s.handle || '').toLowerCase().replace('@', '').trim();
+              return s.id !== host.id && sHandle !== cleanHostHandle;
+            });
+            return [host, ...filtered];
+          });
+          const hostName = host.creatorName || host.name || `@${host.creatorHandle || 'someone'}`;
+          triggerToast(`🔴 ${hostName} is now LIVE!`);
+          break;
+        }
+
+        case 'LIVE_ENDED': {
+          const { streamId, handle } = event;
+          if (!streamId && !handle) return;
+          liveStreamSync.notifyStreamEnded(streamId || '', handle);
+          setNetworkLiveStreamers((prev) => {
+            const cleanTarget = (handle || '').toLowerCase().replace('@', '').trim();
+            return prev.filter((s) => {
+              const sHandle = ((s as any).creatorHandle || s.handle || '').toLowerCase().replace('@', '').trim();
+              return s.id !== streamId && (!cleanTarget || sHandle !== cleanTarget);
+            });
+          });
+          if (activeLiveStream && (activeLiveStream.id === streamId || (handle && (activeLiveStream as any).creatorHandle === handle))) {
+            setActiveLiveStream(null);
+            triggerToast('Live broadcast ended by host');
+          }
+          if (minimizedLiveStream && (minimizedLiveStream.id === streamId || (handle && (minimizedLiveStream as any).creatorHandle === handle))) {
+            setMinimizedLiveStream(null);
+          }
           break;
         }
 
@@ -1888,7 +2133,49 @@ export function App() {
 
     connectSSE();
 
-    // 4. Same-device multi-tab BroadcastChannel listener
+    // 4. Supabase Realtime WebSocket listener for sub-50ms instant sync across all devices
+    const unsubSupabase = onSupabaseBroadcast((evt) => {
+      applyRemoteSyncEvent(evt);
+    });
+
+    // 4.1. Supabase Postgres DB changes listener on profiles table
+    let dbProfilesSubscription: any = null;
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
+        dbProfilesSubscription = sb
+          .channel('public:profiles_realtime')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'profiles' },
+            (payload: any) => {
+              if (payload?.new) {
+                const row = payload.new;
+                const cleanHandle = (row.handle || row.username || '').replace(/^@/, '');
+                if (cleanHandle) {
+                  applyRemoteSyncEvent({
+                    action: 'UPDATE_PROFILE',
+                    profile: {
+                      id: row.id,
+                      name: row.full_name || row.name || cleanHandle,
+                      handle: cleanHandle,
+                      avatar: row.avatar_url || row.avatar || '',
+                      bio: row.bio || '',
+                      coverUrl: row.cover_url || '',
+                      isVerified: !!row.is_verified,
+                    },
+                  });
+                }
+              }
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Supabase DB subscription error:', err);
+      }
+    }
+
+    // 5. Same-device multi-tab BroadcastChannel listener
     if (localSyncBus) {
       localSyncBus.onmessage = (e) => {
         if (e.data) {
@@ -1897,7 +2184,7 @@ export function App() {
       };
     }
 
-    // 5. 3-second heartbeat poll to ensure guaranteed sync even if mobile OS sleeps SSE
+    // 6. 3-second heartbeat poll to ensure guaranteed sync even if mobile OS sleeps SSE
     const pollInterval = setInterval(() => {
       quickCatchUp();
       if (!es || es.readyState === EventSource.CLOSED) {
@@ -1905,7 +2192,7 @@ export function App() {
       }
     }, 3000);
 
-    // 6. On window visibility / focus (e.g. user unlocks phone or switches back to tab)
+    // 7. On window visibility / focus (e.g. user unlocks phone or switches back to tab)
     const handleWake = () => {
       if (document.visibilityState === 'visible') {
         quickCatchUp();
@@ -1922,6 +2209,12 @@ export function App() {
       clearInterval(pollInterval);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       es?.close();
+      unsubSupabase();
+      if (dbProfilesSubscription) {
+        try {
+          sb?.removeChannel(dbProfilesSubscription);
+        } catch {}
+      }
       window.removeEventListener('visibilitychange', handleWake);
       window.removeEventListener('focus', handleWake);
       window.removeEventListener('online', fullCatchUp);
@@ -2607,6 +2900,10 @@ export function App() {
       const pts = totalCost * 2;
       setBattleScoreHost((prev) => prev + pts);
 
+      // 3.5. Compute user XP and real-time level progression
+      const expResult = authService.addExperience(totalCost);
+      const userLevel = expResult.level || getDeterministicLevel(myProfile.handle) || 1;
+
       // 4. Construct GiftEvent
       const giftEvent: GiftEvent = {
         id: `evt_gift_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -2614,6 +2911,7 @@ export function App() {
         senderId: (myProfile.handle || '').replace(/^@/, ''),
         senderName: myProfile.name,
         senderAvatar: myProfile.avatar,
+        senderLevel: userLevel,
         recipientId: currentStream.creatorHandle,
         recipientName: currentStream.creatorName,
         giftId: gift.id,
@@ -2643,7 +2941,7 @@ export function App() {
           user: myProfile.name,
           text: `sent ${gift.name} ${quantity > 1 ? `x${quantity} ` : ''}(+${pts} pts)!`,
           badge: gift.rarity === 'legendary' ? 'Crown VIP' : 'Top Gifter',
-          level: 30,
+          level: userLevel,
           giftName: gift.name,
           giftIcon: gift.icon,
         },
@@ -2873,6 +3171,9 @@ export function App() {
       action: 'TOGGLE_FOLLOW',
       targetHandle: resolvedHandle,
       targetId: resolvedId,
+      followerHandle: myProfile.handle,
+      followerName: myProfile.name,
+      followerAvatar: myProfile.avatar,
       isFollowing: next,
     });
 
@@ -4567,6 +4868,10 @@ export function App() {
       localStorage.setItem('privity_active_live_session', JSON.stringify(userStream));
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_HOST_STARTED', host: hostMeta });
+      broadcastSyncEvent({
+        action: 'LIVE_STARTED',
+        host: hostMeta,
+      });
     } catch {}
 
     // Announce and broadcast P2P live stream across all network devices
@@ -8415,6 +8720,11 @@ export function App() {
               if (activeLiveStream?.id) {
                 const targetHandle = (activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '';
                 liveStreamSync.markStreamEnded(activeLiveStream.id, targetHandle);
+                broadcastSyncEvent({
+                  action: 'LIVE_ENDED',
+                  streamId: activeLiveStream.id,
+                  handle: targetHandle,
+                });
               }
               liveStreamSync.stopHostBroadcast();
               try {
@@ -8442,6 +8752,11 @@ export function App() {
             if (activeLiveStream?.id) {
               const targetHandle = (activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '';
               liveStreamSync.markStreamEnded(activeLiveStream.id, targetHandle);
+              broadcastSyncEvent({
+                action: 'LIVE_ENDED',
+                streamId: activeLiveStream.id,
+                handle: targetHandle,
+              });
             }
             setActiveLiveStream(null);
             setMinimizedLiveStream(null);

@@ -433,6 +433,17 @@ class LiveStreamSyncService {
     this.notifySubscribers();
   }
 
+  public notifyStreamStarted(stream: any) {
+    if (!stream) return;
+    const normHandle = (stream.creatorHandle || stream.handle || '').toLowerCase().replace('@', '').trim();
+    if (stream.id) this.clearStreamEnded(stream.id, normHandle);
+    this.handleIncomingStream(stream);
+  }
+
+  public notifyStreamEnded(streamId: string, rawHandle?: string) {
+    this.handleStreamEnded(streamId, rawHandle);
+  }
+
   private startPruneLoop() {
     if (this.pruneInterval) clearInterval(this.pruneInterval);
     this.pruneInterval = setInterval(() => {

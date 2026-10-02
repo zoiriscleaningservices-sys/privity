@@ -18,6 +18,7 @@ import { LiveModerationModal } from './LiveModerationModal';
 import { getUserLiveProfile, UserLiveProfile, getDeterministicLevel } from './userProfileUtils';
 import { GiftAnimationPlayer, globalGiftQueue, DEFAULT_GIFTS, GiftEvent } from '../../gifts';
 import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSyncService';
+import { authService } from '../../services/authService';
 import './liveme.css';
 
 export interface LiveBroadcastSummaryData {
@@ -1568,12 +1569,16 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       } catch {}
     }
 
+    // Award real-time XP and compute level
+    authService.addExperience(totalCost);
+    const userLevel = getDeterministicLevel(currentUser.handle);
+
     // Post to chat stream with special gift notice
     const giftMsg: LiveMeChatMessage = {
       id: `gift-${Date.now()}`,
       user: currentUser.name,
       handle: currentUser.handle,
-      level: getDeterministicLevel(currentUser.handle),
+      level: userLevel,
       text: `sent ${gift.name} x${selectedCombo}! ${gift.icon}`,
       isSystem: true,
       giftInfo: {
@@ -1628,10 +1633,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           name: currentUser.name,
           handle: currentUser.handle,
           avatar: currentUser.avatar,
+          level: userLevel,
         },
       });
       const bus = new BroadcastChannel('privity_sync_bus');
-      bus.postMessage({ type: 'LIVE_GIFT', event: giftEvent, animGift });
+      bus.postMessage({ type: 'LIVE_GIFT', event: giftEvent, animGift, senderLevel: userLevel });
       bus.close();
     } catch {}
 

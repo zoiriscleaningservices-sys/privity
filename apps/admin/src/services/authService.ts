@@ -495,6 +495,21 @@ class AuthService {
     return updated;
   }
 
+  // Add XP and level up dynamically with real-time level progression
+  public addExperience(xpToAdd: number): { level: number; xp: number; leveledUp: boolean } {
+    if (!this.currentUser) return { level: 0, xp: 0, leveledUp: false };
+    const currentXp = (this.currentUser.xp || 0) + xpToAdd;
+    const newLevel = Math.max(1, Math.floor(Math.sqrt(currentXp / 20)));
+    const leveledUp = newLevel > (this.currentUser.level || 0);
+    const updated: UserAccount = {
+      ...this.currentUser,
+      xp: currentXp,
+      level: newLevel,
+    };
+    this.setSession(updated);
+    return { level: newLevel, xp: currentXp, leveledUp };
+  }
+
   // Log out current session
   public async logout(): Promise<void> {
     const supabase = getSupabaseClient();
