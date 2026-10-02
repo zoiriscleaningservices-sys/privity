@@ -124,9 +124,59 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const currentStreamer = streamers[activeIndex] || streamers[0];
   const isHost = isHostBroadcast || !!currentStreamer.isHost;
 
-  // Remote P2P Live Camera Video Stream
+  // Remote P2P Live Camera Video Stream & Real-time Live Frame Stream
   const [remoteP2PStream, setRemoteP2PStream] = useState<MediaStream | null>(null);
+  const [remoteLiveFrame, setRemoteLiveFrame] = useState<string | null>(null);
   const [p2pConnectionStatus, setP2pConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
+  const [roomContributors, setRoomContributors] = useState(() => currentStreamer.topContributors || []);
+
+  useEffect(() => {
+    if (currentStreamer.topContributors && currentStreamer.topContributors.length > 0) {
+      setRoomContributors(currentStreamer.topContributors);
+    }
+  }, [currentStreamer.topContributors]);
+
+  // Viewer join and leave room presence announcement
+  useEffect(() => {
+    if (!isHost) {
+      liveStreamSync.sendRoomEvent(currentStreamer.id, {
+        type: 'LIVE_JOIN',
+        streamerId: currentStreamer.id,
+        user: {
+          name: currentUser.name,
+          handle: currentUser.handle,
+          avatar: currentUser.avatar,
+        },
+      });
+
+      return () => {
+        liveStreamSync.sendRoomEvent(currentStreamer.id, {
+          type: 'LIVE_LEAVE',
+          streamerId: currentStreamer.id,
+          user: {
+            handle: currentUser.handle,
+          },
+        });
+      };
+    }
+  }, [isHost, currentStreamer.id, currentUser.name, currentUser.handle, currentUser.avatar]);
+
+  // Cross-tab live frame sync fallback
+  useEffect(() => {
+    if (isHost) return;
+    let frameChannel: BroadcastChannel | null = null;
+    try {
+      frameChannel = new BroadcastChannel('privity_live_frames');
+      frameChannel.onmessage = (e) => {
+        if (e.data?.type === 'FRAME' && e.data.frame) {
+          setRemoteLiveFrame(e.data.frame);
+        }
+      };
+    } catch {}
+    return () => {
+      if (frameChannel) frameChannel.close();
+    };
+  }, [isHost]);
 
   useEffect(() => {
     if (isHost) {
@@ -642,18 +692,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     } catch {}
 
     const frameSyncInterval = setInterval(() => {
-      if (videoRef.current && offscreenCtx && frameChannel && !isVideoOff) {
+      if (videoRef.current && offscreenCtx && !isVideoOff) {
         try {
           offscreenCtx.drawImage(videoRef.current, 0, 0, 360, 640);
-          const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.55);
-          frameChannel.postMessage({
-            type: 'FRAME',
-            handle: currentUser.handle,
-            frame: frameJpeg,
-          });
+          const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.42);
+          liveStreamSync.sendVideoFrame(currentStreamer.id, frameJpeg);
+          if (frameChannel) {
+            frameChannel.postMessage({
+              type: 'FRAME',
+              handle: currentUser.handle,
+              frame: frameJpeg,
+            });
+          }
         } catch {}
       }
-    }, 120);
+    }, 150);
 
     return () => {
       clearInterval(frameSyncInterval);
@@ -811,31 +864,140 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       liveStreamSync.sendRoomEvent(currentStreamer.id, {
         type: 'LIVE_LIKE',
         streamerId: currentStreamer.id,
+        x: posX,
+        y: posY,
+        color: heart.color,
       });
       const bus = new BroadcastChannel('privity_sync_bus');
-      bus.postMessage({ type: 'LIVE_LIKE', streamerId: currentStreamer.id });
+      bus.postMessage({ type: 'LIVE_LIKE', streamerId: currentStreamer.id, x: posX, y: posY, color: heart.color });
       bus.close();
     } catch {}
   };
 
-  // Cross-device room events subscription (real-time likes & chat)
+  // Cross-device room events subscription (real-time live frames, gifts, joins, likes & chat)
   useEffect(() => {
     return liveStreamSync.subscribeToRoomEvents(currentStreamer.id, (evt) => {
-      if (evt.type === 'LIVE_LIKE') {
+      if (evt.type === 'LIVE_FRAME' && evt.frame) {
+        setRemoteLiveFrame(evt.frame);
+      } else if (evt.type === 'LIVE_LIKE') {
         const sid = evt.streamerId || currentStreamer.id;
         setStreamerLikesMap((prev) => {
           const current = prev[sid] ?? currentStreamer.likesCount;
           return { ...prev, [sid]: current + 1 };
         });
         setLikesReceived((prev) => prev + 1);
+
+        // Spawn visual floating heart on recipient screen!
+        const stageWidth = stageRef.current ? stageRef.current.clientWidth : 440;
+        const stageHeight = stageRef.current ? stageRef.current.clientHeight : 700;
+        const posX = evt.x !== undefined ? evt.x : stageWidth / 2 + (Math.random() * 80 - 40);
+        const posY = evt.y !== undefined ? evt.y : stageHeight - 160;
+        const colors = ['#f43f5e', '#ec4899', '#a855f7', '#3b82f6', '#fbbf24'];
+        const heart = {
+          id: Date.now() + Math.random(),
+          x: posX,
+          y: posY,
+          color: evt.color || colors[Math.floor(Math.random() * colors.length)],
+        };
+        setFloatingHearts((prev) => [...prev.slice(-15), heart]);
+        setTimeout(() => {
+          setFloatingHearts((prev) => prev.filter((h) => h.id !== heart.id));
+        }, 2200);
       } else if (evt.type === 'LIVE_CHAT' && evt.message) {
         setChatMessages((prev) => {
           if (prev.some((m) => m.id === evt.message.id)) return prev;
           return [...prev.slice(-35), evt.message];
         });
+      } else if (evt.type === 'LIVE_JOIN' && evt.user) {
+        const joinMsg: LiveMeChatMessage = {
+          id: `join-${Date.now()}-${Math.random()}`,
+          user: evt.user.name,
+          handle: evt.user.handle,
+          avatar: evt.user.avatar,
+          level: 28,
+          badge: 'FAN',
+          text: 'joined the live room 👋',
+          isSystem: true,
+          timestamp: Date.now(),
+        };
+        setChatMessages((prev) => [...prev.slice(-35), joinMsg]);
+        setLiveViewersCount((prev) => prev + 1);
+
+        if (isHost) {
+          showToastRef.current(`👋 ${evt.user.name} joined your live stream!`);
+          liveStreamSync.sendRoomEvent(currentStreamer.id, {
+            type: 'LIVE_VIEWER_COUNT',
+            count: liveViewersCount + 1,
+          });
+        }
+      } else if (evt.type === 'LIVE_LEAVE') {
+        setLiveViewersCount((prev) => Math.max(1, prev - 1));
+      } else if (evt.type === 'LIVE_VIEWER_COUNT' && typeof evt.count === 'number') {
+        setLiveViewersCount(evt.count);
+      } else if (evt.type === 'LIVE_GIFT') {
+        // Enqueue animation for host & all viewers
+        if (evt.giftEvent && evt.animGift) {
+          globalGiftQueue.enqueue(evt.giftEvent, evt.animGift);
+        }
+
+        // Add gift message to chat
+        if (evt.giftMessage) {
+          setChatMessages((prev) => [...prev.slice(-35), evt.giftMessage]);
+        }
+
+        // Play sound effect
+        const matchedGift = LIVEME_GIFTS.find(
+          (g) => g.id === evt.giftEvent?.giftId || g.name === evt.giftEvent?.giftName
+        );
+        if (matchedGift?.soundUrl) {
+          try {
+            const audio = new Audio(matchedGift.soundUrl);
+            audio.volume = isMuted ? 0 : 0.85;
+            audio.play().catch(() => {});
+          } catch {}
+        }
+
+        // Increment diamonds on host
+        const diamonds = evt.diamonds || evt.giftEvent?.coinValue || 10;
+        setDiamondsEarned((prev) => prev + diamonds);
+
+        // If in PK battle, add score
+        if (isPkBattleActive) {
+          const dmg = diamonds * 2;
+          setHostPkScore((prev) => prev + dmg);
+          triggerPkHit(`+${dmg.toLocaleString()} GIFT CRIT! 🔥`, '#ec4899');
+        }
+
+        // Update top contributors facepile
+        if (evt.sender) {
+          setRoomContributors((prev) => {
+            const existing = prev.find((c) => c.id === evt.sender.handle || c.name === evt.sender.name);
+            const updated = existing
+              ? prev.map((c) => (c.id === existing.id ? { ...c, contribution: c.contribution + diamonds } : c))
+              : [
+                  ...prev,
+                  {
+                    id: evt.sender.handle,
+                    name: evt.sender.name,
+                    avatar: evt.sender.avatar,
+                    rank: 1 as 1 | 2 | 3,
+                    contribution: diamonds,
+                  },
+                ];
+
+            return updated
+              .sort((a, b) => b.contribution - a.contribution)
+              .map((c, i) => ({
+                ...c,
+                rank: ((i === 0 ? 1 : i === 1 ? 2 : 3) as 1 | 2 | 3),
+              }));
+          });
+        }
+
+        showToastRef.current(`🎁 ${evt.sender?.name || 'Viewer'} sent ${evt.giftEvent?.giftName || 'Gift'}! (+${diamonds} 💎)`);
       }
     });
-  }, [currentStreamer.id, currentStreamer.likesCount]);
+  }, [currentStreamer.id, currentStreamer.likesCount, isHost, liveViewersCount, isMuted, isPkBattleActive]);
 
   // Trigger floating PK Hit Damage text
   const triggerPkHit = (text: string, color = '#fbbf24') => {
@@ -1031,8 +1193,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
     globalGiftQueue.enqueue(giftEvent, animGift);
 
-    // Cross-tab broadcast gift
+    // Network & Cross-tab broadcast gift
     try {
+      liveStreamSync.sendRoomEvent(currentStreamer.id, {
+        type: 'LIVE_GIFT',
+        streamerId: currentStreamer.id,
+        giftEvent,
+        animGift,
+        giftMessage: giftMsg,
+        diamonds: totalCost,
+        sender: {
+          name: currentUser.name,
+          handle: currentUser.handle,
+          avatar: currentUser.avatar,
+        },
+      });
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_GIFT', event: giftEvent, animGift });
       bus.close();
@@ -1288,6 +1463,38 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               muted={isMuted}
               className="liveme-video-canvas"
             />
+          ) : remoteLiveFrame ? (
+            <div className="liveme-live-frame-viewport" style={{ width: '100%', height: '100%', position: 'relative' }}>
+              <img
+                src={remoteLiveFrame}
+                alt="Live Broadcast Camera"
+                className="liveme-video-canvas"
+                style={{ objectFit: 'cover', width: '100%', height: '100%', display: 'block' }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '72px',
+                  left: '14px',
+                  background: 'rgba(239, 68, 68, 0.9)',
+                  color: '#fff',
+                  fontSize: '10px',
+                  fontWeight: 900,
+                  padding: '3px 9px',
+                  borderRadius: '99px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  zIndex: 10,
+                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.5)',
+                  backdropFilter: 'blur(8px)',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fff' }} />
+                <span>LIVE FEED</span>
+              </div>
+            </div>
           ) : (currentStreamer.peerId || currentStreamer.isCameraStream) ? (
             <div className="liveme-connecting-camera-backdrop">
               <img
@@ -1305,10 +1512,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   <div className="liveme-connecting-pulse-ring" />
                 </div>
                 <div className="liveme-connecting-title">
-                  {p2pConnectionStatus === 'connected' ? 'Streaming Live' : 'Connecting Real-Time P2P Broadcast...'}
+                  {p2pConnectionStatus === 'connected' ? 'Streaming Live' : 'Connecting Real-Time Broadcast...'}
                 </div>
                 <div className="liveme-connecting-subtitle">
-                  Direct peer-to-peer live feed from @{currentStreamer.handle}
+                  Direct sovereign live feed from @{currentStreamer.handle}
                 </div>
               </div>
             </div>
@@ -1570,7 +1777,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           <div className="liveme-top-right-group">
             {/* Top Gifters Facepile (compact 2 slots) */}
             <div className="liveme-top-gifters-pile">
-              {currentStreamer.topContributors.slice(0, 2).map((c) => (
+              {roomContributors.slice(0, 2).map((c) => (
                 <div
                   key={c.id}
                   className="liveme-gifter-avatar-slot"
@@ -1592,7 +1799,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               style={{ cursor: 'pointer' }}
             >
               <span>👥</span>
-              <span>{(isHost ? liveViewersCount : currentStreamer.viewersCount).toLocaleString()}</span>
+              <span>{liveViewersCount.toLocaleString()}</span>
             </div>
 
             {/* Close / End Live Button (Prominent X button at very top right) */}

@@ -358,9 +358,9 @@ class LiveStreamSyncService {
   ): Promise<string> {
     this.hostMediaStream = cameraStream;
 
-    // Clean alphanumeric peer ID for reliable WebRTC signaling
+    // Clean alphanumeric unique peer ID for reliable WebRTC signaling
     const sanitizedHandle = session.creatorHandle.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const peerId = `privity-live-${sanitizedHandle}`;
+    const peerId = `privity-live-${sanitizedHandle}-${Math.random().toString(36).substring(2, 7)}`;
 
     this.currentHostSession = {
       id: session.id,
@@ -424,6 +424,8 @@ class LiveStreamSyncService {
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
             { urls: 'stun:global.stun.twilio.com:3478' },
           ],
         },
@@ -431,8 +433,20 @@ class LiveStreamSyncService {
 
       this.hostPeer = peer;
 
-      peer.on('open', () => {
-        // Host peer registered successfully
+      peer.on('open', (assignedId) => {
+        if (this.currentHostSession) {
+          this.currentHostSession.peerId = assignedId;
+          this.announceStream(this.currentHostSession);
+        }
+      });
+
+      peer.on('error', (err) => {
+        console.warn('Privity Host Peer notice:', err.type);
+        if (err.type === 'unavailable-id') {
+          const sanitizedHandle = peerId.split('-')[2] || 'host';
+          const fallbackId = `privity-live-${sanitizedHandle}-${Math.random().toString(36).substring(2, 7)}`;
+          this.setupHostPeer(fallbackId);
+        }
       });
 
       peer.on('call', (call) => {
@@ -621,6 +635,14 @@ class LiveStreamSyncService {
 
     // Dispatch locally too
     this.dispatchRoomEvent(streamId, event);
+  }
+
+  public sendVideoFrame(streamId: string, frameData: string) {
+    this.sendRoomEvent(streamId, {
+      type: 'LIVE_FRAME',
+      streamerId: streamId,
+      frame: frameData,
+    });
   }
 
   public subscribeToRoomEvents(streamId: string, onEvent: (event: any) => void): () => void {
