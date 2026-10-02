@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './authModal.css';
 import { authService, UserAccount } from '../../services/authService';
-import { getSupabaseAnonKey } from '../../services/supabaseClient';
+import { getSupabaseAnonKey, getGoogleClientId } from '../../services/supabaseClient';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -47,9 +47,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (!isOpen) return;
 
     // Optional environment Google Client ID
-    const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
-    if (envClientId) {
-      authService.initGoogleIdentity(envClientId, (credential) => {
+    const clientId = getGoogleClientId();
+    if (clientId) {
+      authService.initGoogleIdentity(clientId, (credential) => {
         try {
           const user = authService.handleGoogleCredential(credential);
           onAuthenticated(user);
@@ -112,17 +112,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
 
     try {
+      const clientId = getGoogleClientId();
+      if (clientId && (window as any).google?.accounts?.id) {
+        (window as any).google.accounts.id.prompt();
+        return;
+      }
+
       if (authService.isSupabaseReady()) {
         await authService.loginWithGoogleOAuth();
         return;
       }
 
-      const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
-      if (envClientId && (window as any).google?.accounts?.id) {
-        (window as any).google.accounts.id.prompt();
-      } else {
-        setIsGoogleModalOpen(true);
-      }
+      setIsGoogleModalOpen(true);
     } catch (err: any) {
       console.error('Google OAuth error:', err);
       const msg = err.message || '';

@@ -8,6 +8,7 @@ export const SUPABASE_URL =
 const STORAGE_ANON_KEY = 'privity_supabase_anon_key';
 
 export const DEFAULT_PUBLISHABLE_KEY = 'sb_publishable_uFUkA9x1C2Zb-Lh_0-lzcw_RKWGKRCK';
+export const DEFAULT_GOOGLE_CLIENT_ID = '723694367508-8h7rqo8gf2217ma8053hk5v1otqfdic1.apps.googleusercontent.com';
 
 export function getSupabaseAnonKey(): string {
   const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
@@ -19,6 +20,14 @@ export function getSupabaseAnonKey(): string {
     if (saved && saved.trim().length > 0) return saved.trim();
   } catch {}
   return DEFAULT_PUBLISHABLE_KEY;
+}
+
+export function getGoogleClientId(): string {
+  const envKey = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
+  if (envKey && typeof envKey === 'string' && envKey.trim().length > 0) {
+    return envKey.trim();
+  }
+  return DEFAULT_GOOGLE_CLIENT_ID;
 }
 
 export function saveSupabaseAnonKey(key: string) {
