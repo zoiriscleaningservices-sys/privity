@@ -11,6 +11,7 @@ import { LiveMeRechargeModal } from './LiveMeRechargeModal';
 import { LiveMeCoinGamesModal } from './LiveMeCoinGamesModal';
 import { LiveMeHotCatalog } from './LiveMeHotCatalog';
 import { LiveMePkMatchModal } from './LiveMePkMatchModal';
+import { LiveMeViewersModal, RoomViewer } from './LiveMeViewersModal';
 import { GiftAnimationPlayer, globalGiftQueue, DEFAULT_GIFTS, GiftEvent } from '../../gifts';
 import './liveme.css';
 
@@ -36,6 +37,7 @@ export interface LiveMeStreamArenaProps {
   isHostBroadcast?: boolean;
   userMediaStream?: MediaStream | null;
   onEndBroadcast?: (summary?: LiveBroadcastSummaryData) => void;
+  onViewProfile?: (handle: string) => void;
 }
 
 export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
@@ -52,6 +54,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   isHostBroadcast = false,
   userMediaStream = null,
   onEndBroadcast,
+  onViewProfile,
 }) => {
   // Catalog view toggle
   const [showCatalog, setShowCatalog] = useState(false);
@@ -280,6 +283,94 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [isGiftTrayOpen, setIsGiftTrayOpen] = useState(false);
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
   const [isCoinGamesOpen, setIsCoinGamesOpen] = useState(false);
+  const [isViewersModalOpen, setIsViewersModalOpen] = useState(false);
+
+  // Dynamic real-time likes map
+  const [streamerLikesMap, setStreamerLikesMap] = useState<Record<string, number>>({});
+
+  // Real-time room audience roster
+  const roomViewers = useMemo<RoomViewer[]>(() => {
+    return [
+      {
+        id: 'v1',
+        name: 'Carlos Mendez',
+        handle: 'carlos_m',
+        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120',
+        level: 49,
+        badge: 'Top Fan 🏆',
+        isVip: true,
+        contribution: 15400,
+        isFollowing: true,
+      },
+      {
+        id: 'v2',
+        name: 'Sarah Williams 🪽',
+        handle: 'sarita_w',
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
+        level: 40,
+        badge: 'Fan Club ⭐',
+        isVip: true,
+        contribution: 8200,
+        isFollowing: false,
+      },
+      {
+        id: 'v3',
+        name: 'Max London',
+        handle: 'max_ldn',
+        avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120',
+        level: 28,
+        badge: 'Knight ⚔️',
+        isVip: true,
+        contribution: 4500,
+        isFollowing: true,
+      },
+      {
+        id: 'v4',
+        name: 'Elena Rostova',
+        handle: 'elena_r',
+        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120',
+        level: 33,
+        isVip: false,
+        contribution: 1200,
+      },
+      {
+        id: 'v5',
+        name: 'Kenji Sato',
+        handle: 'kenji_tokyo',
+        avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=120',
+        level: 21,
+        isVip: false,
+        contribution: 650,
+      },
+      {
+        id: 'v6',
+        name: 'Chloe Monet',
+        handle: 'chloe_m',
+        avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120',
+        level: 19,
+        isVip: false,
+        contribution: 200,
+      },
+      {
+        id: 'v7',
+        name: 'David Kim',
+        handle: 'david_k',
+        avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=120',
+        level: 15,
+        isVip: false,
+      },
+      {
+        id: 'v8',
+        name: 'Amina Al-Mansoor',
+        handle: 'amina_dxb',
+        avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120',
+        level: 25,
+        badge: 'Supporter 💫',
+        isVip: false,
+        contribution: 800,
+      },
+    ];
+  }, []);
 
   // Gift tray state
   const [activeGiftCategory, setActiveGiftCategory] = useState<'popular' | 'special' | 'pranks' | 'nvip' | 'celebrity'>('popular');
@@ -624,13 +715,25 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       setFloatingHearts((prev) => prev.filter((h) => h.id !== heart.id));
     }, 2200);
 
-    // Increment streamer likes count
+    // Increment streamer likes count in real-time
+    const streamerId = currentStreamer.id;
+    setStreamerLikesMap((prev) => {
+      const current = prev[streamerId] ?? currentStreamer.likesCount;
+      return { ...prev, [streamerId]: current + 1 };
+    });
     setLikesReceived((prev) => prev + 1);
     setStreamers((prev) =>
       prev.map((s, idx) =>
         idx === activeIndex ? { ...s, likesCount: s.likesCount + 1 } : s
       )
     );
+
+    // Cross-tab broadcast like
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage({ type: 'LIVE_LIKE', streamerId: currentStreamer.id });
+      bus.close();
+    } catch {}
   };
 
   // Trigger floating PK Hit Damage text
@@ -744,8 +847,15 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   };
 
   // Send Real Project Gift Handler
+  // Send Real Project Gift Handler
   const handleSendGift = () => {
     const gift = LIVEME_GIFTS.find((g) => g.id === selectedGiftId) || LIVEME_GIFTS[0];
+    handleSelectAndSendGift(gift);
+  };
+
+  // Select and immediately dispatch gift, then close gift tray as requested
+  const handleSelectAndSendGift = (gift: (typeof LIVEME_GIFTS)[0]) => {
+    setSelectedGiftId(gift.id);
     const totalCost = gift.coins * selectedCombo;
 
     if (userCoins < totalCost) {
@@ -806,6 +916,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
     globalGiftQueue.enqueue(giftEvent, animGift);
 
+    // Cross-tab broadcast gift
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage({ type: 'LIVE_GIFT', event: giftEvent, animGift });
+      bus.close();
+    } catch {}
+
     // In PK battle, add huge points and trigger damage burst
     if (isPkBattleActive) {
       const dmg = totalCost * 2;
@@ -823,6 +940,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
     showToast(`🎁 Sent ${gift.name} x${selectedCombo}! (-${totalCost} 🪙)`);
     spawnHeartReaction();
+
+    // Immediately close the gift tray as requested so the animation is clearly visible!
+    setIsGiftTrayOpen(false);
   };
 
   // Fullscreen toggle
@@ -862,6 +982,66 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     return Math.max(12, Math.min(88, Math.round((hostPkScore / total) * 100)));
   }, [hostPkScore, rivalPkScore]);
 
+  // Mobile Gestures:
+  // - Swipe Up: Next live room
+  // - Swipe Down: Previous live room
+  // - Swipe Right: Minimize live stream to PiP
+  // - Swipe Left: Open creator's profile page
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest(
+        'input, textarea, button, .liveme-gift-tray-panel, .liveme-viewers-sheet, .liveme-recharge-modal, .liveme-coin-games-modal, .liveme-pk-modal, .liveme-chat-scroll-box'
+      )
+    ) {
+      return;
+    }
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+    const duration = Date.now() - touchStartRef.current.time;
+    touchStartRef.current = null;
+
+    if (duration > 750) return;
+
+    // Vertical Swipes: Up = Next Live, Down = Previous Live
+    if (absY > 45 && absY > absX * 1.2) {
+      if (deltaY < 0) {
+        handleNextStream();
+      } else {
+        handlePrevStream();
+      }
+      return;
+    }
+
+    // Horizontal Swipes:
+    // Right swipe: Minimize stream to PiP (or back out)
+    if (deltaX > 55 && absX > absY * 1.2) {
+      onClose();
+      return;
+    }
+
+    // Left swipe: Open creator profile
+    if (deltaX < -55 && absX > absY * 1.2) {
+      if (onViewProfile) {
+        onViewProfile(currentStreamer.handle);
+      } else {
+        showToast(`Viewing @${currentStreamer.handle}'s profile`);
+      }
+      return;
+    }
+  };
+
   if (showCatalog) {
     return (
       <LiveMeHotCatalog
@@ -880,7 +1060,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   }
 
   return (
-    <div className="liveme-room-root">
+    <div
+      className="liveme-room-root"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       {/* 1. AMBIENT BLURRED VIDEO WINGS (LEFT & RIGHT) */}
       <div className="liveme-ambient-wings">
         {isHost ? (
@@ -954,8 +1138,6 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               playsInline
               muted={true}
               poster={currentUser.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900'}
-              src={!localStreamRef.current ? 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4' : undefined}
-              loop={!localStreamRef.current}
               onLoadedMetadata={() => {
                 if (videoRef.current) {
                   videoRef.current.play().catch(() => {});
@@ -1171,12 +1353,22 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               <div className="liveme-streamer-name">
                 {currentStreamer.name}
               </div>
-              <div className="liveme-diamond-score">
+              <div
+                className="liveme-diamond-score"
+                onClick={() => {
+                  spawnHeartReaction();
+                  const likesNow = streamerLikesMap[currentStreamer.id] ?? (isHost ? likesReceived : currentStreamer.likesCount);
+                  showToast(`❤️ Exact Real-Time Likes: ${likesNow.toLocaleString()}`);
+                }}
+                style={{ cursor: 'pointer' }}
+                title="Tap to like & view exact real-time hearts count"
+              >
                 <span style={{ color: '#f43f5e' }}>♥</span>
                 <span>
-                  {isHost
-                    ? (likesReceived >= 1000 ? `${(likesReceived / 1000).toFixed(1)}K` : likesReceived)
-                    : (currentStreamer.likesCount >= 1000 ? `${(currentStreamer.likesCount / 1000).toFixed(1)}K` : currentStreamer.likesCount)}
+                  {(() => {
+                    const count = streamerLikesMap[currentStreamer.id] ?? (isHost ? likesReceived : currentStreamer.likesCount);
+                    return count >= 1000 ? `${(count / 1000).toFixed(1)}K` : count;
+                  })()}
                 </span>
               </div>
             </div>
@@ -1213,11 +1405,12 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             {/* Audience Count Pill */}
             <div
               className="liveme-audience-pill"
-              title="Current Live Audience"
-              onClick={() => showToast(`Room Audience: ${isHost ? liveViewersCount : currentStreamer.viewersCount} active viewers`)}
+              title="Click to view all live people in this room"
+              onClick={() => setIsViewersModalOpen(true)}
+              style={{ cursor: 'pointer' }}
             >
               <span>👥</span>
-              <span>{isHost ? liveViewersCount : currentStreamer.viewersCount}</span>
+              <span>{(isHost ? liveViewersCount : currentStreamer.viewersCount).toLocaleString()}</span>
             </div>
 
             {/* Close / End Live Button (Prominent X button at very top right) */}
@@ -1451,8 +1644,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 <div
                   key={gift.id}
                   className={`liveme-gift-card ${selectedGiftId === gift.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedGiftId(gift.id)}
-                  title={`${gift.name} · ${gift.coins} Coins`}
+                  onClick={() => handleSelectAndSendGift(gift)}
+                  title={`Tap to send ${gift.name} · ${gift.coins} Coins`}
                 >
                   <div className="liveme-gift-icon-preview">
                     {gift.imageIcon ? (
@@ -1634,7 +1827,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       />
 
       {/* ================================================================ */}
-      {/* 10. HOST END LIVE CONFIRMATION MODAL                             */}
+      {/* 11. ROOM VIEWERS & REAL-TIME AUDIENCE MODAL                      */}
+      {/* ================================================================ */}
+      <LiveMeViewersModal
+        isOpen={isViewersModalOpen}
+        onClose={() => setIsViewersModalOpen(false)}
+        streamerName={currentStreamer.name}
+        viewersCount={isHost ? liveViewersCount : currentStreamer.viewersCount}
+        viewers={roomViewers}
+        isHost={isHost}
+        onViewProfile={onViewProfile}
+        showToast={showToast}
+      />
+
+      {/* ================================================================ */}
+      {/* 12. HOST END LIVE CONFIRMATION MODAL                             */}
       {/* ================================================================ */}
       {isConfirmEndOpen && (
         <div className="liveme-confirm-end-backdrop" onClick={() => setIsConfirmEndOpen(false)}>

@@ -2924,6 +2924,7 @@ export function App() {
   // Modal Composer State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraInitialTab, setCameraInitialTab] = useState<'POST' | 'LIVE' | 'CREATE'>('POST');
   const [hostLiveCameraStream, setHostLiveCameraStream] = useState<MediaStream | null>(null);
   const [isHostBroadcasting, setIsHostBroadcasting] = useState<boolean>(() => {
     try {
@@ -5541,7 +5542,10 @@ export function App() {
                   setMinimizedLiveStream(null);
                 }}
                 onBackToFeed={() => setFeedFilter('feed')}
-                onGoLive={() => setIsCameraOpen(true)}
+                onGoLive={() => {
+                  setCameraInitialTab('LIVE');
+                  setIsCameraOpen(true);
+                }}
                 currentUser={{
                   name: myProfile.name,
                   handle: myProfile.handle,
@@ -8780,6 +8784,13 @@ export function App() {
           userCoins={userSparksBalance}
           onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
           showToast={triggerToast}
+          onViewProfile={(handle) => {
+            const streamer = LIVEME_STREAMERS.find((s) => s.id === activeLiveStream.id) || (activeLiveStream as any);
+            setMinimizedLiveStream(streamer);
+            setActiveLiveStream(null);
+            setIsHostBroadcasting(false);
+            navigateToProfile(handle);
+          }}
         />
       )}
 
@@ -9336,10 +9347,14 @@ export function App() {
       {/* CAMERA & LIVE BROADCAST STUDIO (TIKTOK / REELS SPEC) */}
       <CameraModal
         isOpen={isCameraOpen}
-        onClose={() => setIsCameraOpen(false)}
+        onClose={() => {
+          setIsCameraOpen(false);
+          setCameraInitialTab('POST');
+        }}
         currentUser={cameraCurrentUser}
         onPublishPost={handleCameraPublishPost}
         onGoLive={handleCameraGoLive}
+        initialTab={cameraInitialTab}
       />
 
       {/* CREATE POST MODAL */}

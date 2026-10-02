@@ -66,6 +66,7 @@ export interface CameraModalProps {
     goal: string;
     cameraStream?: MediaStream | null;
   }) => void;
+  initialTab?: CameraMode;
 }
 
 export const CameraModal: React.FC<CameraModalProps> = ({
@@ -74,10 +75,17 @@ export const CameraModal: React.FC<CameraModalProps> = ({
   currentUser,
   onPublishPost,
   onGoLive,
+  initialTab,
 }) => {
   // Navigation Modes
-  const [activeTab, setActiveTab] = useState<CameraMode>('POST');
+  const [activeTab, setActiveTab] = useState<CameraMode>(initialTab || 'POST');
   const [durationMode, setDurationMode] = useState<DurationMode>('PHOTO');
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   // Media Stream & Camera Hardware State
   const videoRef = useRef<HTMLVideoElement | null>(null);

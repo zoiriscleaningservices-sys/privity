@@ -90,42 +90,78 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     ...LIVEME_STREAMERS,
   ];
 
-  const filteredStreamers = allStreamers.filter((s) => {
-    // Search query match
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      return (
-        s.name.toLowerCase().includes(q) ||
-        s.handle.toLowerCase().includes(q) ||
-        s.title.toLowerCase().includes(q) ||
-        (s.tags || []).some((t) => t.toLowerCase().includes(q))
-      );
-    }
+  const filteredStreamers = allStreamers
+    .filter((s) => {
+      // Search query match
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          s.name.toLowerCase().includes(q) ||
+          s.handle.toLowerCase().includes(q) ||
+          s.title.toLowerCase().includes(q) ||
+          (s.tags || []).some((t) => t.toLowerCase().includes(q))
+        );
+      }
 
-    // Top Category tab filter
-    if (activeTab === 'video_chat') {
-      return s.category === 'Video Chat' || (s.tags || []).includes('VideoChat') || s.tagBadge === 'Multi-beam';
-    }
-    if (activeTab === 'party') {
-      return s.category === 'Party' || (s.tags || []).includes('Party');
-    }
-    if (activeTab === 'global') {
-      return s.category === 'Global' || (s.tags || []).includes('Global');
-    }
+      // Top Category tab filter
+      if (activeTab === 'video_chat') {
+        return (
+          s.category === 'Video Chat' ||
+          s.category === 'Voice Chat' ||
+          (s.tags || []).some((t) => ['voicechat', 'voice', 'audio', 'talk', 'videochat'].includes(t.toLowerCase())) ||
+          s.tagBadge === 'Multi-beam'
+        );
+      }
+      if (activeTab === 'party') {
+        return (
+          s.category === 'Party' ||
+          s.tagBadge === 'Multi-beam' ||
+          (s.tags || []).some((t) => ['party', 'group', 'multi-beam', 'multiguest'].includes(t.toLowerCase()))
+        );
+      }
+      if (activeTab === 'global') {
+        return s.category === 'Global' || (s.tags || []).includes('Global');
+      }
+      if (activeTab === 'rankings') {
+        return true;
+      }
 
-    // Chip filter when on 'featured'
-    if (activeChip === 'h2h') {
-      return s.tagBadge === 'H2H' || (s.tags || []).includes('H2H') || (s.tags || []).includes('Battle') || (s.tags || []).includes('PKMatch');
-    }
-    if (activeChip === 'battle') {
-      return (s.tags || []).includes('Battle') || (s.tags || []).includes('PKBattle') || s.category.includes('PK');
-    }
-    if (activeChip === 'music') {
-      return (s.tags || []).includes('Music') || (s.tags || []).includes('DJ') || s.category.includes('Synth');
-    }
+      // Chip filter when on 'featured'
+      if (activeChip === 'h2h') {
+        return (
+          s.tagBadge === 'H2H' ||
+          (s.tags || []).some((t) => ['h2h', 'battle', 'pkbattle', 'pkmatch'].includes(t.toLowerCase())) ||
+          s.category.toLowerCase().includes('pk') ||
+          s.category.toLowerCase().includes('battle')
+        );
+      }
+      if (activeChip === 'battle') {
+        return (
+          (s.tags || []).some((t) => ['battle', 'pkbattle', 'pkmatch'].includes(t.toLowerCase())) ||
+          s.category.toLowerCase().includes('pk') ||
+          s.category.toLowerCase().includes('battle')
+        );
+      }
+      if (activeChip === 'music') {
+        return (s.tags || []).includes('Music') || (s.tags || []).includes('DJ') || s.category.includes('Synth');
+      }
 
-    return true; // 'recommend' or default
-  });
+      return true; // 'recommend' or default
+    })
+    .sort((a, b) => {
+      // Host stream always first if active
+      if (a.id === 'liveme-host-myself') return -1;
+      if (b.id === 'liveme-host-myself') return 1;
+
+      if (activeTab === 'rankings') {
+        const scoreA = (a.diamonds || 0) * 2 + (a.viewersCount || 0) * 100 + (a.likesCount || 0);
+        const scoreB = (b.diamonds || 0) * 2 + (b.viewersCount || 0) * 100 + (b.likesCount || 0);
+        return scoreB - scoreA;
+      }
+
+      // Standard sort: views count
+      return (b.viewersCount || 0) - (a.viewersCount || 0);
+    });
 
   // Scroll & Intersection Observation for Auto-Preview Outside
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
@@ -262,10 +298,15 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
             <button
               type="button"
               className={`live-cat-nav-item rankings-icon-item ${activeTab === 'rankings' ? 'active' : ''}`}
-              onClick={() => showToast('🏆 Top Live Rank: 1. QueenDuc (790K) · 2. Kashout (626K)')}
-              title="Daily Live Leaderboard"
+              onClick={() => {
+                setActiveTab('rankings');
+                setSearchQuery('');
+                showToast('🏆 Top Live Rank sorted by Views & Points');
+              }}
+              title="Daily Live Leaderboard (Ranked by views & points)"
             >
               <span className="trophy-emoji">🏆</span>
+              {activeTab === 'rankings' && <span className="live-cat-nav-indicator" />}
             </button>
           </nav>
         </div>
@@ -355,7 +396,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
         onScroll={handleScroll}
       >
         <div className="live-explore-stream-grid">
-          {filteredStreamers.map((streamer) => {
+          {filteredStreamers.map((streamer, idx) => {
             const isPreviewActive = activePreviewId === streamer.id;
 
             return (
@@ -396,21 +437,28 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
                   <div className="live-card-top-scrim" />
                   <div className="live-card-bottom-scrim" />
 
-                  {/* Top Badge: Multi-beam / H2H / LIVE */}
+                  {/* Top Badge: Battle H2H / Multi-beam Group / Voice Chat / LIVE */}
                   <div className="live-card-top-badges">
-                    {streamer.tagBadge === 'Multi-beam' || (streamer.tags || []).includes('Multi-beam') ? (
-                      <div className="live-badge-pill multi-beam">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
-                        </svg>
-                        <span>Multi-beam</span>
-                      </div>
-                    ) : streamer.tagBadge === 'H2H' || (streamer.tags || []).includes('H2H') ? (
+                    {streamer.tagBadge === 'H2H' ||
+                    (streamer.tags || []).some((t) => ['h2h', 'battle', 'pkbattle', 'pkmatch'].includes(t.toLowerCase())) ||
+                    streamer.category.toLowerCase().includes('pk') ||
+                    streamer.category.toLowerCase().includes('battle') ? (
                       <div className="live-badge-pill h2h">
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" />
-                        </svg>
+                        <span style={{ fontSize: '11px', lineHeight: 1 }}>⚔️</span>
                         <span>H2H</span>
+                      </div>
+                    ) : streamer.tagBadge === 'Multi-beam' ||
+                      streamer.category === 'Party' ||
+                      (streamer.tags || []).some((t) => ['party', 'group', 'multi-beam', 'multiguest'].includes(t.toLowerCase())) ? (
+                      <div className="live-badge-pill multi-beam">
+                        <span style={{ fontSize: '11px', lineHeight: 1 }}>👥</span>
+                        <span>Group</span>
+                      </div>
+                    ) : streamer.category === 'Voice Chat' ||
+                      (streamer.tags || []).some((t) => ['voicechat', 'voice', 'audio'].includes(t.toLowerCase())) ? (
+                      <div className="live-badge-pill voice-chat">
+                        <span style={{ fontSize: '11px', lineHeight: 1 }}>🎙️</span>
+                        <span>Voice Chat</span>
                       </div>
                     ) : (
                       <div className="live-badge-pill live-dot">
@@ -428,6 +476,13 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
                       </div>
                     )}
                   </div>
+
+                  {/* Podium Rank Badge when on Rankings tab */}
+                  {activeTab === 'rankings' && (
+                    <div className={`live-card-rank-podium rank-${idx + 1 <= 3 ? idx + 1 : 'other'}`}>
+                      {idx === 0 ? '👑 #1' : idx === 1 ? '🥈 #2' : idx === 2 ? '🥉 #3' : `#${idx + 1}`}
+                    </div>
+                  )}
 
                   {/* Bottom Overlaid Streamer Info */}
                   <div className="live-card-info-box">

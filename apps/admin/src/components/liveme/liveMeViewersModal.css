@@ -1,0 +1,367 @@
+/* ==========================================================================
+   PRIVITY LIVE VIEWERS MODAL (REAL-TIME ROOM AUDIENCE SHEET)
+   ========================================================================== */
+
+.liveme-viewers-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 15000;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: viewersFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes viewersFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.liveme-viewers-sheet {
+  width: 100%;
+  max-width: 480px;
+  max-height: 82vh;
+  max-height: 82dvh;
+  background: rgba(14, 16, 26, 0.95);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: viewersSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+}
+
+@keyframes viewersSlideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.liveme-viewers-drag-bar {
+  width: 38px;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.28);
+  margin: 10px auto 4px;
+  flex-shrink: 0;
+}
+
+.liveme-viewers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.liveme-viewers-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.liveme-viewers-heading {
+  font-size: 17px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.liveme-viewers-counter-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  background: rgba(34, 197, 94, 0.2);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+  letter-spacing: 0.02em;
+}
+
+.liveme-viewers-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+}
+
+.liveme-viewers-close-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.liveme-viewers-close-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(1.05);
+}
+
+/* Tabs */
+.liveme-viewers-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 18px 6px;
+}
+
+.liveme-viewers-tab-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.liveme-viewers-tab-btn.active {
+  background: linear-gradient(135deg, #a855f7, #7c3aed);
+  color: #ffffff;
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow: 0 4px 14px rgba(168, 85, 247, 0.35);
+}
+
+/* Search Box */
+.liveme-viewers-search-box {
+  margin: 6px 18px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.liveme-viewers-search-input {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 13.5px;
+  width: 100%;
+  outline: none;
+}
+
+.liveme-viewers-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.liveme-viewers-clear-search {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+/* Viewers List Scroll */
+.liveme-viewers-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.liveme-viewers-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  color: rgba(255, 255, 255, 0.5);
+  gap: 8px;
+}
+
+.liveme-viewers-empty span {
+  font-size: 32px;
+}
+
+.liveme-viewer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: 14px;
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+
+.liveme-viewer-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.liveme-viewer-rank {
+  font-size: 16px;
+  font-weight: 800;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.liveme-viewer-avatar-wrap {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.liveme-viewer-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+}
+
+.liveme-viewer-level-chip {
+  position: absolute;
+  bottom: -3px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #ffffff;
+  font-size: 8.5px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  white-space: nowrap;
+  letter-spacing: -0.02em;
+}
+
+.liveme-viewer-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.liveme-viewer-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.liveme-viewer-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.liveme-viewer-badge-tag {
+  background: rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  color: #c084fc;
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.liveme-viewer-vip-tag {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 900;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  letter-spacing: 0.03em;
+}
+
+.liveme-viewer-handle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.liveme-viewer-contribution {
+  color: #fbbf24;
+  font-weight: 700;
+  font-size: 11.5px;
+}
+
+.liveme-viewer-status-text {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.liveme-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.liveme-viewer-follow-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.liveme-viewer-follow-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.liveme-viewer-follow-btn.following {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #4ade80;
+}
+
+.liveme-viewer-mod-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  color: #ffffff;
+  transition: background 0.15s ease;
+}
+
+.liveme-viewer-mod-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.liveme-viewers-footer {
+  padding: 10px 18px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+}

@@ -7,3 +7,4 @@ export * from './LiveMeCoinGamesModal';
 export * from './LiveMePkMatchModal';
 export * from './LiveExploreGrid';
 export * from './LivePipPlayer';
+export * from './LiveMeViewersModal';
