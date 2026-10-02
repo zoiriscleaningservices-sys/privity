@@ -140,6 +140,7 @@ export type SlideFeedChannel = 'live' | 'birdie' | 'circles' | 'following' | 'fo
 export interface TikTokSlideFeedProps {
   posts: PostItem[];
   currentUser: {
+    id?: string;
     name: string;
     handle: string;
     avatar: string;
@@ -1591,7 +1592,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           ) : (
             displayPosts.map((post) => {
             const isVideo = post.type === 'video' || !!post.videoUrl;
-            const mediaUrl = post.videoUrl || post.contentUrl || post.thumbnailUrl || './nicole-spicy.jpg';
+            const mediaUrl = post.videoUrl || post.contentUrl || post.thumbnailUrl || '';
             const isPaused = !!pausedMap[post.id];
             const isFollowed = !!followedMap[post.authorHandle];
 
@@ -2222,23 +2223,41 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
               )}
             </div>
 
-            <div className="tiktok-search-trending-tags">
-              <div className="tiktok-trending-title">Trending on Privity</div>
-              <div className="tiktok-trending-pills">
-                {['#viral', '#fyp', '#miami', '#video', '#sovereign', '#web3', '#photography', '#mindful'].map((t, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    className="tiktok-trending-pill"
-                    onClick={() => {
-                      setSearchQuery(t.replace('#', ''));
-                    }}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {(() => {
+              const counts: Record<string, number> = {};
+              for (const p of posts) {
+                for (const t of p.tags || []) {
+                  const clean = t.toLowerCase().replace(/^#/, '').trim();
+                  if (clean) counts[clean] = (counts[clean] || 0) + 1;
+                }
+              }
+              const trendingList = Object.entries(counts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8)
+                .map(([tag]) => `#${tag}`);
+
+              if (trendingList.length === 0) return null;
+
+              return (
+                <div className="tiktok-search-trending-tags">
+                  <div className="tiktok-trending-title">Trending on Privity</div>
+                  <div className="tiktok-trending-pills">
+                    {trendingList.map((t, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        className="tiktok-trending-pill"
+                        onClick={() => {
+                          setSearchQuery(t.replace('#', ''));
+                        }}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <button
               type="button"
@@ -2264,7 +2283,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             </div>
             <div className="privity-action-sheet-options">
               {/* If user's own post, show Delete Dispatch */}
-              {(activePostMenu.authorHandle === currentUser.handle || activePostMenu.authorId === 'usr-luciano') && (
+              {(activePostMenu.authorHandle === currentUser.handle || (currentUser.id && activePostMenu.authorId === currentUser.id)) && (
                 <button
                   type="button"
                   className="privity-sheet-btn danger"
@@ -2440,7 +2459,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             {/* Presets Horizontal Row */}
             <div className="creator-atmosphere-row">
               {[
-                { name: '🌅 Miami Golden', url: './nicole-spicy.jpg', type: 'image' },
+                { name: '🌅 Golden Hour', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1200', type: 'image' },
                 { name: '🏙️ Tokyo Neon', url: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200', type: 'image' },
                 { name: '📐 Studio Blueprint', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200', type: 'image' },
                 { name: '🎞️ 35mm Silver', url: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200', type: 'image' },

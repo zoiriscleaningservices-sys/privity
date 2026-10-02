@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './authModal.css';
 import { authService, UserAccount } from '../../services/authService';
+import { getSupabaseAnonKey } from '../../services/supabaseClient';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const [tab, setTab] = useState<'login' | 'signup'>('signup');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Form states
   const [name, setName] = useState('');
@@ -29,8 +31,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [googleManualEmail, setGoogleManualEmail] = useState('');
   const [googleManualPhoto, setGoogleManualPhoto] = useState('');
 
+  // Supabase Configuration Modal State
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [supabaseKeyInput, setSupabaseKeyInput] = useState('');
+  const [isSupabaseReady, setIsSupabaseReady] = useState(() => authService.isSupabaseReady());
+
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setIsSupabaseReady(authService.isSupabaseReady());
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -56,13 +67,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleNativeSubmit = (e: React.FormEvent) => {
+  const handleNativeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setIsLoading(true);
 
     try {
       if (tab === 'signup') {
-        const user = authService.signUp({
+        const user = await authService.signUpAsync({
           name: name.trim(),
           handle: handle.trim(),
           email: email.trim(),
@@ -72,12 +84,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         onAuthenticated(user);
         onClose?.();
       } else {
-        const user = authService.login(handle || email, password);
+        const user = await authService.loginAsync(handle || email, password);
         onAuthenticated(user);
         onClose?.();
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Authentication error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -93,15 +107,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const handleGoogleClick = () => {
+  const handleGoogleClick = async () => {
     setErrorMsg(null);
-    const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
 
-    // If official Google Client ID is configured, trigger Google prompt
+    // If Supabase is active, trigger Supabase Google OAuth
+    if (authService.isSupabaseReady()) {
+      try {
+        await authService.loginWithGoogleOAuth();
+        return;
+      } catch (err: any) {
+        console.warn('Supabase Google OAuth fallback:', err);
+      }
+    }
+
+    const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
     if (envClientId && (window as any).google?.accounts?.id) {
       (window as any).google.accounts.id.prompt();
     } else {
-      // Direct Google Account Connector
       setIsGoogleModalOpen(true);
     }
   };
@@ -129,6 +151,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     onClose?.();
   };
 
+  const handleSaveSupabaseKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (supabaseKeyInput.trim()) {
+      authService.setSupabaseKey(supabaseKeyInput.trim());
+      setIsSupabaseReady(true);
+      setIsConfigModalOpen(false);
+      setSupabaseKeyInput('');
+      setErrorMsg(null);
+    }
+  };
+
   return (
     <div className="auth-modal-overlay" onClick={requireAuth ? undefined : onClose}>
       <div className="auth-modal-card" onClick={(e) => e.stopPropagation()}>
@@ -146,6 +179,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         <div className="auth-brand-badge">
           <span>🛡️ Privity Authentic Identity</span>
+        </div>
+
+        {/* Supabase Status Pill */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
+          {isSupabaseReady ? (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '5px 12px',
+                borderRadius: '999px',
+                fontSize: '11px',
+                fontWeight: 600,
+                color: '#34d399',
+                background: 'rgba(52, 211, 153, 0.1)',
+                border: '1px solid rgba(52, 211, 153, 0.25)',
+              }}
+            >
+              <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: '#34d399' }} />
+              <span>Supabase Cloud Active ({authService.getSupabaseProjectId()})</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSupabaseKeyInput(getSupabaseAnonKey());
+                setIsConfigModalOpen(true);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '5px 12px',
+                borderRadius: '999px',
+                fontSize: '11px',
+                fontWeight: 600,
+                color: '#fbbf24',
+                background: 'rgba(251, 191, 36, 0.1)',
+                border: '1px solid rgba(251, 191, 36, 0.25)',
+                cursor: 'pointer',
+              }}
+              title="Click to connect Supabase Anon Public Key"
+            >
+              <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: '#fbbf24' }} />
+              <span>⚡ Connect Supabase Cloud Key</span>
+            </button>
+          )}
         </div>
 
         <h2 className="auth-header-title">
@@ -172,6 +253,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             type="button"
             className="google-identity-btn"
             onClick={handleGoogleClick}
+            disabled={isLoading}
           >
             <svg className="google-icon-svg" viewBox="0 0 24 24">
               <path
@@ -207,6 +289,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             type="button"
             className={`auth-mode-btn ${tab === 'signup' ? 'active' : ''}`}
             onClick={() => { setTab('signup'); setErrorMsg(null); }}
+            disabled={isLoading}
           >
             Create Account
           </button>
@@ -214,12 +297,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             type="button"
             className={`auth-mode-btn ${tab === 'login' ? 'active' : ''}`}
             onClick={() => { setTab('login'); setErrorMsg(null); }}
+            disabled={isLoading}
           >
             Sign In
           </button>
         </div>
 
-        {/* 3. NATIVE FORM */}
+        {/* 3. NATIVE / SUPABASE FORM */}
         <form onSubmit={handleNativeSubmit} className="auth-form">
           {tab === 'signup' && (
             <div className="auth-input-group">
@@ -227,10 +311,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <input
                 type="text"
                 className="auth-input"
-                placeholder="e.g. Luciano"
+                placeholder="e.g. Alex Morgan"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
+                disabled={isLoading}
               />
             </div>
           )}
@@ -240,10 +325,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <input
               type="text"
               className="auth-input"
-              placeholder={tab === 'signup' ? 'e.g. luciano' : 'Your @handle or email'}
+              placeholder={tab === 'signup' ? 'e.g. alexmorgan' : 'Your @handle or email'}
               value={handle}
               onChange={(e) => setHandle(e.target.value.replace(/^@/, ''))}
               required
+              disabled={isLoading}
             />
           </div>
 
@@ -257,6 +343,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={isLoading}
               />
             </div>
           )}
@@ -269,6 +356,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              required={tab === 'signup'}
+              disabled={isLoading}
             />
           </div>
 
@@ -288,6 +377,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   type="button"
                   className="auth-avatar-pick-btn"
                   onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading}
                 >
                   Upload Photo
                 </button>
@@ -302,12 +392,108 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          <button type="submit" className="auth-submit-btn">
-            {tab === 'signup' ? 'Create Account & Begin at 0 🚀' : 'Sign In 🔑'}
+          <button type="submit" className="auth-submit-btn" disabled={isLoading}>
+            {isLoading
+              ? 'Connecting to Supabase...'
+              : tab === 'signup'
+              ? 'Create Account & Begin at 0 🚀'
+              : 'Sign In 🔑'}
           </button>
         </form>
 
-        {/* 4. GOOGLE MODAL POPUP (Direct Google Connector) */}
+        {/* 4. SUPABASE CONFIGURATION MODAL */}
+        {isConfigModalOpen && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 100001,
+              background: 'rgba(0,0,0,0.85)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '16px',
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                maxWidth: '440px',
+                background: '#151926',
+                borderRadius: '20px',
+                border: '1px solid rgba(255,255,255,0.18)',
+                padding: '24px',
+                color: '#fff',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.8)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <span style={{ fontSize: '20px' }}>⚡</span>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>Connect Supabase Project</h3>
+              </div>
+              <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.5, margin: '0 0 16px 0' }}>
+                Your project ID is <strong>{authService.getSupabaseProjectId()}</strong>. Paste your project&apos;s <strong>anon</strong> public key below from your Supabase dashboard:
+              </p>
+
+              <div style={{ marginBottom: '16px', padding: '10px 14px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', fontSize: '12px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Dashboard URL:</span><br />
+                <a
+                  href={`https://supabase.com/dashboard/project/${authService.getSupabaseProjectId()}/settings/api`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#38bdf8', textDecoration: 'underline', wordBreak: 'break-all' }}
+                >
+                  Project Settings &gt; API &gt; anon public key
+                </a>
+              </div>
+
+              <form onSubmit={handleSaveSupabaseKey} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)', fontWeight: 700, display: 'block', marginBottom: '6px' }}>
+                    Supabase Anon Public Key (starts with eyJ...)
+                  </label>
+                  <textarea
+                    rows={3}
+                    required
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    value={supabaseKeyInput}
+                    onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '10px',
+                      background: 'rgba(255,255,255,0.08)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      color: '#fff',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      boxSizing: 'border-box',
+                      resize: 'none',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsConfigModalOpen(false)}
+                    style={{ flex: 1, padding: '11px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={{ flex: 1, padding: '11px', borderRadius: '999px', background: 'linear-gradient(135deg, #10b981, #059669)', border: 'none', color: '#fff', fontWeight: 800, cursor: 'pointer' }}
+                  >
+                    Save & Connect
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* 5. GOOGLE MODAL POPUP (Direct Google Connector) */}
         {isGoogleModalOpen && (
           <div
             style={{

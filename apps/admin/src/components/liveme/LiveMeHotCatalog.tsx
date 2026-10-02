@@ -27,8 +27,8 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   showToast,
   onGoLive,
   currentUser = {
-    name: 'LUCIANO 4E 🥷',
-    handle: 'luciano',
+    name: 'Creator',
+    handle: '',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
   },
 }) => {
@@ -117,7 +117,7 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   }, []);
 
   // Strict handle deduplication
-  const userHandle = (currentUser?.handle || 'luciano').toLowerCase().replace('@', '').trim();
+  const userHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
   const isUserBroadcasting =
     (liveStreamSync.isLocalHost() && !!liveStreamSync.getHostSession()) ||
     (activeHost &&
@@ -132,7 +132,7 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   if (isUserBroadcasting && currentHost && !liveStreamSync.isStreamEnded(currentHost.id, currentHost.creatorHandle || currentHost.handle, currentHost.startedAt)) {
     const rawHandle = currentHost.creatorHandle || currentHost.handle || userHandle;
     const hostHandle = rawHandle.toLowerCase().replace('@', '').trim();
-    const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Luciano';
+    const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Creator';
     const cleanName = rawName.replace(' (LIVE NOW 🔴)', '');
     const avatar =
       currentHost.creatorAvatar ||

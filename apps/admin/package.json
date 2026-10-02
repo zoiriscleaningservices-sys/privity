@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@privity/types": "*",
+    "@supabase/supabase-js": "^2.117.2",
     "mqtt": "^5.16.0",
     "peerjs": "^1.5.5",
     "react": "^18.3.1",

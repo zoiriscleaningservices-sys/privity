@@ -1,6 +1,8 @@
 // Privity Authentication & User Profile Management Service
-// Supports Google Sign-In (real Google name, email, profile picture) & Email/Password Sign Up
-// Guarantees all new users begin from absolute zero (0 level, 0 followers, 0 following, 0 likes, 0 sparks)
+// Full Supabase Cloud Auth Integration with Sovereign Local Fallback
+// Guarantees all new users begin from absolute zero (Level 0, 0 followers, 0 following, 0 likes, 0 sparks)
+
+import { getSupabaseClient, saveSupabaseAnonKey, isSupabaseConfigured, SUPABASE_PROJECT_ID } from './supabaseClient';
 
 export interface UserAccount {
   id: string;
@@ -18,7 +20,7 @@ export interface UserAccount {
   sparks: number;
   isVerified?: boolean;
   createdAt: number;
-  provider: 'google' | 'email' | 'guest';
+  provider: 'supabase' | 'google' | 'email' | 'guest';
 }
 
 export interface GoogleJwtPayload {
@@ -34,13 +36,72 @@ export interface GoogleJwtPayload {
 const STORAGE_SESSION_KEY = 'privity_auth_session_v1';
 const STORAGE_ACCOUNTS_KEY = 'privity_accounts_v1';
 
+export function mapSupabaseUserToAccount(sbUser: any): UserAccount {
+  const meta = sbUser.user_metadata || {};
+  const email = (sbUser.email || '').toLowerCase().trim();
+  const rawHandle = meta.handle || email.split('@')[0] || `user_${sbUser.id.slice(0, 5)}`;
+  const cleanHandle = rawHandle.replace(/^@/, '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+  const name = meta.name || meta.full_name || (cleanHandle ? cleanHandle.charAt(0).toUpperCase() + cleanHandle.slice(1) : 'Member');
+  const avatar = meta.avatar || meta.avatar_url || meta.picture || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(cleanHandle || sbUser.id)}`;
+
+  return {
+    id: sbUser.id,
+    name,
+    handle: cleanHandle,
+    email,
+    avatar,
+    coverUrl: meta.coverUrl || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&auto=format&fit=crop&q=85',
+    bio: meta.bio || '',
+    level: 0,
+    xp: 0,
+    followers: 0,
+    following: 0,
+    likes: 0,
+    sparks: 0,
+    isVerified: false,
+    createdAt: new Date(sbUser.created_at || Date.now()).getTime(),
+    provider: (sbUser.app_metadata?.provider as any) || 'supabase',
+  };
+}
+
 class AuthService {
   private currentUser: UserAccount | null = null;
   private listeners: Set<(user: UserAccount | null) => void> = new Set();
   public isGoogleSdkLoaded = false;
+  private isSupabaseListenerAttached = false;
 
   constructor() {
     this.loadSession();
+    this.initSupabaseListener();
+  }
+
+  // Initialize Supabase Auth listener
+  public initSupabaseListener() {
+    if (this.isSupabaseListenerAttached) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    this.isSupabaseListenerAttached = true;
+
+    // Check active Supabase session
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (!error && session?.user) {
+        const account = mapSupabaseUserToAccount(session.user);
+        this.setSession(account);
+      }
+    }).catch((e) => {
+      console.warn('[Supabase Auth] getSession error:', e);
+    });
+
+    // Subscribe to Supabase auth events
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        const account = mapSupabaseUserToAccount(session.user);
+        this.setSession(account);
+      } else if (event === 'SIGNED_OUT') {
+        this.setSession(null);
+      }
+    });
   }
 
   // Reactive subscription
@@ -114,6 +175,21 @@ class AuthService {
     this.notify();
   }
 
+  // Check if Supabase backend is configured and ready
+  public isSupabaseReady(): boolean {
+    return isSupabaseConfigured();
+  }
+
+  public getSupabaseProjectId(): string {
+    return SUPABASE_PROJECT_ID;
+  }
+
+  public setSupabaseKey(key: string) {
+    saveSupabaseAnonKey(key);
+    this.isSupabaseListenerAttached = false;
+    this.initSupabaseListener();
+  }
+
   // Parse Google JWT ID Token without requiring third-party library
   public decodeGoogleJwt(credential: string): GoogleJwtPayload | null {
     try {
@@ -151,17 +227,14 @@ class AuthService {
       payload.picture ||
       `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(email)}`;
 
-    // Generate clean unique handle from email prefix
     const baseHandle = email.split('@')[0].replace(/[^a-z0-9_]/gi, '').toLowerCase();
 
     const accounts = this.getAllAccounts();
-    // Check if account already exists
     let existing = Object.values(accounts).find(
       (a) => a.email.toLowerCase() === email || a.id === `google_${payload.sub}`
     );
 
     if (existing) {
-      // Update with latest real Google profile name & photo
       const updated: UserAccount = {
         ...existing,
         name: googleName,
@@ -195,7 +268,56 @@ class AuthService {
     return newAccount;
   }
 
-  // Native Email/Password Sign Up
+  // Supabase Async Sign Up (with local sovereign fallback)
+  public async signUpAsync(data: {
+    name: string;
+    handle: string;
+    email: string;
+    password?: string;
+    avatar?: string;
+  }): Promise<UserAccount> {
+    const cleanHandle = data.handle.trim().replace(/^@/, '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanName = data.name.trim();
+
+    if (!cleanHandle) throw new Error('Please choose a valid username / handle');
+    if (!cleanEmail || !cleanEmail.includes('@')) throw new Error('Please enter a valid email address');
+    if (!cleanName) throw new Error('Please enter your full name');
+
+    const defaultAvatar =
+      data.avatar ||
+      `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanHandle}`;
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { data: res, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: data.password || 'Privity@2026',
+        options: {
+          data: {
+            name: cleanName,
+            handle: cleanHandle,
+            avatar: defaultAvatar,
+          },
+        },
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (res.user) {
+        const account = mapSupabaseUserToAccount(res.user);
+        this.setSession(account);
+        return account;
+      }
+    }
+
+    // Sovereign fallback if Supabase not yet keyed
+    return this.signUp(data);
+  }
+
+  // Synchronous Email/Password Sign Up
   public signUp(data: {
     name: string;
     handle: string;
@@ -220,7 +342,6 @@ class AuthService {
       data.avatar ||
       `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanHandle}`;
 
-    // New User Account: Starts at Level 0, 0 stats!
     const newAccount: UserAccount = {
       id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       name: cleanName,
@@ -244,12 +365,37 @@ class AuthService {
     return newAccount;
   }
 
-  // Native Log In
+  // Supabase Async Login (with local sovereign fallback)
+  public async loginAsync(identifier: string, password?: string): Promise<UserAccount> {
+    const clean = identifier.trim().toLowerCase().replace(/^@/, '');
+    const cleanEmail = clean.includes('@') ? clean : `${clean}@privity.app`;
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { data: res, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: password || 'Privity@2026',
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (res.user) {
+        const account = mapSupabaseUserToAccount(res.user);
+        this.setSession(account);
+        return account;
+      }
+    }
+
+    return this.login(identifier, password);
+  }
+
+  // Synchronous Log In fallback
   public login(identifier: string, _password?: string): UserAccount {
     const clean = identifier.trim().toLowerCase().replace(/^@/, '');
     const accounts = this.getAllAccounts();
 
-    // Find by handle or email
     const found = Object.values(accounts).find(
       (a) => a.handle.toLowerCase() === clean || a.email.toLowerCase() === clean
     );
@@ -259,7 +405,6 @@ class AuthService {
       return found;
     }
 
-    // If identifier doesn't exist yet, create a fresh Level 0 session for them
     const freshUser: UserAccount = {
       id: `usr_${Date.now()}`,
       name: clean.charAt(0).toUpperCase() + clean.slice(1),
@@ -283,6 +428,20 @@ class AuthService {
     return freshUser;
   }
 
+  // Supabase Google OAuth
+  public async loginWithGoogleOAuth(): Promise<void> {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) throw new Error(error.message);
+    }
+  }
+
   // Update current user profile
   public updateProfile(updates: Partial<UserAccount>): UserAccount {
     if (!this.currentUser) throw new Error('No user is currently signed in');
@@ -291,11 +450,33 @@ class AuthService {
       ...updates,
     };
     this.setSession(updated);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      supabase.auth.updateUser({
+        data: {
+          name: updated.name,
+          handle: updated.handle,
+          avatar: updated.avatar,
+          coverUrl: updated.coverUrl,
+          bio: updated.bio,
+        },
+      }).catch((e) => console.warn('Supabase updateUser error:', e));
+    }
+
     return updated;
   }
 
   // Log out current session
-  public logout() {
+  public async logout(): Promise<void> {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {
+        console.warn('Supabase signOut error:', e);
+      }
+    }
     this.setSession(null);
   }
 

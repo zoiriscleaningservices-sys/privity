@@ -147,7 +147,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   }, []);
 
   // Filter streamers - STRICT HANDLE DEDUPLICATION & ZERO ZOMBIE GHOSTS
-  const userHandle = (currentUser?.handle || 'luciano').toLowerCase().replace('@', '').trim();
+  const userHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
   const isUserBroadcasting =
     (liveStreamSync.isLocalHost() && !!liveStreamSync.getHostSession()) ||
     (activeHost &&
@@ -163,7 +163,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   if (isUserBroadcasting && currentHost && !liveStreamSync.isStreamEnded(currentHost.id, currentHost.creatorHandle || currentHost.handle, currentHost.startedAt)) {
     const rawHandle = currentHost.creatorHandle || currentHost.handle || userHandle;
     const hostHandle = rawHandle.toLowerCase().replace('@', '').trim();
-    const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Luciano';
+    const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Creator';
     const cleanName = rawName.replace(' (LIVE NOW 🔴)', '');
     const avatar =
       currentHost.creatorAvatar ||

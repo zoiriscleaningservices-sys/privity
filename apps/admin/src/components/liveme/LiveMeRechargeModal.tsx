@@ -14,7 +14,7 @@ export const LiveMeRechargeModal: React.FC<LiveMeRechargeModalProps> = ({
   isOpen,
   onClose,
   userCoins,
-  userName = 'LUCIANO 4E 🥷',
+  userName = 'Member',
   userAvatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
   onRechargeSuccess,
 }) => {

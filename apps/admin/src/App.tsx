@@ -66,32 +66,84 @@ import { LiveMeStreamer } from './components/liveme/types';
 import { liveStreamSync } from './services/liveStreamSyncService';
 import {
   TikTokSlideFeed,
-  INITIAL_STORIES_V3,
   StoryItem,
 } from './components/feed/TikTokSlideFeed';
 import { authService, UserAccount } from './services/authService';
 import { AuthModal } from './components/auth';
 
-// Guaranteed One-Time Zero Reset: Wipes legacy cached fake/mock data in localStorage
-if (typeof window !== 'undefined' && localStorage.getItem('privity_zero_reset_v4') !== 'done') {
+export const BANNED_MOCK_HANDLES = new Set([
+  'elena_rodriguez',
+  'marcus_dev',
+  'queenduc',
+  'nicole_spicy',
+  'julian_analogue',
+  'sara_architecture',
+  'oliver_wood',
+  'chloe_visuals',
+  'carlos_m',
+  'sarita_w',
+  'max_ldn',
+  'shadow_wolf',
+  'gatty_live',
+  'kenji_tokyo',
+  'elena_r',
+]);
+
+export const isMockHandle = (handle?: string): boolean => {
+  if (!handle) return false;
+  const clean = handle.replace(/^@/, '').toLowerCase().trim();
+  return BANNED_MOCK_HANDLES.has(clean);
+};
+
+export const isMockPost = (p: any): boolean => {
+  if (!p || typeof p !== 'object') return true;
+  const id = String(p.id || '');
+  if (id.startsWith('p-media-')) return true;
+  if (
+    id.startsWith('p-nicole') ||
+    id.startsWith('p-sara') ||
+    id.startsWith('p-marcus') ||
+    id.startsWith('p-elena') ||
+    id.startsWith('p-julian') ||
+    id.startsWith('p-chloe') ||
+    id.startsWith('p-oliver') ||
+    id.startsWith('post-')
+  ) {
+    return true;
+  }
+  return isMockHandle(p.authorHandle);
+};
+
+// Guaranteed Absolute Zero Reset: Wipes legacy cached fake/mock data in localStorage
+if (typeof window !== 'undefined' && localStorage.getItem('privity_absolute_wipe_zero_v102') !== 'done') {
   try {
-    localStorage.removeItem('privity_posts_v5');
-    localStorage.removeItem('privity_profiles_v5');
-    localStorage.removeItem('privity_following_v5');
-    localStorage.removeItem('privity_close_friends_v5');
-    localStorage.removeItem('privity_stories_v3');
-    localStorage.removeItem('privity_direct_messages_v5');
-    localStorage.removeItem('privity_photo_likes_v5');
-    localStorage.removeItem('privity_live_streams_v2');
-    localStorage.removeItem('privity_ended_streams_v1');
-    localStorage.setItem('privity_zero_reset_v4', 'done');
+    const keysToRemove = [
+      'privity_posts_v5',
+      'privity_profiles_v5',
+      'privity_following_v5',
+      'privity_close_friends_v5',
+      'privity_stories_v3',
+      'privity_direct_messages_v5',
+      'privity_photo_likes_v5',
+      'privity_live_streams_v2',
+      'privity_ended_streams_v1',
+      'privity_follow_requests_v5',
+      'privity_viewed_handle_v5',
+      'privity_zero_reset_v1',
+      'privity_zero_reset_v2',
+      'privity_zero_reset_v3',
+      'privity_zero_reset_v4',
+      'privity_feed_posts_cache',
+      'privity_explore_streams',
+    ];
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    localStorage.setItem('privity_absolute_wipe_zero_v102', 'done');
   } catch (e) {}
 }
 
 const ALL_TEMPLATE_POSTS: PostItem[] = [];
 
-
-// 24-hour persistent story loader (strictly within stories)
+// 24-hour persistent story loader (strictly within stories, zero mock stories)
 export const loadValidStories = (): StoryItem[] => {
   try {
     const saved = localStorage.getItem('privity_stories_v3');
@@ -99,13 +151,16 @@ export const loadValidStories = (): StoryItem[] => {
       const parsed: StoryItem[] = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
         const now = Date.now();
-        // Retain stories within 24 hours (24 * 3600 * 1000 = 86400000 ms)
-        const valid = parsed.filter((s) => !s.createdAt || now - s.createdAt < 86400000);
-        return valid.length > 0 ? valid : INITIAL_STORIES_V3;
+        const valid = parsed.filter(
+          (s) =>
+            (!s.createdAt || now - s.createdAt < 86400000) &&
+            !isMockHandle(s.authorHandle)
+        );
+        return valid;
       }
     }
   } catch (e) {}
-  return INITIAL_STORIES_V3;
+  return [];
 };
 
 // ==================== SETTINGS DATA MODEL ====================
@@ -131,8 +186,8 @@ export interface UserSettings {
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
-  email: 'luciano@privity.app',
-  phone: '+1 (415) 890-2100',
+  email: '',
+  phone: '',
   membershipTier: 'Founding Member',
   handlePrivacyBadge: true,
   isPrivateAccount: false,
@@ -144,10 +199,10 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   notifyMentionsAndReplies: true,
   notifyNewFollowers: true,
   notifyCryptoProofValidations: true,
-  twoFactorEnabled: true,
-  cryptoKeyFingerprint: 'ed25519:7a9f:88c2:e410:33bc:99d1:a102:fe55',
-  hardwareKeyLinked: true,
-  sessionDevice: 'Apple Vision Pro · visionOS 2.2 · Active Now',
+  twoFactorEnabled: false,
+  cryptoKeyFingerprint: '',
+  hardwareKeyLinked: false,
+  sessionDevice: 'Active Web Session',
 };
 
 // ==================== REAL DATA MODELS & ASSETS ====================
@@ -211,7 +266,7 @@ interface PostItem {
 
 export const SAMPLE_POSTS: PostItem[] = [];
 
-const SUGGESTED_CREATORS: any[] = [];
+export const SUGGESTED_CREATORS: any[] = [];
 
 interface UserMediaItem {
   id: string;
@@ -525,9 +580,9 @@ export interface DirectChatMessage {
 const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {};
 
 // Helper to sanitize stored direct messages so legacy glitch counters (e.g. 25, 24) are cleanly normalized
-const sanitizeStoredDirectMessages = (raw: Record<string, DirectChatMessage[]>): Record<string, DirectChatMessage[]> => {
+const sanitizeStoredDirectMessages = (raw: Record<string, DirectChatMessage[]>, userHandle?: string): Record<string, DirectChatMessage[]> => {
   if (!raw || typeof raw !== 'object') return raw;
-  const cleanMyHandle = 'luciano';
+  const cleanMyHandle = userHandle ? userHandle.replace(/^@/, '') : '';
   const sanitized: Record<string, DirectChatMessage[]> = {};
 
   for (const [handle, thread] of Object.entries(raw)) {
@@ -547,7 +602,7 @@ const sanitizeStoredDirectMessages = (raw: Record<string, DirectChatMessage[]>):
 
         // If legacy glitch had incremented it (e.g. 25, 24) without user tracking, attribute 1 to the active user
         if (users.length === 0) {
-          nextUserReactions[emoji] = [cleanMyHandle];
+          if (cleanMyHandle) nextUserReactions[emoji] = [cleanMyHandle];
           nextReactions[emoji] = 1;
         } else {
           nextReactions[emoji] = users.length;
@@ -780,23 +835,17 @@ export function App() {
       [streamId]: (prev[streamId] || currentCount) + 15,
     }));
     setLikersLeaderboard((prev) =>
-      prev.map((item) => (item.handle === 'luciano' ? { ...item, likes: item.likes + 15 } : item))
+      prev.map((item) => (item.handle === myProfile.handle ? { ...item, likes: item.likes + 15 } : item))
     );
     handleLiveHeartBurst('#ff4d6d');
     triggerToast('Tapped +15 Likes for Host! ♥');
   };
 
-  // Live Battle Timer Countdown & Dynamic Opponent Simulation
+  // Live Battle Timer Countdown
   useEffect(() => {
     if (!isBattleMatchActive) return;
     const interval = setInterval(() => {
       setBattleTimeSeconds((prev) => (prev <= 1 ? 180 : prev - 1));
-
-      // Occasional random opponent battle cheer
-      if (Math.random() < 0.28) {
-        const delta = Math.floor(Math.random() * 35) + 12;
-        setBattleScoreOpponent((prev) => prev + delta);
-      }
     }, 1000);
     return () => clearInterval(interval);
   }, [isBattleMatchActive]);
@@ -916,26 +965,43 @@ export function App() {
     safeSaveStorage('privity_direct_messages_v5', directMessages);
   }, [directMessages]);
 
-  // 1. Persistent Profiles State
-  const [profiles, setProfiles] = useState<Record<string, UserProfile>>(() =>
-    readStorage('privity_profiles_v5', INITIAL_PROFILES_REGISTRY)
-  );
-
-  // 2. Persistent Posts State (sanitizes any auto-synthesized p-media- posts from private clicks)
-  const [posts, setPosts] = useState<PostItem[]>(() => {
-    const loaded = readStorage<PostItem[]>('privity_posts_v5', []);
-    return Array.isArray(loaded) ? loaded.filter((p) => p && !p.id?.startsWith('p-media-')) : [];
+  // 1. Persistent Profiles State (purges any mock profiles)
+  const [profiles, setProfiles] = useState<Record<string, UserProfile>>(() => {
+    const loaded = readStorage<Record<string, UserProfile>>('privity_profiles_v5', INITIAL_PROFILES_REGISTRY);
+    const cleaned: Record<string, UserProfile> = {};
+    if (loaded && typeof loaded === 'object') {
+      for (const [k, v] of Object.entries(loaded)) {
+        if (!isMockHandle(k) && !isMockHandle(v?.handle)) {
+          cleaned[k] = v;
+        }
+      }
+    }
+    return cleaned;
   });
 
-  // 3. Persistent Following Map
-  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>(() =>
-    readStorage('privity_following_v5', {})
-  );
+  // 2. Persistent Posts State (strictly filters out any mock posts)
+  const [posts, setPosts] = useState<PostItem[]>(() => {
+    const loaded = readStorage<PostItem[]>('privity_posts_v5', []);
+    return Array.isArray(loaded) ? loaded.filter((p) => !isMockPost(p)) : [];
+  });
 
-  // 4. Persistent Close Friends List
-  const [closeFriendsList, setCloseFriendsList] = useState<string[]>(() =>
-    readStorage('privity_close_friends_v5', [])
-  );
+  // 3. Persistent Following Map (filters out following any mock handles)
+  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>(() => {
+    const loaded = readStorage<Record<string, boolean>>('privity_following_v5', {});
+    const cleaned: Record<string, boolean> = {};
+    if (loaded && typeof loaded === 'object') {
+      for (const [k, v] of Object.entries(loaded)) {
+        if (!isMockHandle(k)) cleaned[k] = v;
+      }
+    }
+    return cleaned;
+  });
+
+  // 4. Persistent Close Friends List (filters out any mock handles)
+  const [closeFriendsList, setCloseFriendsList] = useState<string[]>(() => {
+    const loaded = readStorage<string[]>('privity_close_friends_v5', []);
+    return Array.isArray(loaded) ? loaded.filter((h) => !isMockHandle(h)) : [];
+  });
 
   // 5. Persistent Private Account Setting
   const [isPrivateAccount, setIsPrivateAccount] = useState<boolean>(() =>
@@ -1025,9 +1091,9 @@ export function App() {
     };
   };
 
-  const activeAuthHandle = (currentAuthUser?.handle || 'luciano').toLowerCase();
+  const activeAuthHandle = (currentAuthUser?.handle || '').toLowerCase();
   const myProfile = useMemo((): UserProfile => {
-    if (profiles[activeAuthHandle]) {
+    if (activeAuthHandle && profiles[activeAuthHandle]) {
       return profiles[activeAuthHandle];
     }
     if (currentAuthUser) {
@@ -1049,13 +1115,29 @@ export function App() {
         mediaItems: [],
       };
     }
-    return getUserProfile('luciano');
+    return {
+      id: '',
+      name: '',
+      handle: '',
+      avatar: '',
+      coverUrl: '',
+      isVerified: false,
+      bio: '',
+      location: '',
+      joinedDate: '',
+      circleStatus: 'You',
+      isPrivate: false,
+      followersList: [],
+      followingList: [],
+      trustCirclesList: [],
+      mediaItems: [],
+    };
   }, [profiles, activeAuthHandle, currentAuthUser]);
 
   // ========================================================
   // REAL-TIME MULTI-DEVICE SYNCHRONIZATION ENGINE
   // ========================================================
-  const SYNC_TOPIC = 'privity_sync_luciano_live';
+  const SYNC_TOPIC = 'privity_sync_global_live';
   const SYNC_ENDPOINT = `https://ntfy.sh/${SYNC_TOPIC}`;
 
   // Unique Device ID generated once per browser/device
@@ -1148,7 +1230,7 @@ export function App() {
         processedEventIdsRef.current.add(event.eventId);
       }
 
-      const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+      const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
 
       switch (event.action) {
         case 'LIVESTREAM_GIFT_EVENT': {
@@ -1183,8 +1265,8 @@ export function App() {
               if (p.id === postId) {
                 const currentLikers = p.likersList || [];
                 const updatedLikers = isLiked
-                  ? Array.from(new Set([...currentLikers, userHandle || 'luciano']))
-                  : currentLikers.filter((h) => h !== (userHandle || 'luciano'));
+                  ? (userHandle ? Array.from(new Set([...currentLikers, userHandle])) : currentLikers)
+                  : (userHandle ? currentLikers.filter((h) => h !== userHandle) : currentLikers);
                 return {
                   ...p,
                   isLiked: userHandle === cleanMyHandle ? isLiked : p.isLiked,
@@ -1247,7 +1329,8 @@ export function App() {
             return next;
           });
           if (post.contentUrl) {
-            const author = (post.authorHandle || 'luciano').replace(/^@/, '');
+            const author = (post.authorHandle || '').replace(/^@/, '');
+            if (!author) return;
             setProfiles((prev) => {
               const prof = prev[author] || getUserProfile(author);
               const exists = (prof.mediaItems || []).some(
@@ -1512,12 +1595,14 @@ export function App() {
           const { handle } = event;
           if (!handle) return;
           const clean = handle.replace(/^@/, '');
+          const myHandle = (myProfile.handle || '').toLowerCase();
+          if (!myHandle) return;
           setProfiles((prev) => {
-            const myProf = prev['luciano'];
+            const myProf = prev[myHandle];
             if (!myProf) return prev;
             const nextProfs = {
               ...prev,
-              luciano: {
+              [myHandle]: {
                 ...myProf,
                 followersList: (myProf.followersList || []).filter(
                   (h) => h.toLowerCase() !== clean.toLowerCase()
@@ -1756,7 +1841,7 @@ export function App() {
       return;
     }
 
-    const cleanHandle = editForm.handle.trim().replace(/^@/, '') || 'luciano';
+    const cleanHandle = editForm.handle.trim().replace(/^@/, '') || myProfile.handle;
     const updated: UserProfile = {
       ...myProfile,
       name: editForm.name.trim(),
@@ -1764,7 +1849,7 @@ export function App() {
       bio: editForm.bio.trim(),
       avatar: editForm.avatar || myProfile.avatar,
       coverUrl: editForm.coverUrl || myProfile.coverUrl,
-      location: editForm.location.trim() || 'San Francisco, CA',
+      location: editForm.location.trim() || 'Global',
       website: editForm.website.trim() || 'privity.app',
       category: editForm.category.trim() || myProfile.category,
       verifiedCategory: editForm.category.trim() || myProfile.verifiedCategory,
@@ -1773,9 +1858,11 @@ export function App() {
     setProfiles((prev) => {
       const next = {
         ...prev,
-        luciano: updated,
-        ...(cleanHandle !== 'luciano' ? { [cleanHandle]: updated } : {}),
+        [cleanHandle.toLowerCase()]: updated,
       };
+      if (myProfile.handle && myProfile.handle.toLowerCase() !== cleanHandle.toLowerCase()) {
+        delete next[myProfile.handle.toLowerCase()];
+      }
       try {
         localStorage.setItem('privity_profiles_v5', JSON.stringify(next));
       } catch (err) {
@@ -1788,14 +1875,13 @@ export function App() {
     setPosts((prev) =>
       prev.map((p) => {
         const isPostAuthor =
-          p.authorId === 'usr-luciano' ||
-          p.authorHandle === 'luciano' ||
+          (myProfile.id && p.authorId === myProfile.id) ||
           p.authorHandle === myProfile.handle;
 
         const updatedComments = p.comments.map((c) => {
-          const isCommentAuthor = c.authorHandle === 'luciano' || c.authorHandle === myProfile.handle;
+          const isCommentAuthor = c.authorHandle === myProfile.handle;
           const updatedReplies = (c.replies || []).map((r) => {
-            const isReplyAuthor = r.authorHandle === 'luciano' || r.authorHandle === myProfile.handle;
+            const isReplyAuthor = r.authorHandle === myProfile.handle;
             if (isReplyAuthor) {
               return {
                 ...r,
@@ -1832,7 +1918,7 @@ export function App() {
       })
     );
 
-    if (viewedUserHandle === 'luciano' || viewedUserHandle === myProfile.handle) {
+    if (myProfile.handle && viewedUserHandle.toLowerCase() === myProfile.handle.toLowerCase()) {
       setViewedUserHandle(cleanHandle);
     }
 
@@ -1907,11 +1993,12 @@ export function App() {
       const nextPosts = prevPosts.map((p) => {
         if (isSameMedia(p.contentUrl, targetUrl) || isSameMedia(p.thumbnailUrl, targetUrl)) {
           matched = true;
+          const likerHandle = myProfile.handle;
           let nextLikers = [...(p.likersList || [])];
           if (nextLiked) {
-            if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
+            if (likerHandle && !nextLikers.includes(likerHandle)) nextLikers = [likerHandle, ...nextLikers];
           } else {
-            nextLikers = nextLikers.filter((h) => h !== 'luciano');
+            nextLikers = nextLikers.filter((h: string) => h !== likerHandle);
           }
           return {
             ...p,
@@ -2402,7 +2489,7 @@ export function App() {
       const giftEvent: GiftEvent = {
         id: `evt_gift_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
         livestreamId: currentStream.id,
-        senderId: (myProfile.handle || 'luciano').replace(/^@/, ''),
+        senderId: (myProfile.handle || '').replace(/^@/, ''),
         senderName: myProfile.name,
         senderAvatar: myProfile.avatar,
         recipientId: currentStream.creatorHandle,
@@ -2543,9 +2630,11 @@ export function App() {
 
 
   // User Profile View State & Navigation History Stack (persisted across refreshes)
-  const [viewedUserHandle, setViewedUserHandle] = useState<string>(() =>
-    readStorage('privity_viewed_handle_v5', 'luciano')
-  );
+  const [viewedUserHandle, setViewedUserHandle] = useState<string>(() => {
+    const saved: string = readStorage('privity_viewed_handle_v5', '') || '';
+    if (saved === 'luciano') return currentAuthUser?.handle || '';
+    return saved || currentAuthUser?.handle || '';
+  });
   const [profileHistory, setProfileHistory] = useState<string[]>([]);
   const [profileSubTab, setProfileSubTab] = useState<'dispatches' | 'media' | 'liked' | 'saved' | 'replies'>('dispatches');
 
@@ -2605,7 +2694,8 @@ export function App() {
 
     const current = isUserFollowed(resolvedHandle);
     const next = !current;
-    const myHandle = myProfile.handle || 'luciano';
+    const myHandle = (myProfile.handle || '').toLowerCase();
+    if (!myHandle) return;
 
     setFollowingMap((prev) => {
       const nextMap = {
@@ -2624,18 +2714,17 @@ export function App() {
       const target = prev[resolvedHandle] || prev[clean] || getUserProfile(resolvedHandle);
       let targetFollowers = [...(target.followersList || [])];
       if (next) {
-        if (!targetFollowers.some((h) => h.toLowerCase() === 'luciano')) targetFollowers.push('luciano');
-        if (myHandle !== 'luciano' && !targetFollowers.some((h) => h.toLowerCase() === myHandle.toLowerCase())) {
+        if (!targetFollowers.some((h) => h.toLowerCase() === myHandle)) {
           targetFollowers.push(myHandle);
         }
       } else {
         targetFollowers = targetFollowers.filter(
-          (h) => h.toLowerCase() !== 'luciano' && h.toLowerCase() !== myHandle.toLowerCase()
+          (h) => h.toLowerCase() !== myHandle
         );
       }
       const nextTarget = { ...target, followersList: targetFollowers };
 
-      const myProf = prev['luciano'] || prev[myHandle] || getUserProfile('luciano');
+      const myProf = prev[myHandle] || myProfile;
       let myFollowing = [...(myProf.followingList || [])];
       if (next) {
         if (!myFollowing.some((h) => h.toLowerCase() === resolvedHandle.toLowerCase())) {
@@ -2650,10 +2739,9 @@ export function App() {
 
       const nextProfiles = {
         ...prev,
-        [resolvedHandle]: nextTarget,
-        [clean]: nextTarget,
-        luciano: nextMyProf,
-        ...(myHandle !== 'luciano' ? { [myHandle]: nextMyProf } : {}),
+        [resolvedHandle.toLowerCase()]: nextTarget,
+        [clean.toLowerCase()]: nextTarget,
+        [myHandle]: nextMyProf,
       };
       safeSaveStorage('privity_profiles_v5', nextProfiles);
       return nextProfiles;
@@ -2670,22 +2758,22 @@ export function App() {
   };
 
   const handleRemoveFollower = (followerHandle: string) => {
-    const clean = followerHandle.replace(/^@/, '');
-    const myHandle = myProfile.handle || 'luciano';
+    const clean = followerHandle.replace(/^@/, '').toLowerCase();
+    const myHandle = (myProfile.handle || '').toLowerCase();
+    if (!myHandle) return;
 
     setProfiles((prev) => {
-      const myProf = prev['luciano'] || prev[myHandle] || getUserProfile('luciano');
-      const updatedFollowers = (myProf.followersList || []).filter((h) => h !== clean);
+      const myProf = prev[myHandle] || myProfile;
+      const updatedFollowers = (myProf.followersList || []).filter((h) => h.toLowerCase() !== clean);
       const nextMyProf = { ...myProf, followersList: updatedFollowers };
 
       const targetProf = prev[clean] || getUserProfile(clean);
-      const targetFollowing = (targetProf.followingList || []).filter((h) => h !== 'luciano' && h !== myHandle);
+      const targetFollowing = (targetProf.followingList || []).filter((h) => h.toLowerCase() !== myHandle);
       const nextTargetProf = { ...targetProf, followingList: targetFollowing };
 
       const nextProfiles = {
         ...prev,
-        luciano: nextMyProf,
-        ...(myHandle !== 'luciano' ? { [myHandle]: nextMyProf } : {}),
+        [myHandle]: nextMyProf,
         [clean]: nextTargetProf,
       };
       try {
@@ -2713,11 +2801,12 @@ export function App() {
     setCloseFriendsList(nextList);
 
     setProfiles((prev) => {
-      const myProf = prev['luciano'];
-      if (!myProf) return prev;
+      const myHandle = (myProfile.handle || '').toLowerCase();
+      if (!myHandle) return prev;
+      const myProf = prev[myHandle] || myProfile;
       return {
         ...prev,
-        luciano: {
+        [myHandle]: {
           ...myProf,
           trustCirclesList: nextList,
         },
@@ -2752,7 +2841,7 @@ export function App() {
   ) => {
     const cleanTarget = targetHandle.replace(/^@/, '');
     const profile = getUserProfile(cleanTarget);
-    const isOwn = cleanTarget === 'luciano' || cleanTarget === myProfile.handle;
+    const isOwn = Boolean(myProfile.handle) && cleanTarget.toLowerCase() === myProfile.handle.toLowerCase();
     const effectiveIsPrivate = isOwn ? isPrivateAccount : !!profile.isPrivate;
     const isFollowing = !!followingMap[cleanTarget] || isOwn;
 
@@ -2774,10 +2863,7 @@ export function App() {
 
   // Notifications & Follow Requests (Real-Time & LocalStorage Persistent)
   const [followRequests, setFollowRequests] = useState<Array<{ id: string; name: string; handle: string; avatar: string }>>(() =>
-    readStorage('privity_follow_requests_v5', [
-      { id: 'fr-1', name: 'Sam Archer', handle: 'sam_arch', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120' },
-      { id: 'fr-2', name: 'Jessica Vance', handle: 'jess_film', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120' },
-    ])
+    readStorage('privity_follow_requests_v5', [])
   );
 
   useEffect(() => {
@@ -2787,11 +2873,12 @@ export function App() {
   // Real-Time Request Approval
   const handleApproveRequest = (requestId: string, targetHandle: string, targetName: string) => {
     const cleanHandle = targetHandle.replace(/^@/, '');
-    const myHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const myHandle = (myProfile.handle || '').replace(/^@/, '').toLowerCase();
+    if (!myHandle) return;
 
     // 1. Remove from pending follow requests immediately
     setFollowRequests((prev) => {
-      const next = prev.filter((x) => x.id !== requestId && x.handle !== cleanHandle);
+      const next = prev.filter((x) => x.id !== requestId && x.handle.toLowerCase() !== cleanHandle.toLowerCase());
       safeSaveStorage('privity_follow_requests_v5', next);
       return next;
     });
@@ -2801,23 +2888,17 @@ export function App() {
       const nextProfs = { ...prev };
 
       // Update my profile followers
-      const myProf = nextProfs[myHandle] || nextProfs['luciano'] || getUserProfile(myHandle);
+      const myProf = nextProfs[myHandle] || myProfile;
       const myFollowers = Array.from(new Set([...(myProf.followersList || []), cleanHandle]));
       nextProfs[myHandle] = {
         ...myProf,
         followersList: myFollowers,
       };
-      if (myHandle !== 'luciano') {
-        nextProfs['luciano'] = {
-          ...myProf,
-          followersList: myFollowers,
-        };
-      }
 
       // Update target profile following
-      const targetProf = nextProfs[cleanHandle] || getUserProfile(cleanHandle);
-      const targetFollowing = Array.from(new Set([...(targetProf.followingList || []), myHandle, 'luciano']));
-      nextProfs[cleanHandle] = {
+      const targetProf = nextProfs[cleanHandle.toLowerCase()] || getUserProfile(cleanHandle);
+      const targetFollowing = Array.from(new Set([...(targetProf.followingList || []), myHandle]));
+      nextProfs[cleanHandle.toLowerCase()] = {
         ...targetProf,
         followingList: targetFollowing,
       };
@@ -2845,28 +2926,8 @@ export function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Moderation state
-  const [reports, setReports] = useState<any[]>([
-    {
-      id: 'rep-991',
-      targetAuthor: 'crypto_drop_bot',
-      targetType: 'post',
-      snippet: 'Claim 5000 USDT free airdrop now at t.me/fake_claim',
-      reason: 'Spam / Scam',
-      status: 'open',
-    },
-  ]);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([
-    {
-      id: 'aud-401',
-      actorId: 'usr-luciano',
-      actorUsername: 'admin_luciano',
-      action: 'remove_content',
-      targetType: 'post',
-      targetId: 'rep-980',
-      reason: 'Malicious external link confirmed',
-      timestamp: '2026-09-28T14:30:00.000Z',
-    },
-  ]);
+  const [reports, setReports] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [reportingPost, setReportingPost] = useState<PostItem | null>(null);
   const [selectedReport, setSelectedReport] = useState<any | null>(null);
   const [actionType, setActionType] = useState<ModerationActionType>('remove_content');
@@ -2901,9 +2962,9 @@ export function App() {
       joinedDate: 'Created 2026',
       circleStatus: 'Close Friend',
       isPrivate: true,
-      followersList: [...members, 'luciano'],
-      followingList: ['luciano'],
-      trustCirclesList: ['luciano'],
+      followersList: [...members, ...(myProfile.handle ? [myProfile.handle] : [])],
+      followingList: myProfile.handle ? [myProfile.handle] : [],
+      trustCirclesList: myProfile.handle ? [myProfile.handle] : [],
       mediaItems: [],
     };
 
@@ -2914,7 +2975,7 @@ export function App() {
 
     const welcomeMsg: DirectChatMessage = {
       id: `msg-${Date.now()}`,
-      senderHandle: 'luciano',
+      senderHandle: myProfile.handle || 'user',
       recipientHandle: groupId,
       text: `🎉 Group "${gName}" created with ${members.length} members. Start chatting!`,
       timeAgo: 'Just now',
@@ -2937,11 +2998,12 @@ export function App() {
     setIsPrivateAccount(val);
     setUserSettings((prev) => ({ ...prev, isPrivateAccount: val }));
     setProfiles((prev) => {
-      const me = prev['luciano'] || getUserProfile('luciano');
+      const myHandle = (myProfile.handle || '').toLowerCase();
+      if (!myHandle) return prev;
+      const me = prev[myHandle] || myProfile;
       return {
         ...prev,
-        luciano: { ...me, isPrivate: val },
-        ...(me.handle !== 'luciano' ? { [me.handle]: { ...me, isPrivate: val } } : {}),
+        [myHandle]: { ...me, isPrivate: val },
       };
     });
     triggerToast(
@@ -2959,7 +3021,7 @@ export function App() {
       settings: userSettings,
       closeFriends: closeFriendsList,
       following: Object.keys(followingMap).filter((k) => followingMap[k]),
-      dispatches: posts.filter((p) => p.authorHandle === myProfile.handle || p.authorId === 'usr-luciano'),
+      dispatches: posts.filter((p) => p.authorHandle === myProfile.handle || (myProfile.id && p.authorId === myProfile.id)),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -3017,11 +3079,12 @@ export function App() {
     if (fromDoubleTap && isCurrentlyLiked) return;
 
     const nextLiked = fromDoubleTap ? true : !isCurrentlyLiked;
+    const userHandle = myProfile.handle || '';
     let nextLikers = [...(targetPost.likersList || [])];
     if (nextLiked) {
-      if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
+      if (userHandle && !nextLikers.includes(userHandle)) nextLikers = [userHandle, ...nextLikers];
     } else {
-      nextLikers = nextLikers.filter((h) => h !== 'luciano');
+      nextLikers = nextLikers.filter((h) => h !== userHandle);
     }
     const currentCount = photoRecord !== undefined
       ? photoRecord.count
@@ -3098,7 +3161,7 @@ export function App() {
       postId,
       isLiked: nextLiked,
       likesCount: nextCount,
-      userHandle: 'luciano',
+      userHandle: myProfile.handle || '',
     });
 
     triggerToast(nextLiked ? 'Liked dispatch' : 'Unliked dispatch');
@@ -3425,7 +3488,7 @@ export function App() {
   // Real-Time Emoji Reaction Toggle (1 reaction per emoji per user, clicking again deletes it)
   const handleReactToMessage = (recipientHandle: string, messageId: string, emoji: string) => {
     const cleanRecipient = recipientHandle.replace(/^@/, '');
-    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
 
     setDirectMessages((prev) => {
       const thread = prev[cleanRecipient] || [];
@@ -3600,7 +3663,7 @@ export function App() {
   // Finish & Send Voice Recording
   const handleFinishAndSendVoiceRecording = (recipientHandle: string) => {
     const cleanRecipient = recipientHandle.replace(/^@/, '');
-    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
     const durationSec = Math.max(1, recordingSeconds);
     const formattedDuration = `${Math.floor(durationSec / 60)}:${(durationSec % 60).toString().padStart(2, '0')}`;
 
@@ -3640,7 +3703,7 @@ export function App() {
 
       setIsRecipientTyping(true);
       setTimeout(() => {
-        const organicReply = getOrganicContactReply('Luciano', '', false, true);
+        const organicReply = getOrganicContactReply(myProfile.name || 'Friend', '', false, true);
         const replyMsg: DirectChatMessage = {
           id: `msg-reply-${Date.now()}`,
           senderHandle: cleanRecipient,
@@ -3697,7 +3760,7 @@ export function App() {
     if (!chatDraftText.trim() && !chatMediaAttachment) return;
 
     const recipientHandle = activeChatUser.handle.replace(/^@/, '');
-    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
     const textToSend = chatDraftText.trim();
     const isMedia = !!chatMediaAttachment;
     const mediaTypeToSend = isMedia ? chatMediaType : undefined;
@@ -3774,7 +3837,7 @@ export function App() {
   // Story reaction or reply forwarded directly into Direct Messages
   const handleStoryReplyToDM = (creatorHandle: string, replyText: string) => {
     const cleanRecipientHandle = creatorHandle.replace(/^@/, '');
-    const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+    const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
     const recipientUser = getUserProfile(cleanRecipientHandle);
 
     const newMsg: DirectChatMessage = {
@@ -3955,12 +4018,12 @@ export function App() {
   // Dedicated Birdie quick-composer post creation
   const handleAddBirdiePost = (caption: string, privacy: 'public' | 'followers' | 'close_friends' = 'public') => {
     if (!caption.trim()) return;
-    const extractedTags = (caption.match(/#[\w-]+/g) || []).map((t) => t.slice(1));
-    const finalTags = extractedTags.length > 0 ? extractedTags : ['birdie', 'thought', 'privity'];
+    const extractedTags = (caption.match(/#[\w-]+/g) || []).map((t) => t.slice(1).toLowerCase().trim()).filter(Boolean);
+    const finalTags = extractedTags;
 
     const newBirdiePost: PostItem = {
       id: `p-birdie-${Date.now()}`,
-      authorId: 'usr-luciano',
+      authorId: myProfile.id || `usr-${myProfile.handle}`,
       authorName: myProfile.name,
       authorHandle: myProfile.handle,
       authorAvatar: myProfile.avatar,
@@ -3997,12 +4060,12 @@ export function App() {
     e.preventDefault();
     if (!composerCaption.trim()) return;
 
-    const extractedTags = (composerCaption.match(/#[\w-]+/g) || []).map((t) => t.slice(1));
-    const finalTags = extractedTags.length > 0 ? extractedTags : ['privity', 'authentic'];
+    const extractedTags = (composerCaption.match(/#[\w-]+/g) || []).map((t) => t.slice(1).toLowerCase().trim()).filter(Boolean);
+    const finalTags = extractedTags;
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
-      authorId: 'usr-luciano',
+      authorId: myProfile.id || `usr-${myProfile.handle}`,
       authorName: myProfile.name,
       authorHandle: myProfile.handle,
       authorAvatar: myProfile.avatar,
@@ -4039,9 +4102,10 @@ export function App() {
       });
 
       setProfiles((prev) => {
-        const prof = prev['luciano'] || prev[myProfile.handle] || myProfile;
+        const handleKey = myProfile.handle.toLowerCase();
+        const prof = prev[handleKey] || myProfile;
         const newMedia: UserMediaItem = {
-          id: `m-luciano-${Date.now()}`,
+          id: `m-${myProfile.handle}-${Date.now()}`,
           url: photoUrl,
           type: 'image',
           likes: 0,
@@ -4050,18 +4114,10 @@ export function App() {
         };
         const nextProfiles = {
           ...prev,
-          luciano: {
+          [handleKey]: {
             ...prof,
             mediaItems: [newMedia, ...(prof.mediaItems || [])],
           },
-          ...(myProfile.handle !== 'luciano'
-            ? {
-                [myProfile.handle]: {
-                  ...prof,
-                  mediaItems: [newMedia, ...(prof.mediaItems || [])],
-                },
-              }
-            : {}),
         };
         safeSaveStorage('privity_profiles_v5', nextProfiles);
         return nextProfiles;
@@ -4100,15 +4156,15 @@ export function App() {
 
     const tagsArr = modalTags
       .split(' ')
-      .map((t) => t.replace('#', '').trim())
+      .map((t) => t.replace('#', '').trim().toLowerCase())
       .filter(Boolean);
-    const captionTags = (modalCaption.match(/#[\w-]+/g) || []).map((t) => t.slice(1));
+    const captionTags = (modalCaption.match(/#[\w-]+/g) || []).map((t) => t.slice(1).toLowerCase().trim()).filter(Boolean);
     const combinedTags = Array.from(new Set([...tagsArr, ...captionTags]));
-    const finalTags = combinedTags.length > 0 ? combinedTags : ['privity'];
+    const finalTags = combinedTags;
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
-      authorId: 'usr-luciano',
+      authorId: myProfile.id || `usr-${myProfile.handle}`,
       authorName: myProfile.name,
       authorHandle: myProfile.handle,
       authorAvatar: myProfile.avatar,
@@ -4145,9 +4201,10 @@ export function App() {
       });
 
       setProfiles((prev) => {
-        const prof = prev['luciano'] || prev[myProfile.handle] || myProfile;
+        const handleKey = myProfile.handle.toLowerCase();
+        const prof = prev[handleKey] || myProfile;
         const newMedia: UserMediaItem = {
-          id: `m-luciano-${Date.now()}`,
+          id: `m-${myProfile.handle}-${Date.now()}`,
           url: photoUrl,
           type: 'image',
           likes: 0,
@@ -4156,18 +4213,10 @@ export function App() {
         };
         const nextProfiles = {
           ...prev,
-          luciano: {
+          [handleKey]: {
             ...prof,
             mediaItems: [newMedia, ...(prof.mediaItems || [])],
           },
-          ...(myProfile.handle !== 'luciano'
-            ? {
-                [myProfile.handle]: {
-                  ...prof,
-                  mediaItems: [newMedia, ...(prof.mediaItems || [])],
-                },
-              }
-            : {}),
         };
         safeSaveStorage('privity_profiles_v5', nextProfiles);
         return nextProfiles;
@@ -4193,7 +4242,7 @@ export function App() {
     setActiveTagFilter(null);
 
     // Switch to feed view unless currently on own profile
-    if (activeTab !== 'profile' || viewedUserHandle !== 'luciano') {
+    if (activeTab !== 'profile' || viewedUserHandle !== myProfile.handle) {
       setActiveTab('feed');
     }
 
@@ -4224,15 +4273,15 @@ export function App() {
   }) => {
     const rawTags = tags
       .split(' ')
-      .map((t) => t.replace('#', '').trim())
+      .map((t) => t.replace('#', '').trim().toLowerCase())
       .filter(Boolean);
-    const captionTags = (caption.match(/#[\w-]+/g) || []).map((t) => t.slice(1));
+    const captionTags = (caption.match(/#[\w-]+/g) || []).map((t) => t.slice(1).toLowerCase().trim()).filter(Boolean);
     const combinedTags = Array.from(new Set([...rawTags, ...captionTags]));
-    const finalTags = combinedTags.length > 0 ? combinedTags : ['privity', 'moments'];
+    const finalTags = combinedTags;
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
-      authorId: 'usr-luciano',
+      authorId: myProfile.id || `usr-${myProfile.handle}`,
       authorName: myProfile.name,
       authorHandle: myProfile.handle,
       authorAvatar: myProfile.avatar,
@@ -4261,7 +4310,7 @@ export function App() {
 
     if (mediaUrl) {
       const newMedia: UserMediaItem = {
-        id: `m-luciano-${Date.now()}`,
+        id: `m-${myProfile.handle}-${Date.now()}`,
         url: mediaUrl,
         type: mediaType === 'video' ? 'video' : 'image',
         likes: 0,
@@ -4270,21 +4319,14 @@ export function App() {
       };
 
       setProfiles((prev) => {
-        const prof = prev['luciano'] || prev[myProfile.handle] || myProfile;
+        const handleKey = myProfile.handle.toLowerCase();
+        const prof = prev[handleKey] || myProfile;
         const nextProfiles = {
           ...prev,
-          luciano: {
+          [handleKey]: {
             ...prof,
             mediaItems: [newMedia, ...(prof.mediaItems || [])],
           },
-          ...(myProfile.handle !== 'luciano'
-            ? {
-                [myProfile.handle]: {
-                  ...prof,
-                  mediaItems: [newMedia, ...(prof.mediaItems || [])],
-                },
-              }
-            : {}),
         };
         safeSaveStorage('privity_profiles_v5', nextProfiles);
         return nextProfiles;
@@ -4306,7 +4348,7 @@ export function App() {
     setFeedFilter('all');
     setActiveTagFilter(null);
 
-    if (activeTab !== 'profile' || viewedUserHandle !== 'luciano') {
+    if (activeTab !== 'profile' || viewedUserHandle !== myProfile.handle) {
       setActiveTab('feed');
     }
 
@@ -4338,7 +4380,7 @@ export function App() {
   }) => {
     setHostLiveCameraStream(cameraStream || null);
     setIsHostBroadcasting(true);
-    const cleanHandle = (myProfile.handle || 'luciano').toLowerCase().replace('@', '').trim();
+    const cleanHandle = (myProfile.handle || '').toLowerCase().replace('@', '').trim();
     const streamSessionId = `live-user-${cleanHandle}-${Date.now()}`;
     liveStreamSync.clearStreamEnded(streamSessionId, cleanHandle);
     const userStream: LiveStreamSession = {
@@ -4424,32 +4466,59 @@ export function App() {
     triggerToast(`Broadcast started: ${userStream.title}`);
   };
 
+  // Official Logout Handler: Locks app immediately and redirects to login gate
+  const handleLogout = () => {
+    authService.logout();
+    setCurrentAuthUser(null);
+    setViewedUserHandle('');
+    setIsSettingsOpen(false);
+    setIsProfileDrawerOpen(false);
+    triggerToast('Logged out securely');
+  };
 
-  // Dynamic trending topics refreshed based on active reverse-chronological stream
+  // Dynamic trending topics refreshed based on active reverse-chronological stream (strictly from zero)
   const dynamicTrendingTags = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const p of posts) {
       for (const t of p.tags || []) {
-        const clean = t.toLowerCase().replace(/^#/, '');
-        counts[clean] = (counts[clean] || 0) + 1;
+        const clean = t.toLowerCase().replace(/^#/, '').trim();
+        if (clean) {
+          counts[clean] = (counts[clean] || 0) + 1;
+        }
       }
     }
     const sorted = Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
+      .slice(0, 8)
       .map(([tag, count]) => ({
         tag,
-        count: `${count * 120 + 80} dispatches`,
+        count: `${count} ${count === 1 ? 'dispatch' : 'dispatches'}`,
       }));
-    return sorted.length > 0
-      ? sorted
-      : [
-          { tag: 'mindful', count: '1.4k dispatches' },
-          { tag: 'photography', count: '890 dispatches' },
-          { tag: 'privacyfirst', count: '620 dispatches' },
-          { tag: 'slowlife', count: '410 dispatches' },
-        ];
+    return sorted;
   }, [posts]);
+
+  // MANDATORY AUTHENTICATION WALL: Nobody can view anything unless logged in
+  if (!currentAuthUser) {
+    return (
+      <div style={{ minHeight: '100vh', width: '100vw', background: '#060813', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+        {toastMsg && (
+          <div className="apple-glass-toast">
+            <div className="glass-toast-dot" />
+            <span>{toastMsg}</span>
+          </div>
+        )}
+        <AuthModal
+          isOpen={true}
+          requireAuth={true}
+          onAuthenticated={(user) => {
+            setCurrentAuthUser(user);
+            setViewedUserHandle(user.handle);
+            triggerToast(`Welcome to Privity, ${user.name}!`);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={`app-container ${activeLiveStream ? 'live-mode-active' : ''}`}>
@@ -4565,8 +4634,8 @@ export function App() {
           </button>
 
           <button
-            className={`nav-link-btn ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}
-            onClick={() => navigateToProfile('luciano')}
+            className={`nav-link-btn ${activeTab === 'profile' && viewedUserHandle === myProfile.handle ? 'active' : ''}`}
+            onClick={() => navigateToProfile(myProfile.handle)}
           >
             <span className="nav-icon-wrap"><IconUser size={21} /></span>
             <span>Profile</span>
@@ -4642,17 +4711,31 @@ export function App() {
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{myProfile.handle}</div>
             </div>
           </div>
-          <button
-            type="button"
-            className="settings-gear-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsSettingsOpen(true);
-            }}
-            title="Settings & System"
-          >
-            <IconSettings size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <button
+              type="button"
+              className="settings-gear-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsSettingsOpen(true);
+              }}
+              title="Settings & System"
+            >
+              <IconSettings size={18} />
+            </button>
+            <button
+              type="button"
+              className="settings-gear-btn"
+              style={{ color: '#f87171' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleLogout();
+              }}
+              title="Sign Out / Log Out"
+            >
+              <IconLock size={16} />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -4853,7 +4936,7 @@ export function App() {
                 onNavigateTab={(tab) => {
                   if (tab === 'discover') setActiveTab('discover');
                   else if (tab === 'messages') setActiveTab('messages');
-                  else if (tab === 'profile') navigateToProfile('luciano');
+                  else if (tab === 'profile') navigateToProfile(myProfile.handle);
                   else setActiveTab('feed');
                 }}
                 currentNavTab={activeTab === 'feed' ? 'feed' : activeTab === 'discover' ? 'discover' : activeTab === 'messages' ? 'messages' : 'profile'}
@@ -5140,19 +5223,56 @@ export function App() {
 
             {/* Posts Stream */}
             <div>
-              {posts
-                .filter((p) => {
-                  if (feedFilter === 'close_friends') return p.privacy === 'close_friends' && p.type !== 'text';
-                  if (feedFilter === 'followers') return p.privacy === 'followers' && p.type !== 'text';
-                  if (feedFilter === 'birdie') return p.type === 'text';
-                  if (feedFilter === 'all') return true;
-                  return p.privacy === 'public' && p.type !== 'text';
-                })
-                .filter((p) => {
-                  if (!activeTagFilter) return true;
-                  return p.tags && p.tags.map((t) => t.toLowerCase()).includes(activeTagFilter.toLowerCase());
-                })
-                .map((post) => (
+              {(() => {
+                const filteredPosts = posts
+                  .filter((p) => {
+                    if (feedFilter === 'close_friends') return p.privacy === 'close_friends' && p.type !== 'text';
+                    if (feedFilter === 'followers') return p.privacy === 'followers' && p.type !== 'text';
+                    if (feedFilter === 'birdie') return p.type === 'text';
+                    if (feedFilter === 'all') return true;
+                    return p.privacy === 'public' && p.type !== 'text';
+                  })
+                  .filter((p) => {
+                    if (!activeTagFilter) return true;
+                    return p.tags && p.tags.map((t) => t.toLowerCase()).includes(activeTagFilter.toLowerCase());
+                  });
+
+                if (filteredPosts.length === 0) {
+                  return (
+                    <div
+                      className="glass-panel-card"
+                      style={{
+                        textAlign: 'center',
+                        padding: '64px 24px',
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px dashed rgba(255, 255, 255, 0.12)',
+                        borderRadius: '20px',
+                        margin: '16px 0',
+                      }}
+                    >
+                      <div style={{ fontSize: '44px', marginBottom: '14px' }}>
+                        🍃
+                      </div>
+                      <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '8px' }}>
+                        No Dispatches Yet
+                      </h3>
+                      <p style={{ fontSize: '14px', color: 'var(--text-muted)', maxWidth: '360px', margin: '0 auto 20px', lineHeight: 1.5 }}>
+                        Be the first to share an encrypted moment or authentic thought with your circle.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn-compose-prime"
+                        onClick={() => setIsCameraOpen(true)}
+                        style={{ margin: '0 auto', display: 'inline-flex' }}
+                      >
+                        <IconPlus size={16} />
+                        <span>Create First Dispatch</span>
+                      </button>
+                    </div>
+                  );
+                }
+
+                return filteredPosts.map((post) => (
                   <article key={post.id} className={`feed-post-card ${highlightPostId === post.id ? 'post-just-published-shimmer' : ''}`}>
                     <img
                       src={post.authorAvatar}
@@ -5326,8 +5446,8 @@ export function App() {
                           : (matchingMedia !== undefined ? matchingMedia.likes : post.likesCount);
 
                         const effectiveLikers = effectiveLiked
-                          ? ((post.likersList || []).includes('luciano') ? (post.likersList || []) : ['luciano', ...(post.likersList || [])])
-                          : (post.likersList || []).filter((h) => h !== 'luciano');
+                          ? (myProfile.handle && !(post.likersList || []).includes(myProfile.handle) ? [myProfile.handle, ...(post.likersList || [])] : (post.likersList || []))
+                          : (post.likersList || []).filter((h) => h !== myProfile.handle);
 
                         return (
                           <>
@@ -5375,7 +5495,7 @@ export function App() {
                               <button
                                 className="btn-post-action"
                                 onClick={() => {
-                                  const isOwn = post.authorHandle === myProfile.handle || post.authorId === 'usr-luciano';
+                                  const isOwn = post.authorHandle === myProfile.handle || Boolean(myProfile.id && post.authorId === myProfile.id);
                                   setPostMenuModal({ post, isOwn });
                                 }}
                                 title={post.authorHandle === myProfile.handle ? 'Dispatch options' : 'Report content'}
@@ -5506,9 +5626,8 @@ export function App() {
                                     <span>{(comment.likesCount || 0) > 0 ? comment.likesCount : 'Like'}</span>
                                   </button>
                                   {(comment.authorHandle === myProfile.handle ||
-                                    comment.authorHandle === 'luciano' ||
                                     post.authorHandle === myProfile.handle ||
-                                    post.authorId === 'usr-luciano') && (
+                                    (myProfile.id && post.authorId === myProfile.id)) && (
                                     <button
                                       type="button"
                                       style={{
@@ -5563,9 +5682,8 @@ export function App() {
                                     </div>
                                     <div className="thread-content-text">{reply.text}</div>
                                     {(reply.authorHandle === myProfile.handle ||
-                                      reply.authorHandle === 'luciano' ||
                                       post.authorHandle === myProfile.handle ||
-                                      post.authorId === 'usr-luciano') && (
+                                      (myProfile.id && post.authorId === myProfile.id)) && (
                                       <div style={{ marginTop: '5px' }}>
                                         <button
                                           type="button"
@@ -5649,7 +5767,8 @@ export function App() {
                       </div>
                     </div>
                   </article>
-                ))}
+                ));
+              })()}
 
               <div
                 style={{
@@ -5684,55 +5803,74 @@ export function App() {
               />
             </div>
 
-            {/* Curated Real Hashtag Topics */}
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>
-                Curated Community Hashtags
-              </div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {[
-                  { name: 'photography', count: 4 },
-                  { name: 'architecture', count: 3 },
-                  { name: 'privacy', count: 3 },
-                  { name: 'analogue', count: 2 },
-                  { name: 'soundscape', count: 1 },
-                  { name: 'cinematography', count: 2 },
-                  { name: 'kyoto', count: 2 },
-                  { name: 'tokyo', count: 1 },
-                  { name: 'alpinism', count: 1 },
-                ].map((item) => (
-                  <button
-                    key={item.name}
-                    className="explore-tag-pill"
-                    onClick={() => handleTagClick(item.name)}
-                    title={`Explore #${item.name} dispatches`}
-                  >
-                    <span className="explore-tag-hash">#</span>
-                    <span>{item.name}</span>
-                    <span className="explore-tag-badge">{item.count}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            {/* Curated Community Hashtag Topics */}
+            {(() => {
+              const tagCounts: Record<string, number> = {};
+              posts.forEach((p) => {
+                (p.tags || []).forEach((t) => {
+                  const clean = t.toLowerCase().replace(/^#/, '').trim();
+                  if (clean) tagCounts[clean] = (tagCounts[clean] || 0) + 1;
+                });
+              });
+              const communityTags = Object.entries(tagCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 12)
+                .map(([name, count]) => ({ name, count }));
+
+              if (communityTags.length === 0) return null;
+
+              return (
+                <div style={{ marginBottom: '24px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>
+                    Community Hashtags
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {communityTags.map((item) => (
+                      <button
+                        key={item.name}
+                        className="explore-tag-pill"
+                        onClick={() => handleTagClick(item.name)}
+                        title={`Explore #${item.name} dispatches`}
+                      >
+                        <span className="explore-tag-hash">#</span>
+                        <span>{item.name}</span>
+                        <span className="explore-tag-badge">{item.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="glass-panel-card" style={{ marginBottom: '24px' }}>
               <div className="panel-title-text">
                 {discoverSearch ? 'Search Results' : 'Featured Verified Creators'}
               </div>
-              {Object.values(profiles)
-                .filter((p) => {
-                  if (!discoverSearch) return true;
-                  const q = discoverSearch.toLowerCase();
+              {(() => {
+                const creators = Object.values(profiles)
+                  .filter((p) => !isMockHandle(p.handle))
+                  .filter((p) => {
+                    if (!discoverSearch) return true;
+                    const q = discoverSearch.toLowerCase();
+                    return (
+                      p.name.toLowerCase().includes(q) ||
+                      p.handle.toLowerCase().includes(q) ||
+                      (p.category && p.category.toLowerCase().includes(q)) ||
+                      p.bio.toLowerCase().includes(q)
+                    );
+                  });
+
+                if (creators.length === 0) {
                   return (
-                    p.name.toLowerCase().includes(q) ||
-                    p.handle.toLowerCase().includes(q) ||
-                    (p.category && p.category.toLowerCase().includes(q)) ||
-                    p.bio.toLowerCase().includes(q)
+                    <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)', fontSize: '14px' }}>
+                      {discoverSearch ? 'No creators found matching search' : 'No creators registered yet'}
+                    </div>
                   );
-                })
-                .map((u) => {
+                }
+
+                return creators.map((u) => {
                   const isF = !!followingMap[u.handle];
-                  const isSelf = u.handle === 'luciano';
+                  const isSelf = u.handle.toLowerCase() === myProfile.handle.toLowerCase();
                   return (
                     <div key={u.handle} className="creator-entry-row">
                       <div
@@ -5765,7 +5903,8 @@ export function App() {
                       )}
                     </div>
                   );
-                })}
+                });
+              })()}
             </div>
           </div>
         )}
@@ -5806,7 +5945,7 @@ export function App() {
           const currentRecipient = activeChatUser || (filteredChannels.length > 0 ? getUserProfile(filteredChannels[0]) : null);
           const cleanRecipientHandle = currentRecipient ? currentRecipient.handle.replace(/^@/, '') : '';
           const currentThread = cleanRecipientHandle ? (directMessages[cleanRecipientHandle] || []) : [];
-          const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+          const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
           const isPartnerInCloseFriends = cleanRecipientHandle ? closeFriendsList.includes(cleanRecipientHandle) : false;
 
           return (
@@ -5958,7 +6097,7 @@ export function App() {
 
                       let snippet = 'Encrypted peer channel ready';
                       if (lastMsg) {
-                        const isMine = lastMsg.senderHandle === cleanMyHandle || lastMsg.senderHandle === 'luciano';
+                        const isMine = cleanMyHandle ? lastMsg.senderHandle === cleanMyHandle : false;
                         const prefix = isMine ? 'You: ' : '';
                         if (lastMsg.isVoiceMemo) {
                           snippet = `${prefix}🎙️ Voice memo (${lastMsg.voiceDuration || '0:18'})`;
@@ -6189,7 +6328,7 @@ export function App() {
                     </div>
                   ) : (
                     currentThread.map((msg) => {
-                      const isSent = msg.senderHandle === cleanMyHandle || msg.senderHandle === 'luciano';
+                      const isSent = cleanMyHandle ? msg.senderHandle === cleanMyHandle : false;
 
                       return (
                         <div
@@ -6962,18 +7101,16 @@ export function App() {
         {activeTab === 'profile' && (() => {
           const profile = getUserProfile(viewedUserHandle);
           const isOwnProfile =
-            profile.handle === 'luciano' ||
-            profile.handle === myProfile.handle ||
-            viewedUserHandle === 'luciano' ||
-            viewedUserHandle === myProfile.handle;
+            Boolean(myProfile.handle) &&
+            (profile.handle.toLowerCase() === myProfile.handle.toLowerCase() ||
+             viewedUserHandle.toLowerCase() === myProfile.handle.toLowerCase());
           const isFollowingThisUser = !!followingMap[profile.handle] || !!followingMap[profile.id];
           const isInCloseFriends = closeFriendsList.includes(profile.handle);
           const userDispatches = posts.filter(
             (p) =>
               p.authorHandle.toLowerCase() === profile.handle.toLowerCase() ||
               (isOwnProfile &&
-                (p.authorId === 'usr-luciano' ||
-                  p.authorHandle.toLowerCase() === 'luciano' ||
+                ((myProfile.id && p.authorId === myProfile.id) ||
                   p.authorHandle.toLowerCase() === myProfile.handle.toLowerCase()))
           );
 
@@ -6981,11 +7118,9 @@ export function App() {
             if (isOwnProfile) {
               return (
                 p.isLiked ||
-                (p.likersList || []).some(
-                  (h) =>
-                    h.toLowerCase() === 'luciano' ||
-                    h.toLowerCase() === myProfile.handle.toLowerCase()
-                )
+                (Boolean(myProfile.handle) && (p.likersList || []).some(
+                  (h) => h.toLowerCase() === myProfile.handle.toLowerCase()
+                ))
               );
             }
             return (p.likersList || []).some(
@@ -6999,7 +7134,7 @@ export function App() {
             const checkAuthor = (handle: string) => {
               if (isOwnProfile) {
                 return (
-                  handle.toLowerCase() === 'luciano' ||
+                  Boolean(myProfile.handle) &&
                   handle.toLowerCase() === myProfile.handle.toLowerCase()
                 );
               }
@@ -7082,9 +7217,9 @@ export function App() {
                   {(() => {
                     const dynamicFollowersCount = isOwnProfile
                       ? (myProfile.followersList || profile.followersList || []).length
-                      : (profile.followersList || []).filter((h) => h !== 'luciano' && h !== myProfile.handle).length + (isFollowingThisUser ? 1 : 0);
+                      : (profile.followersList || []).filter((h) => h.toLowerCase() !== (myProfile.handle || '').toLowerCase()).length + (isFollowingThisUser ? 1 : 0);
                     const dynamicFollowingCount = isOwnProfile
-                      ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano' && k !== myProfile.handle).length
+                      ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k.toLowerCase() !== (myProfile.handle || '').toLowerCase()).length
                       : (profile.followingList || []).length;
                     const dynamicCirclesCount = isOwnProfile
                       ? closeFriendsList.length
@@ -7463,8 +7598,8 @@ export function App() {
                                 : (matchingMedia !== undefined ? matchingMedia.likes : post.likesCount);
 
                               const effectiveLikers = effectiveLiked
-                                ? ((post.likersList || []).includes('luciano') ? (post.likersList || []) : ['luciano', ...(post.likersList || [])])
-                                : (post.likersList || []).filter((h) => h !== 'luciano');
+                                ? (myProfile.handle && !(post.likersList || []).includes(myProfile.handle) ? [myProfile.handle, ...(post.likersList || [])] : (post.likersList || []))
+                                : (post.likersList || []).filter((h) => h !== myProfile.handle);
 
                               return (
                                 <>
@@ -7503,7 +7638,7 @@ export function App() {
                                     <button
                                       className="btn-post-action"
                                       onClick={() => {
-                                        const isOwn = post.authorHandle === myProfile.handle || post.authorId === 'usr-luciano';
+                                        const isOwn = post.authorHandle === myProfile.handle || Boolean(myProfile.id && post.authorId === myProfile.id);
                                         setPostMenuModal({ post, isOwn });
                                       }}
                                       title={post.authorHandle === myProfile.handle ? 'Dispatch options' : 'Report content'}
@@ -7629,7 +7764,7 @@ export function App() {
                                         >
                                           <span>{(comment.likesCount || 0) > 0 ? comment.likesCount : 'Like'}</span>
                                         </button>
-                                        {(comment.authorHandle === myProfile.handle || comment.authorHandle === 'luciano') && (
+                                        {(Boolean(myProfile.handle) && comment.authorHandle.toLowerCase() === myProfile.handle.toLowerCase()) && (
                                           <button
                                             type="button"
                                             style={{
@@ -7677,7 +7812,7 @@ export function App() {
                                               <span className="thread-time">{reply.timeAgo}</span>
                                             </div>
                                             <div className="thread-content-text">{reply.text}</div>
-                                            {(reply.authorHandle === myProfile.handle || reply.authorHandle === 'luciano') && (
+                                            {(Boolean(myProfile.handle) && reply.authorHandle.toLowerCase() === myProfile.handle.toLowerCase()) && (
                                               <div style={{ marginTop: '4px' }}>
                                                 <button
                                                   type="button"
@@ -7817,7 +7952,7 @@ export function App() {
                                   <span>{itemCommentsCount}</span>
                                 </div>
 
-                                {profile.handle === (myProfile.handle || 'luciano') && (
+                                {Boolean(myProfile.handle) && profile.handle.toLowerCase() === myProfile.handle.toLowerCase() && (
                                   <div
                                     style={{
                                       marginLeft: 'auto',
@@ -8038,57 +8173,77 @@ export function App() {
         {/* Featured Creators */}
         <div className="glass-panel-card">
           <div className="panel-title-text">Featured Creators</div>
-          {SUGGESTED_CREATORS.map((u) => {
-            const isF = !!followingMap[u.id] || !!followingMap[u.handle];
-            return (
-              <div key={u.id} className="creator-entry-row">
-                <div
-                  className="creator-ident-left"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => navigateToProfile(u.handle)}
-                  title={`View @${u.handle}'s profile`}
-                >
-                  <img src={u.avatar} alt={u.name} className="creator-thumb-pic" />
-                  <div>
-                    <div className="creator-title-bold">
-                      {u.name}
-                      {u.isVerified && <VerifiedBadge authorName={u.name} category={u.category} />}
-                    </div>
-                    <div className="creator-subtitle-meta">@{u.handle}</div>
-                  </div>
-                </div>
-                <button
-                  className={`btn-follow-toggle ${isF ? 'following' : ''}`}
-                  onClick={() => toggleFollow(u.handle, u.name)}
-                >
-                  {isF ? 'Following' : 'Follow'}
-                </button>
-              </div>
+          {(() => {
+            const availableCreators = Object.values(profiles).filter(
+              (p) => !isMockHandle(p.handle) && p.handle.toLowerCase() !== myProfile.handle.toLowerCase()
             );
-          })}
+
+            if (availableCreators.length === 0) {
+              return (
+                <div style={{ padding: '16px 0', fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                  No other creators registered yet
+                </div>
+              );
+            }
+
+            return availableCreators.slice(0, 5).map((u) => {
+              const isF = !!followingMap[u.id] || !!followingMap[u.handle];
+              return (
+                <div key={u.id || u.handle} className="creator-entry-row">
+                  <div
+                    className="creator-ident-left"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigateToProfile(u.handle)}
+                    title={`View @${u.handle}'s profile`}
+                  >
+                    <img src={u.avatar} alt={u.name} className="creator-thumb-pic" />
+                    <div>
+                      <div className="creator-title-bold">
+                        {u.name}
+                        {u.isVerified && <VerifiedBadge authorName={u.name} category={u.category} />}
+                      </div>
+                      <div className="creator-subtitle-meta">@{u.handle}</div>
+                    </div>
+                  </div>
+                  <button
+                    className={`btn-follow-toggle ${isF ? 'following' : ''}`}
+                    onClick={() => toggleFollow(u.handle, u.name)}
+                  >
+                    {isF ? 'Following' : 'Follow'}
+                  </button>
+                </div>
+              );
+            });
+          })()}
         </div>
 
         {/* Trending Tags */}
         <div className="glass-panel-card">
           <div className="panel-title-text">Trending in Your Network</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {dynamicTrendingTags.map((t) => (
-              <div
-                key={t.tag}
-                className="trending-topic-cell"
-                onClick={() => {
-                  setActiveTagFilter(t.tag);
-                  setActiveTab('feed');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                  triggerToast(`Filtered feed by #${t.tag}`);
-                }}
-                style={{ cursor: 'pointer' }}
-                title={`Filter feed by #${t.tag}`}
-              >
-                <div className="topic-hashtag-title">#{t.tag}</div>
-                <div className="topic-volume-sub">{t.count}</div>
+            {dynamicTrendingTags.length === 0 ? (
+              <div style={{ padding: '12px 0', fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                No trending tags yet
               </div>
-            ))}
+            ) : (
+              dynamicTrendingTags.map((t) => (
+                <div
+                  key={t.tag}
+                  className="trending-topic-cell"
+                  onClick={() => {
+                    setActiveTagFilter(t.tag);
+                    setActiveTab('feed');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    triggerToast(`Filtered feed by #${t.tag}`);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                  title={`Filter feed by #${t.tag}`}
+                >
+                  <div className="topic-hashtag-title">#{t.tag}</div>
+                  <div className="topic-volume-sub">{t.count}</div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -8226,7 +8381,7 @@ export function App() {
         const resolvedCommentsCount = matchingPost?.commentsCount ?? (matchingMedia?.comments ?? resolvedComments.length);
 
         const isMyMedia = !lightboxIsPrivateMessage && (
-          (matchingPost && (matchingPost.authorHandle === myProfile.handle || matchingPost.authorHandle === 'luciano')) ||
+          (matchingPost && Boolean(myProfile.handle) && matchingPost.authorHandle.toLowerCase() === myProfile.handle.toLowerCase()) ||
           (matchingMedia && profiles[myProfile.handle]?.mediaItems?.some((m) => m.id === matchingMedia.id))
         );
 
@@ -8275,10 +8430,11 @@ export function App() {
               if (isSameMedia(p.contentUrl, lightboxUrl) || isSameMedia(p.thumbnailUrl, lightboxUrl)) {
                 matched = true;
                 let nextLikers = [...(p.likersList || [])];
+                const userHandle = myProfile.handle || '';
                 if (nextLiked) {
-                  if (!nextLikers.includes('luciano')) nextLikers = ['luciano', ...nextLikers];
+                  if (userHandle && !nextLikers.includes(userHandle)) nextLikers = [userHandle, ...nextLikers];
                 } else {
-                  nextLikers = nextLikers.filter((h) => h !== 'luciano');
+                  nextLikers = nextLikers.filter((h) => h !== userHandle);
                 }
                 return {
                   ...p,
@@ -8683,7 +8839,7 @@ export function App() {
               {(() => {
                 const recipientClean = activeChatUser.handle.replace(/^@/, '');
                 const thread = directMessages[recipientClean] || [];
-                const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
+                const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
 
                 if (thread.length === 0) {
                   return (
@@ -8700,7 +8856,7 @@ export function App() {
                 return (
                   <>
                     {thread.map((msg) => {
-                      const isSent = msg.senderHandle === cleanMyHandle || msg.senderHandle === 'luciano';
+                      const isSent = cleanMyHandle ? msg.senderHandle === cleanMyHandle : false;
                       return (
                         <div key={msg.id} className={`chat-bubble-row ${isSent ? 'sent' : 'received'}`}>
                           <div className="chat-bubble-content">{msg.text}</div>
@@ -9407,8 +9563,8 @@ export function App() {
                     setReports(reports.map((r) => (r.id === selectedReport.id ? { ...r, status: 'resolved' } : r)));
                     const log = {
                       id: `aud-${Date.now().toString().slice(-4)}`,
-                      actorId: 'usr-luciano',
-                      actorUsername: 'admin_luciano',
+                      actorId: myProfile.id || `usr-${myProfile.handle}`,
+                      actorUsername: myProfile.handle || 'admin',
                       action: actionType,
                       targetType: 'post',
                       targetId: selectedReport.id,
@@ -9451,13 +9607,13 @@ export function App() {
             {rosterModal.mode !== 'likes' && (() => {
               const cleanTarget = rosterModal.targetHandle.replace(/^@/, '');
               const p = getUserProfile(cleanTarget);
-              const isTargetOwn = cleanTarget === 'luciano' || cleanTarget === myProfile.handle;
+              const isTargetOwn = Boolean(myProfile.handle) && cleanTarget.toLowerCase() === myProfile.handle.toLowerCase();
               const isTargetFollowing = !!followingMap[cleanTarget];
               const followersCount = isTargetOwn
                 ? (myProfile.followersList || p.followersList || []).length
-                : (p.followersList || []).filter((h) => h !== 'luciano' && h !== myProfile.handle).length + (isTargetFollowing ? 1 : 0);
+                : (p.followersList || []).filter((h) => h.toLowerCase() !== (myProfile.handle || '').toLowerCase()).length + (isTargetFollowing ? 1 : 0);
               const followingCount = isTargetOwn
-                ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano' && k !== myProfile.handle).length
+                ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k.toLowerCase() !== (myProfile.handle || '').toLowerCase()).length
                 : (p.followingList || []).length;
               const circlesCount = isTargetOwn
                 ? closeFriendsList.length
@@ -9508,7 +9664,7 @@ export function App() {
             {(() => {
               const cleanTarget = rosterModal.targetHandle.replace(/^@/, '');
               const p = getUserProfile(cleanTarget);
-              const isTargetOwn = cleanTarget === 'luciano' || cleanTarget === myProfile.handle;
+              const isTargetOwn = Boolean(myProfile.handle) && cleanTarget.toLowerCase() === myProfile.handle.toLowerCase();
               let currentHandles: string[] = [];
 
               if (rosterModal.mode === 'likes') {
@@ -9518,13 +9674,13 @@ export function App() {
                   currentHandles = [...(myProfile.followersList || p.followersList || [])];
                 } else {
                   const isTargetFollowing = !!followingMap[cleanTarget];
-                  const base = (p.followersList || []).filter((h) => h !== 'luciano' && h !== myProfile.handle);
-                  currentHandles = isTargetFollowing ? [myProfile.handle, ...base] : base;
+                  const base = (p.followersList || []).filter((h) => h.toLowerCase() !== (myProfile.handle || '').toLowerCase());
+                  currentHandles = isTargetFollowing && myProfile.handle ? [myProfile.handle, ...base] : base;
                 }
               } else if (rosterModal.mode === 'following') {
                 if (isTargetOwn) {
                   currentHandles = Object.keys(followingMap).filter(
-                    (k) => followingMap[k] && !k.startsWith('sc-') && k !== 'luciano' && k !== myProfile.handle
+                    (k) => followingMap[k] && !k.startsWith('sc-') && k.toLowerCase() !== (myProfile.handle || '').toLowerCase()
                   );
                 } else {
                   currentHandles = [...(p.followingList || [])];
@@ -9537,15 +9693,17 @@ export function App() {
                 }
               }
 
-              const filteredHandles = currentHandles.filter((h) => {
-                const user = getUserProfile(h);
-                const q = rosterSearch.toLowerCase();
-                return (
-                  user.name.toLowerCase().includes(q) ||
-                  user.handle.toLowerCase().includes(q) ||
-                  (user.category && user.category.toLowerCase().includes(q))
-                );
-              });
+              const filteredHandles = currentHandles
+                .filter((h) => !isMockHandle(h))
+                .filter((h) => {
+                  const user = getUserProfile(h);
+                  const q = rosterSearch.toLowerCase();
+                  return (
+                    user.name.toLowerCase().includes(q) ||
+                    user.handle.toLowerCase().includes(q) ||
+                    (user.category && user.category.toLowerCase().includes(q))
+                  );
+                });
 
               return (
                 <div className="roster-list-scroll">
@@ -9557,7 +9715,7 @@ export function App() {
                     filteredHandles.map((handle) => {
                       const user = getUserProfile(handle);
                       const isF = !!followingMap[user.handle];
-                      const isSelf = user.handle === 'luciano' || user.handle === myProfile.handle;
+                      const isSelf = Boolean(myProfile.handle) && user.handle.toLowerCase() === myProfile.handle.toLowerCase();
 
                       return (
                         <div key={user.handle} className="roster-person-card">
@@ -10089,7 +10247,7 @@ export function App() {
                         className="btn-glass-back"
                         onClick={() => {
                           setIsSettingsOpen(false);
-                          openRoster('luciano', myProfile.name, 'circle');
+                          openRoster(myProfile.handle, myProfile.name, 'circle');
                         }}
                         style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
                       >

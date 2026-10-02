@@ -19,6 +19,7 @@ export interface LiveUserProfileModalProps {
   onOpenModerationManagement?: () => void;
   onSendChatMessage?: (text: string) => void;
   showToast: (msg: string) => void;
+  currentUserHandle?: string;
 }
 
 export const LiveUserProfileModal: React.FC<LiveUserProfileModalProps> = ({
@@ -37,6 +38,7 @@ export const LiveUserProfileModal: React.FC<LiveUserProfileModalProps> = ({
   onOpenModerationManagement,
   onSendChatMessage,
   showToast,
+  currentUserHandle,
 }) => {
   const [followingState, setFollowingState] = useState(isFollowing);
 
@@ -46,7 +48,9 @@ export const LiveUserProfileModal: React.FC<LiveUserProfileModalProps> = ({
 
   if (!isOpen || !user) return null;
 
-  const isSelf = user.handle.toLowerCase().replace(/^@/, '') === 'luciano';
+  const myHandle = (currentUserHandle || '').toLowerCase().replace(/^@/, '');
+  const targetHandle = user.handle.toLowerCase().replace(/^@/, '');
+  const isSelf = myHandle ? targetHandle === myHandle : false;
 
   const handleFollowClick = () => {
     const next = !followingState;

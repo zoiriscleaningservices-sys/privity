@@ -25,6 +25,7 @@ export interface LiveMeViewersModalProps {
   onFollowToggle?: (handle: string) => void;
   followedMap?: Record<string, boolean>;
   showToast: (msg: string) => void;
+  currentUserHandle?: string;
 }
 
 export const LiveMeViewersModal: React.FC<LiveMeViewersModalProps> = ({
@@ -38,6 +39,7 @@ export const LiveMeViewersModal: React.FC<LiveMeViewersModalProps> = ({
   onFollowToggle,
   followedMap,
   showToast,
+  currentUserHandle,
 }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'vip'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -147,7 +149,8 @@ export const LiveMeViewersModal: React.FC<LiveMeViewersModalProps> = ({
           ) : (
             filteredViewers.map((viewer, idx) => {
               const cleanViewerHandle = viewer.handle.replace(/^@/, '').toLowerCase();
-              const isSelfViewer = cleanViewerHandle === 'luciano';
+              const myHandle = (currentUserHandle || '').replace(/^@/, '').toLowerCase();
+              const isSelfViewer = myHandle ? cleanViewerHandle === myHandle : false;
               const isFollowing = (followedMap && followedMap[cleanViewerHandle]) ?? followingMap[viewer.handle] ?? viewer.isFollowing ?? false;
               return (
                 <div

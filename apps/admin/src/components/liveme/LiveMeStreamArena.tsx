@@ -50,8 +50,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   onClose,
   initialStreamerId,
   currentUser = {
-    name: 'Luciano',
-    handle: 'luciano',
+    name: 'Member',
+    handle: '',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
   },
   userCoins,
@@ -129,15 +129,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [remoteP2PStream, setRemoteP2PStream] = useState<MediaStream | null>(null);
   const [remoteLiveFrame, setRemoteLiveFrame] = useState<string | null>(null);
   const [p2pConnectionStatus, setP2pConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
-  const [roomContributors, setRoomContributors] = useState<LiveMeContributor[]>(() => isRealStream ? [] : (currentStreamer.topContributors || []));
+  const [roomContributors, setRoomContributors] = useState<LiveMeContributor[]>([]);
   const roomContributorsRef = useRef(roomContributors);
   roomContributorsRef.current = roomContributors;
-
-  useEffect(() => {
-    if (!isRealStream && currentStreamer.topContributors && currentStreamer.topContributors.length > 0) {
-      setRoomContributors(currentStreamer.topContributors);
-    }
-  }, [isRealStream, currentStreamer.topContributors]);
 
   // Viewer join and leave room presence announcement
   useEffect(() => {
@@ -477,62 +471,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const vuAnimRef = useRef<number | null>(null);
 
   // Real-time room audience roster (Accurate, dynamic tracking of viewers)
-  const [activeAudience, setActiveAudience] = useState<RoomViewer[]>(() => {
-    if (isRealStream) return [];
-    return [
-      {
-        id: 'v1',
-        name: 'Carlos Mendez',
-        handle: 'carlos_m',
-        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120',
-        level: getDeterministicLevel('carlos_m'),
-        badge: 'Top Fan 🏆',
-        isVip: true,
-        contribution: 15400,
-        isFollowing: true,
-      },
-      {
-        id: 'v2',
-        name: 'Sarah Williams 🪽',
-        handle: 'sarita_w',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
-        level: getDeterministicLevel('sarita_w'),
-        badge: 'Fan Club ⭐',
-        isVip: true,
-        contribution: 8200,
-        isFollowing: false,
-      },
-      {
-        id: 'v3',
-        name: 'Max London',
-        handle: 'max_ldn',
-        avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120',
-        level: getDeterministicLevel('max_ldn'),
-        badge: 'Knight ⚔️',
-        isVip: true,
-        contribution: 4500,
-        isFollowing: true,
-      },
-      {
-        id: 'v4',
-        name: 'Elena Rostova',
-        handle: 'elena_r',
-        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120',
-        level: getDeterministicLevel('elena_r'),
-        isVip: false,
-        contribution: 1200,
-      },
-      {
-        id: 'v5',
-        name: 'Kenji Sato',
-        handle: 'kenji_tokyo',
-        avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=120',
-        level: getDeterministicLevel('kenji_tokyo'),
-        isVip: false,
-        contribution: 650,
-      },
-    ];
-  });
+  const [activeAudience, setActiveAudience] = useState<RoomViewer[]>([]);
 
   // Open User Profile Mini-Card ("Little Tab" that does not disrupt the live stream)
   const handleOpenUserProfile = (
@@ -691,59 +630,18 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [selectedGiftId, setSelectedGiftId] = useState<string>('rose');
   const [selectedCombo, setSelectedCombo] = useState<number>(1);
 
-  // Chat state (starts clean for real streams, no fake audience or simulated comments)
-  const [chatMessages, setChatMessages] = useState<LiveMeChatMessage[]>(() => {
-    if (isRealStream) {
-      return [
-        {
-          id: 'welcome-sys',
-          user: 'Privity Live',
-          handle: 'privity',
-          level: 1,
-          text: '🔴 Live broadcast started. Tap the screen for hearts ♥ or say hello!',
-          isSystem: true,
-          timestamp: Date.now(),
-        },
-      ];
-    }
-    return [
-      {
-        id: 'm1',
-        user: 'Carlos_M',
-        handle: 'carlos_m',
-        level: 49,
-        text: 'welcome back! Looking amazing today in the stream 🔥',
-        timestamp: Date.now() - 40000,
-      },
-      {
-        id: 'm2',
-        user: 'Sarita 🪽',
-        handle: 'sarita_w',
-        level: 40,
-        text: 'FOLLOW FOLLOW FOLLOW everyone! Keep tapping the screen ♥ for the PK battle!',
-        timestamp: Date.now() - 25000,
-      },
-      {
-        id: 'm3',
-        user: 'MrMaxLondon',
-        handle: 'max_ldn',
-        level: 23,
-        text: 'joined the room',
-        isJoin: true,
-        timestamp: Date.now() - 10000,
-      },
-      {
-        id: 'm4',
-        user: 'ShadowWolf',
-        handle: 'shadow_wolf',
-        level: 55,
-        text: 'sent Rose x10! 🌹',
-        isSystem: true,
-        giftInfo: { name: 'Rose', icon: '🌹', count: 10, coins: 10 },
-        timestamp: Date.now() - 4000,
-      },
-    ];
-  });
+  // Chat state (starts clean with system welcome, no fake audience or simulated comments)
+  const [chatMessages, setChatMessages] = useState<LiveMeChatMessage[]>([
+    {
+      id: 'welcome-sys',
+      user: 'Privity Live',
+      handle: 'privity',
+      level: 0,
+      text: '🔴 Live broadcast started. Tap the screen for hearts ♥ or say hello!',
+      isSystem: true,
+      timestamp: Date.now(),
+    },
+  ]);
   const [chatInput, setChatInput] = useState('');
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
@@ -1023,16 +921,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       });
     }, 1000);
 
-    // Opponent score dynamic cheering
-    const rivalCheerTimer = setInterval(() => {
-      if (battleRoundTimer > 0) {
-        setRivalPkScore((prev) => prev + Math.floor(Math.random() * 20));
-      }
-    }, 3000);
-
     return () => {
       clearInterval(timer);
-      clearInterval(rivalCheerTimer);
     };
   }, [isPkBattleActive, battleRoundTimer, showToast]);
 
@@ -1572,10 +1462,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (rawProfs) {
           const profs = JSON.parse(rawProfs);
           if (profs[handleToToggle]) {
+            const curUserHandle = (currentUser?.handle || '').replace(/^@/, '').toLowerCase();
             const curFollowers: string[] = profs[handleToToggle].followersList || [];
             const nextFollowers = nextState
-              ? Array.from(new Set([...curFollowers, 'luciano']))
-              : curFollowers.filter((h: string) => h.toLowerCase() !== 'luciano');
+              ? (curUserHandle ? Array.from(new Set([...curFollowers, curUserHandle])) : curFollowers)
+              : (curUserHandle ? curFollowers.filter((h: string) => h.toLowerCase() !== curUserHandle) : curFollowers);
             profs[handleToToggle] = { ...profs[handleToToggle], followersList: nextFollowers };
             localStorage.setItem('privity_profiles_v5', JSON.stringify(profs));
           }
@@ -3063,6 +2954,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       <LiveMeViewersModal
         isOpen={isViewersModalOpen}
         onClose={() => setIsViewersModalOpen(false)}
+        currentUserHandle={currentUser?.handle}
         streamerName={currentStreamer.name}
         viewersCount={isHost ? liveViewersCount : currentStreamer.viewersCount}
         viewers={activeAudience}
@@ -3172,6 +3064,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       <LiveUserProfileModal
         isOpen={isUserProfileModalOpen}
         onClose={() => setIsUserProfileModalOpen(false)}
+        currentUserHandle={currentUser?.handle}
         user={selectedProfileUser}
         isHost={isHost}
         isFollowing={!!followedMap[(selectedProfileUser?.handle || '').replace(/^@/, '').toLowerCase()]}
