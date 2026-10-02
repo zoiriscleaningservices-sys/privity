@@ -678,6 +678,57 @@ textarea::placeholder {
   background: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 50%, #38bdf8 100%);
 }
 
+.circle-halo-ring.live-pulsing-halo {
+  background: linear-gradient(135deg, #ef4444 0%, #ec4899 50%, #f97316 100%);
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.75), 0 0 35px rgba(236, 72, 153, 0.45);
+  animation: liveRingPulse 1.8s infinite ease-in-out;
+}
+
+@keyframes liveRingPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.7), 0 0 30px rgba(236, 72, 153, 0.4);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 26px rgba(239, 68, 68, 0.95), 0 0 45px rgba(249, 115, 22, 0.65);
+  }
+}
+
+.circle-live-pill-tag {
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: #ffffff;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--bg-deep);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.7);
+  white-space: nowrap;
+}
+
+.audience-tab-btn.live.has-active-broadcast {
+  background: rgba(239, 68, 68, 0.16) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  color: #f87171 !important;
+  animation: liveTabGlow 2s infinite ease-in-out;
+}
+
+@keyframes liveTabGlow {
+  0%, 100% {
+    border-color: rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    border-color: rgba(239, 68, 68, 0.9);
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.45);
+  }
+}
+
 .circle-halo-ring.add-circle {
   border: 1.5px dashed rgba(255, 255, 255, 0.25);
   background: transparent;

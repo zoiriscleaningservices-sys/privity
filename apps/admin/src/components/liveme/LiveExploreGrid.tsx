@@ -3,6 +3,7 @@ import './liveExploreGrid.css';
 import { LIVEME_STREAMERS } from './liveMeData';
 import { LiveMeStreamer } from './types';
 import { IconArrowLeft, IconSearch, IconX } from '../Icons';
+import { liveStreamSync } from '../../services/liveStreamSyncService';
 
 const IconFlame: React.FC<{ size?: number; color?: string }> = ({ size = 12, color = '#f97316' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
@@ -38,7 +39,18 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
 
-  // Cross-tab active live host detection
+  // Network Active Streamers (synchronized across all physical devices)
+  const [networkStreamers, setNetworkStreamers] = useState<LiveMeStreamer[]>(() =>
+    liveStreamSync.getStreamersList()
+  );
+
+  useEffect(() => {
+    return liveStreamSync.subscribeToActiveStreams((streams) => {
+      setNetworkStreamers(streams);
+    });
+  }, []);
+
+  // Cross-tab active live host detection fallback
   const [activeHost, setActiveHost] = useState<any>(() => {
     try {
       const saved = localStorage.getItem('privity_current_live_host');
@@ -65,10 +77,11 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     };
   }, []);
 
-  // Filter streamers
+  // Filter streamers - Active broadcast is ALWAYS at the very top (#1) of the explore arena
   const allStreamers: LiveMeStreamer[] = [
-    ...(activeHost ? [{
-      id: 'liveme-host-myself',
+    ...networkStreamers,
+    ...(activeHost && !networkStreamers.some((s) => s.id === activeHost.id || s.handle === activeHost.handle) ? [{
+      id: activeHost.id || 'liveme-host-myself',
       handle: activeHost.handle || currentUser?.handle || 'luciano',
       name: `${activeHost.name || currentUser?.name || 'Luciano'} (LIVE NOW 🔴)`,
       avatar: activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500',
@@ -76,18 +89,20 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       category: 'Featured',
       title: activeHost.title || 'My Live Broadcast · Privity Exclusive',
       description: 'Live host studio broadcast',
-      viewersCount: 120,
-      totalViews: '120',
+      viewersCount: Math.max(1, activeHost.viewersCount || 1),
+      totalViews: `${Math.max(1, activeHost.viewersCount || 1)}`,
       popularity: '999+',
       diamonds: 50000,
       likesCount: 1200,
-      videoStreamUrl: activeHost.videoStreamUrl || 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-to-the-camera-42866-large.mp4',
+      videoStreamUrl: activeHost.videoStreamUrl,
       posterUrl: activeHost.posterUrl || activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=900',
       tags: ['Host', 'LiveNow', 'Privity'],
-      tagBadge: 'HOST',
+      tagBadge: 'LIVE NOW',
+      isHost: true,
+      isCameraStream: true,
       topContributors: [],
     }] : []),
-    ...LIVEME_STREAMERS,
+    ...LIVEME_STREAMERS.filter((s) => !networkStreamers.some((ns) => ns.id === s.id)),
   ];
 
   const filteredStreamers = allStreamers
@@ -398,6 +413,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
         <div className="live-explore-stream-grid">
           {filteredStreamers.map((streamer, idx) => {
             const isPreviewActive = activePreviewId === streamer.id;
+            const isLiveNow = streamer.tagBadge === 'LIVE NOW' || streamer.isCameraStream || streamer.isHost;
 
             return (
               <article
@@ -406,66 +422,71 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
                   if (el) cardElementsRef.current.set(streamer.id, el);
                   else cardElementsRef.current.delete(streamer.id);
                 }}
-                className={`live-stream-card ${isPreviewActive ? 'preview-active' : ''}`}
+                className={`live-stream-card ${isPreviewActive ? 'preview-active' : ''} ${isLiveNow ? 'is-live-broadcasting' : ''}`}
                 onClick={() => onOpenStream(streamer.id)}
-                onMouseEnter={() => handleCardMouseEnter(streamer.id)}
-                onMouseLeave={handleCardMouseLeave}
-              >
-                {/* Visual Canvas: Cover Image (Chosen Pre-Live) OR Active Video Stream */}
-                <div className="live-card-media-viewport">
-                  {/* Photo selected by the streamer before starting broadcast */}
-                  <img
-                    src={streamer.posterUrl || streamer.avatar}
-                    alt={streamer.name}
-                    className="live-card-poster-image"
-                    loading="lazy"
-                  />
+                    onMouseEnter={() => handleCardMouseEnter(streamer.id)}
+                    onMouseLeave={handleCardMouseLeave}
+                  >
+                    {/* Visual Canvas: Cover Image (Chosen Pre-Live) OR Active Video Stream */}
+                    <div className="live-card-media-viewport">
+                      {/* Photo selected by the streamer before starting broadcast */}
+                      <img
+                        src={streamer.posterUrl || streamer.avatar}
+                        alt={streamer.name}
+                        className="live-card-poster-image"
+                        loading="lazy"
+                      />
 
-                  {/* Active playing video stream when hovered or scrolled to */}
-                  {isPreviewActive && streamer.videoStreamUrl && (
-                    <video
-                      src={streamer.videoStreamUrl}
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                      className="live-card-active-video"
-                    />
-                  )}
+                      {/* Active playing video stream when hovered or scrolled to */}
+                      {isPreviewActive && streamer.videoStreamUrl && (
+                        <video
+                          src={streamer.videoStreamUrl}
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                          className="live-card-active-video"
+                        />
+                      )}
 
-                  {/* Gradient Scrims for maximum readability */}
-                  <div className="live-card-top-scrim" />
-                  <div className="live-card-bottom-scrim" />
+                      {/* Gradient Scrims for maximum readability */}
+                      <div className="live-card-top-scrim" />
+                      <div className="live-card-bottom-scrim" />
 
-                  {/* Top Badge: Battle H2H / Multi-beam Group / Voice Chat / LIVE */}
-                  <div className="live-card-top-badges">
-                    {streamer.tagBadge === 'H2H' ||
-                    (streamer.tags || []).some((t) => ['h2h', 'battle', 'pkbattle', 'pkmatch'].includes(t.toLowerCase())) ||
-                    streamer.category.toLowerCase().includes('pk') ||
-                    streamer.category.toLowerCase().includes('battle') ? (
-                      <div className="live-badge-pill h2h">
-                        <span style={{ fontSize: '11px', lineHeight: 1 }}>⚔️</span>
-                        <span>H2H</span>
-                      </div>
-                    ) : streamer.tagBadge === 'Multi-beam' ||
-                      streamer.category === 'Party' ||
-                      (streamer.tags || []).some((t) => ['party', 'group', 'multi-beam', 'multiguest'].includes(t.toLowerCase())) ? (
-                      <div className="live-badge-pill multi-beam">
-                        <span style={{ fontSize: '11px', lineHeight: 1 }}>👥</span>
-                        <span>Group</span>
-                      </div>
-                    ) : streamer.category === 'Voice Chat' ||
-                      (streamer.tags || []).some((t) => ['voicechat', 'voice', 'audio'].includes(t.toLowerCase())) ? (
-                      <div className="live-badge-pill voice-chat">
-                        <span style={{ fontSize: '11px', lineHeight: 1 }}>🎙️</span>
-                        <span>Voice Chat</span>
-                      </div>
-                    ) : (
-                      <div className="live-badge-pill live-dot">
-                        <span className="live-pulse-dot" />
-                        <span>LIVE</span>
-                      </div>
-                    )}
+                      {/* Top Badge: LIVE NOW / Battle H2H / Multi-beam Group / Voice Chat / LIVE */}
+                      <div className="live-card-top-badges">
+                        {isLiveNow ? (
+                          <div className="live-badge-pill live-now-highlight">
+                            <span className="live-pulse-dot" />
+                            <span>LIVE NOW 🔴</span>
+                          </div>
+                        ) : streamer.tagBadge === 'H2H' ||
+                        (streamer.tags || []).some((t) => ['h2h', 'battle', 'pkbattle', 'pkmatch'].includes(t.toLowerCase())) ||
+                        streamer.category.toLowerCase().includes('pk') ||
+                        streamer.category.toLowerCase().includes('battle') ? (
+                          <div className="live-badge-pill h2h">
+                            <span style={{ fontSize: '11px', lineHeight: 1 }}>⚔️</span>
+                            <span>H2H</span>
+                          </div>
+                        ) : streamer.tagBadge === 'Multi-beam' ||
+                          streamer.category === 'Party' ||
+                          (streamer.tags || []).some((t) => ['party', 'group', 'multi-beam', 'multiguest'].includes(t.toLowerCase())) ? (
+                          <div className="live-badge-pill multi-beam">
+                            <span style={{ fontSize: '11px', lineHeight: 1 }}>👥</span>
+                            <span>Group</span>
+                          </div>
+                        ) : streamer.category === 'Voice Chat' ||
+                          (streamer.tags || []).some((t) => ['voicechat', 'voice', 'audio'].includes(t.toLowerCase())) ? (
+                          <div className="live-badge-pill voice-chat">
+                            <span style={{ fontSize: '11px', lineHeight: 1 }}>🎙️</span>
+                            <span>Voice Chat</span>
+                          </div>
+                        ) : (
+                          <div className="live-badge-pill live-dot">
+                            <span className="live-pulse-dot" />
+                            <span>LIVE</span>
+                          </div>
+                        )}
 
                     {/* Active Equalizer soundwave when preview is running */}
                     {isPreviewActive && (

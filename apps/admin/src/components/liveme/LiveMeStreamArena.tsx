@@ -13,6 +13,7 @@ import { LiveMeHotCatalog } from './LiveMeHotCatalog';
 import { LiveMePkMatchModal } from './LiveMePkMatchModal';
 import { LiveMeViewersModal, RoomViewer } from './LiveMeViewersModal';
 import { GiftAnimationPlayer, globalGiftQueue, DEFAULT_GIFTS, GiftEvent } from '../../gifts';
+import { liveStreamSync } from '../../services/liveStreamSyncService';
 import './liveme.css';
 
 export interface LiveBroadcastSummaryData {
@@ -38,6 +39,7 @@ export interface LiveMeStreamArenaProps {
   userMediaStream?: MediaStream | null;
   onEndBroadcast?: (summary?: LiveBroadcastSummaryData) => void;
   onViewProfile?: (handle: string) => void;
+  customStreamer?: LiveMeStreamer;
 }
 
 export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
@@ -55,6 +57,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   userMediaStream = null,
   onEndBroadcast,
   onViewProfile,
+  customStreamer,
 }) => {
   // Catalog view toggle
   const [showCatalog, setShowCatalog] = useState(false);
@@ -88,16 +91,31 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
   // Streamers list and active index
   const [streamers, setStreamers] = useState<LiveMeStreamer[]>(() => {
+    const networkStreams = liveStreamSync.getStreamersList();
+    const combined: LiveMeStreamer[] = [];
     if (isHostBroadcast) {
-      return [hostStreamer, ...LIVEME_STREAMERS];
+      combined.push(hostStreamer);
     }
-    return LIVEME_STREAMERS;
+    if (customStreamer && !combined.some((s) => s.id === customStreamer.id)) {
+      combined.push(customStreamer);
+    }
+    for (const ns of networkStreams) {
+      if (!combined.some((s) => s.id === ns.id)) {
+        combined.push(ns);
+      }
+    }
+    for (const ms of LIVEME_STREAMERS) {
+      if (!combined.some((s) => s.id === ms.id)) {
+        combined.push(ms);
+      }
+    }
+    return combined;
   });
 
   const [activeIndex, setActiveIndex] = useState(() => {
     if (isHostBroadcast) return 0;
     if (initialStreamerId) {
-      const idx = LIVEME_STREAMERS.findIndex((s) => s.id === initialStreamerId);
+      const idx = streamers.findIndex((s) => s.id === initialStreamerId);
       return idx !== -1 ? idx : 0;
     }
     return 0;
@@ -105,6 +123,46 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
   const currentStreamer = streamers[activeIndex] || streamers[0];
   const isHost = isHostBroadcast || !!currentStreamer.isHost;
+
+  // Remote P2P Live Camera Video Stream
+  const [remoteP2PStream, setRemoteP2PStream] = useState<MediaStream | null>(null);
+  const [p2pConnectionStatus, setP2pConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
+
+  useEffect(() => {
+    if (isHost) {
+      setRemoteP2PStream(null);
+      setP2pConnectionStatus('idle');
+      return;
+    }
+
+    const targetPeerId =
+      currentStreamer.peerId ||
+      (currentStreamer.isCameraStream
+        ? `privity-live-${currentStreamer.handle.toLowerCase().replace(/[^a-z0-9]/g, '')}`
+        : null);
+
+    if (!targetPeerId) {
+      setRemoteP2PStream(null);
+      setP2pConnectionStatus('idle');
+      return;
+    }
+
+    const cleanup = liveStreamSync.connectToRemoteStream(
+      targetPeerId,
+      (incomingStream) => {
+        setRemoteP2PStream(incomingStream);
+        setP2pConnectionStatus('connected');
+      },
+      (status) => {
+        setP2pConnectionStatus(status);
+      }
+    );
+
+    return () => {
+      cleanup();
+      setRemoteP2PStream(null);
+    };
+  }, [isHost, currentStreamer.id, currentStreamer.peerId, currentStreamer.handle, currentStreamer.isCameraStream]);
 
   // Real Hardware Camera Video Elements
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -728,13 +786,36 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       )
     );
 
-    // Cross-tab broadcast like
+    // Cross-device and cross-tab broadcast like
     try {
+      liveStreamSync.sendRoomEvent(currentStreamer.id, {
+        type: 'LIVE_LIKE',
+        streamerId: currentStreamer.id,
+      });
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_LIKE', streamerId: currentStreamer.id });
       bus.close();
     } catch {}
   };
+
+  // Cross-device room events subscription (real-time likes & chat)
+  useEffect(() => {
+    return liveStreamSync.subscribeToRoomEvents(currentStreamer.id, (evt) => {
+      if (evt.type === 'LIVE_LIKE') {
+        const sid = evt.streamerId || currentStreamer.id;
+        setStreamerLikesMap((prev) => {
+          const current = prev[sid] ?? currentStreamer.likesCount;
+          return { ...prev, [sid]: current + 1 };
+        });
+        setLikesReceived((prev) => prev + 1);
+      } else if (evt.type === 'LIVE_CHAT' && evt.message) {
+        setChatMessages((prev) => {
+          if (prev.some((m) => m.id === evt.message.id)) return prev;
+          return [...prev.slice(-35), evt.message];
+        });
+      }
+    });
+  }, [currentStreamer.id, currentStreamer.likesCount]);
 
   // Trigger floating PK Hit Damage text
   const triggerPkHit = (text: string, color = '#fbbf24') => {
@@ -844,9 +925,15 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     setChatMessages((prev) => [...prev, newMsg]);
     setChatInput('');
     spawnHeartReaction();
+
+    try {
+      liveStreamSync.sendRoomEvent(currentStreamer.id, {
+        type: 'LIVE_CHAT',
+        message: newMsg,
+      });
+    } catch {}
   };
 
-  // Send Real Project Gift Handler
   // Send Real Project Gift Handler
   const handleSendGift = () => {
     const gift = LIVEME_GIFTS.find((g) => g.id === selectedGiftId) || LIVEME_GIFTS[0];
@@ -893,6 +980,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       timestamp: Date.now(),
     };
     setChatMessages((prev) => [...prev, giftMsg]);
+
+    try {
+      liveStreamSync.sendRoomEvent(currentStreamer.id, {
+        type: 'LIVE_CHAT',
+        message: giftMsg,
+      });
+    } catch {}
 
     // Dispatch global virtual gift animation player
     const animationKey = gift.animationKey || 'rose';
@@ -1075,6 +1169,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             muted
             className="liveme-ambient-wings-media"
           />
+        ) : remoteP2PStream ? (
+          <video
+            ref={(node) => {
+              if (node && node.srcObject !== remoteP2PStream) {
+                node.srcObject = remoteP2PStream;
+                node.play().catch(() => {});
+              }
+            }}
+            autoPlay
+            playsInline
+            muted
+            className="liveme-ambient-wings-media"
+          />
         ) : (
           <video
             src={currentStreamer.videoStreamUrl}
@@ -1145,6 +1252,45 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               }}
               className={`liveme-video-canvas ${isMirrored ? 'mirrored' : ''}`}
             />
+          ) : remoteP2PStream ? (
+            <video
+              ref={(node) => {
+                if (node && node.srcObject !== remoteP2PStream) {
+                  node.srcObject = remoteP2PStream;
+                  node.setAttribute('playsinline', 'true');
+                  node.setAttribute('webkit-playsinline', 'true');
+                  node.play().catch(() => {});
+                }
+              }}
+              autoPlay
+              playsInline
+              muted={isMuted}
+              className="liveme-video-canvas"
+            />
+          ) : (currentStreamer.peerId || currentStreamer.isCameraStream) ? (
+            <div className="liveme-connecting-camera-backdrop">
+              <img
+                src={currentStreamer.posterUrl || currentStreamer.avatar}
+                alt={currentStreamer.name}
+                className="liveme-connecting-bg-blur"
+              />
+              <div className="liveme-connecting-overlay-content">
+                <div className="liveme-connecting-avatar-ring">
+                  <img
+                    src={currentStreamer.avatar}
+                    alt={currentStreamer.name}
+                    className="liveme-connecting-avatar"
+                  />
+                  <div className="liveme-connecting-pulse-ring" />
+                </div>
+                <div className="liveme-connecting-title">
+                  {p2pConnectionStatus === 'connected' ? 'Streaming Live' : 'Connecting Real-Time P2P Broadcast...'}
+                </div>
+                <div className="liveme-connecting-subtitle">
+                  Direct peer-to-peer live feed from @{currentStreamer.handle}
+                </div>
+              </div>
+            </div>
           ) : (
             <video
               src={currentStreamer.videoStreamUrl}
@@ -1215,6 +1361,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                       }
                     }}
                     className={`liveme-pk-video-layer ${isMirrored ? 'mirrored' : ''}`}
+                  />
+                ) : remoteP2PStream ? (
+                  <video
+                    ref={(node) => {
+                      if (node && node.srcObject !== remoteP2PStream) {
+                        node.srcObject = remoteP2PStream;
+                        node.setAttribute('playsinline', 'true');
+                        node.setAttribute('webkit-playsinline', 'true');
+                        node.play().catch(() => {});
+                      }
+                    }}
+                    autoPlay
+                    playsInline
+                    muted={isMuted}
+                    className="liveme-pk-video-layer"
                   />
                 ) : (
                   <video

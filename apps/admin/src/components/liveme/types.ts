@@ -18,6 +18,7 @@ export interface LiveMeStreamer {
   tagBadge?: string;
   isHost?: boolean;
   isCameraStream?: boolean;
+  peerId?: string;
   topContributors: Array<{
     id: string;
     name: string;

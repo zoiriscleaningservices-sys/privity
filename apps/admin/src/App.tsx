@@ -62,6 +62,8 @@ import {
 import './gifts/gifts.css';
 import { CameraModal } from './camera';
 import { LiveMeStreamArena, LiveExploreGrid, LivePipPlayer, LIVEME_STREAMERS } from './components/liveme';
+import { LiveMeStreamer } from './components/liveme/types';
+import { liveStreamSync } from './services/liveStreamSyncService';
 import {
   TikTokSlideFeed,
   EXCLUSIVE_FORYOU_POSTS,
@@ -2940,6 +2942,17 @@ export function App() {
   const [modalPrivacy, setModalPrivacy] = useState<PostPrivacy>('close_friends');
   const [modalPhoto, setModalPhoto] = useState<string | null>(null);
 
+  // Network active live streams (synchronized across multiple devices)
+  const [networkLiveStreamers, setNetworkLiveStreamers] = useState<LiveMeStreamer[]>(() =>
+    liveStreamSync.getStreamersList()
+  );
+
+  useEffect(() => {
+    return liveStreamSync.subscribeToActiveStreams((streams) => {
+      setNetworkLiveStreamers(streams);
+    });
+  }, []);
+
   // Comment input per post
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [replyTarget, setReplyTarget] = useState<{ postId: string; commentId: string; handle: string } | null>(null);
@@ -5199,21 +5212,45 @@ export function App() {
     setActiveLiveIndex(0);
     setActiveLiveStream(userStream);
     setIsCameraOpen(false);
+
+    // Announce and broadcast P2P live stream across all network devices
+    liveStreamSync.startHostBroadcast(
+      {
+        id: userStream.id,
+        creatorHandle: myProfile.handle,
+        creatorName: myProfile.name,
+        creatorAvatar: myProfile.avatar,
+        isVerified: myProfile.isVerified,
+        title: userStream.title,
+        category: userStream.category,
+        description: userStream.description,
+        viewersCount: userStream.viewersCount,
+        likesCount: userStream.likesCount,
+        previewUrl: userStream.previewUrl,
+        tags: userStream.tags,
+      },
+      cameraStream || null
+    ).then((peerId) => {
+      try {
+        localStorage.setItem(
+          'privity_current_live_host',
+          JSON.stringify({
+            id: userStream.id,
+            peerId,
+            handle: myProfile.handle,
+            name: myProfile.name,
+            avatar: myProfile.avatar,
+            title: userStream.title,
+            startedAt: Date.now(),
+            viewersCount: userStream.viewersCount,
+          })
+        );
+      } catch {}
+    }).catch(() => {});
+
     try {
       localStorage.setItem('privity_is_host_broadcasting', 'true');
       localStorage.setItem('privity_active_live_session', JSON.stringify(userStream));
-      localStorage.setItem(
-        'privity_current_live_host',
-        JSON.stringify({
-          id: userStream.id,
-          handle: myProfile.handle,
-          name: myProfile.name,
-          avatar: myProfile.avatar,
-          title: userStream.title,
-          startedAt: Date.now(),
-          viewersCount: userStream.viewersCount,
-        })
-      );
     } catch {}
     triggerToast(`Broadcast started: ${userStream.title}`);
   };
@@ -5470,8 +5507,8 @@ export function App() {
                     id="tab-feed-live"
                     type="button"
                     role="tab"
-                    aria-selected={false}
-                    className="audience-tab-btn live"
+                    aria-selected={(feedFilter as string) === 'live'}
+                    className={`audience-tab-btn live ${networkLiveStreamers.length > 0 ? 'has-active-broadcast' : ''} ${(feedFilter as string) === 'live' ? 'active' : ''}`}
                     onClick={() => handleSelectFeedTab('live')}
                   >
                     <span className="live-tab-radar">
@@ -5479,7 +5516,7 @@ export function App() {
                       <span className="live-radar-core"></span>
                     </span>
                     <span>Live</span>
-                    <span className="live-badge-count">{liveStreamsList.length}</span>
+                    <span className="live-badge-count">{LIVEME_STREAMERS.length + networkLiveStreamers.length}</span>
                   </button>
 
                   <button
@@ -5537,7 +5574,23 @@ export function App() {
             {feedFilter === 'live' ? (
               <LiveExploreGrid
                 onOpenStream={(streamerId) => {
+                  const remoteMatch = networkLiveStreamers.find((s) => s.id === streamerId);
+                  if (remoteMatch) {
+                    const isMyself = !!(remoteMatch.handle === myProfile.handle || remoteMatch.isHost);
+                    setIsHostBroadcasting(isMyself);
+                    setActiveLiveStream(remoteMatch as any);
+                    setMinimizedLiveStream(null);
+                    return;
+                  }
+                  const sessionMatch = liveStreamsList.find((s) => s.id === streamerId);
+                  if (sessionMatch) {
+                    setIsHostBroadcasting(sessionMatch.creatorHandle === myProfile.handle);
+                    setActiveLiveStream(sessionMatch as any);
+                    setMinimizedLiveStream(null);
+                    return;
+                  }
                   const target = LIVEME_STREAMERS.find((s) => s.id === streamerId) || LIVEME_STREAMERS[0];
+                  setIsHostBroadcasting(false);
                   setActiveLiveStream(target as any);
                   setMinimizedLiveStream(null);
                 }}
@@ -5644,6 +5697,33 @@ export function App() {
 
             {/* Circles & Stories Rail */}
             <div className="circles-story-rail">
+              {/* Active Real-Time Live Broadcasts Across Devices (At very start of rail) */}
+              {networkLiveStreamers.map((liveStream) => (
+                <div
+                  key={liveStream.id}
+                  className="circle-unit live-story-unit"
+                  onClick={() => {
+                    const isMyself = !!(liveStream.handle === myProfile.handle || liveStream.isHost);
+                    setIsHostBroadcasting(isMyself);
+                    setActiveLiveStream(liveStream as any);
+                    setMinimizedLiveStream(null);
+                  }}
+                  title={`${liveStream.name} is LIVE NOW! Tap to watch.`}
+                >
+                  <div className="circle-halo-ring live-pulsing-halo">
+                    <img
+                      src={liveStream.avatar}
+                      alt={liveStream.name}
+                      className="circle-user-img"
+                    />
+                    <div className="circle-live-pill-tag">LIVE 🔴</div>
+                  </div>
+                  <span className="circle-tag-name" style={{ color: '#ef4444', fontWeight: 700 }}>
+                    {liveStream.name.replace(' (LIVE NOW 🔴)', '')}
+                  </span>
+                </div>
+              ))}
+
               <div className="circle-unit" onClick={() => navigateToProfile('elena_rodriguez')} title="View Elena's Profile">
                 <div className="circle-halo-ring cf">
                   <img
@@ -5695,6 +5775,64 @@ export function App() {
                 <span className="circle-tag-name">New Circle</span>
               </div>
             </div>
+
+            {/* Active Live Broadcast Banner on Feed */}
+            {networkLiveStreamers.length > 0 && (
+              <div
+                className="live-active-feed-banner"
+                onClick={() => {
+                  const firstLive = networkLiveStreamers[0];
+                  const isMyself = !!(firstLive.handle === myProfile.handle || firstLive.isHost);
+                  setIsHostBroadcasting(isMyself);
+                  setActiveLiveStream(firstLive as any);
+                  setMinimizedLiveStream(null);
+                }}
+                style={{
+                  margin: '8px 16px 14px',
+                  padding: '10px 14px',
+                  borderRadius: '14px',
+                  background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.16), rgba(168, 85, 247, 0.16))',
+                  border: '1px solid rgba(239, 68, 68, 0.45)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 18px rgba(239, 68, 68, 0.2)',
+                  backdropFilter: 'blur(12px)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ position: 'relative', width: '38px', height: '38px' }}>
+                    <img
+                      src={networkLiveStreamers[0].avatar}
+                      alt="Live Host"
+                      style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '2px solid #ef4444' }}
+                    />
+                    <span style={{ position: 'absolute', bottom: '-2px', right: '-2px', background: '#ef4444', color: '#fff', fontSize: '8px', fontWeight: 900, padding: '1px 4px', borderRadius: '99px' }}>LIVE</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>{networkLiveStreamers[0].name.replace(' (LIVE NOW 🔴)', '')} is broadcasting live</span>
+                      <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'rgba(255, 255, 255, 0.7)' }}>
+                      {networkLiveStreamers[0].title || 'Tap to join live stream'}
+                    </div>
+                  </div>
+                </div>
+                <div style={{
+                  padding: '5px 12px',
+                  borderRadius: '9999px',
+                  background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                  color: '#ffffff',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.5)'
+                }}>
+                  Watch Live ⮞
+                </div>
+              </div>
+            )}
 
             {/* Inline Post Composer */}
             <form onSubmit={handleInlinePublish} className="composer-card">
@@ -8756,8 +8894,12 @@ export function App() {
           initialStreamerId={activeLiveStream.id}
           isHostBroadcast={isHostBroadcasting}
           userMediaStream={hostLiveCameraStream}
+          customStreamer={activeLiveStream as any}
           onClose={() => {
-            const streamer = LIVEME_STREAMERS.find((s) => s.id === activeLiveStream.id) || (activeLiveStream as any);
+            const streamer =
+              networkLiveStreamers.find((s) => s.id === activeLiveStream.id) ||
+              LIVEME_STREAMERS.find((s) => s.id === activeLiveStream.id) ||
+              (activeLiveStream as any);
             setMinimizedLiveStream(streamer);
             setActiveLiveStream(null);
             setIsHostBroadcasting(false);
@@ -8766,6 +8908,7 @@ export function App() {
             setActiveLiveStream(null);
             setMinimizedLiveStream(null);
             setIsHostBroadcasting(false);
+            liveStreamSync.stopHostBroadcast();
             try {
               localStorage.removeItem('privity_is_host_broadcasting');
               localStorage.removeItem('privity_active_live_session');
@@ -8785,7 +8928,10 @@ export function App() {
           onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
           showToast={triggerToast}
           onViewProfile={(handle) => {
-            const streamer = LIVEME_STREAMERS.find((s) => s.id === activeLiveStream.id) || (activeLiveStream as any);
+            const streamer =
+              networkLiveStreamers.find((s) => s.id === activeLiveStream.id) ||
+              LIVEME_STREAMERS.find((s) => s.id === activeLiveStream.id) ||
+              (activeLiveStream as any);
             setMinimizedLiveStream(streamer);
             setActiveLiveStream(null);
             setIsHostBroadcasting(false);
