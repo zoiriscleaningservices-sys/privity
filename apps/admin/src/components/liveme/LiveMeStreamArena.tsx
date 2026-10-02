@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   LiveMeStreamer,
   LiveMeChatMessage,
+  LiveMeContributor,
 } from './types';
 import {
   LIVEME_STREAMERS,
@@ -13,7 +14,7 @@ import { LiveMeHotCatalog } from './LiveMeHotCatalog';
 import { LiveMePkMatchModal } from './LiveMePkMatchModal';
 import { LiveMeViewersModal, RoomViewer } from './LiveMeViewersModal';
 import { GiftAnimationPlayer, globalGiftQueue, DEFAULT_GIFTS, GiftEvent } from '../../gifts';
-import { liveStreamSync } from '../../services/liveStreamSyncService';
+import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSyncService';
 import './liveme.css';
 
 export interface LiveBroadcastSummaryData {
@@ -62,9 +63,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   // Catalog view toggle
   const [showCatalog, setShowCatalog] = useState(false);
 
-  // Host Streamer Profile Definition
+  // Host Streamer Profile Definition (Pure Real Data: starts with 0 viewers, 0 likes, 0 diamonds)
   const hostStreamer = useMemo<LiveMeStreamer>(() => ({
-    id: `live-user-${currentUser.handle}`,
+    id: `live-user-${getRoomIdFromHandle(currentUser.handle)}`,
     handle: currentUser.handle,
     name: currentUser.name,
     avatar: currentUser.avatar,
@@ -72,21 +73,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     category: 'Visionary Host',
     title: 'Live Broadcast · Privity Sovereign Stream & PK Battle 🔥',
     description: 'Streaming live directly to authorized circles! Tap screen for hearts ♥',
-    viewersCount: 185,
-    totalViews: '2.4K',
-    popularity: '3.2K',
-    diamonds: 24500,
-    likesCount: 1420,
+    viewersCount: 0,
+    totalViews: '0',
+    popularity: '0',
+    diamonds: 0,
+    likesCount: 0,
     videoStreamUrl: '',
     posterUrl: currentUser.avatar,
     isHost: true,
     isCameraStream: true,
     tags: ['Host', 'Live', 'PKBattle'],
-    topContributors: [
-      { id: 'c1', name: 'ShadowWolf', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120', rank: 1, contribution: 85400 },
-      { id: 'c2', name: 'AngelEyes', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', rank: 2, contribution: 42300 },
-      { id: 'c3', name: 'Sarita', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120', rank: 3, contribution: 29100 },
-    ],
+    topContributors: [],
   }), [currentUser]);
 
   // Streamers list and active index
@@ -123,23 +120,25 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
   const currentStreamer = streamers[activeIndex] || streamers[0];
   const isHost = isHostBroadcast || !!currentStreamer.isHost;
+  const isRealStream = isHost || !!currentStreamer.isHost || currentStreamer.id?.startsWith('live-user-') || !!currentStreamer.isCameraStream;
 
   // Remote P2P Live Camera Video Stream & Real-time Live Frame Stream
   const [remoteP2PStream, setRemoteP2PStream] = useState<MediaStream | null>(null);
   const [remoteLiveFrame, setRemoteLiveFrame] = useState<string | null>(null);
   const [p2pConnectionStatus, setP2pConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
-  const [roomContributors, setRoomContributors] = useState(() => currentStreamer.topContributors || []);
+  const [roomContributors, setRoomContributors] = useState<LiveMeContributor[]>(() => isRealStream ? [] : (currentStreamer.topContributors || []));
 
   useEffect(() => {
-    if (currentStreamer.topContributors && currentStreamer.topContributors.length > 0) {
+    if (!isRealStream && currentStreamer.topContributors && currentStreamer.topContributors.length > 0) {
       setRoomContributors(currentStreamer.topContributors);
     }
-  }, [currentStreamer.topContributors]);
+  }, [isRealStream, currentStreamer.topContributors]);
 
   // Viewer join and leave room presence announcement
   useEffect(() => {
     if (!isHost) {
-      liveStreamSync.sendRoomEvent(currentStreamer.id, {
+      const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      liveStreamSync.sendRoomEvent(roomId, {
         type: 'LIVE_JOIN',
         streamerId: currentStreamer.id,
         user: {
@@ -150,7 +149,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       });
 
       return () => {
-        liveStreamSync.sendRoomEvent(currentStreamer.id, {
+        liveStreamSync.sendRoomEvent(roomId, {
           type: 'LIVE_LEAVE',
           streamerId: currentStreamer.id,
           user: {
@@ -159,7 +158,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         });
       };
     }
-  }, [isHost, currentStreamer.id, currentUser.name, currentUser.handle, currentUser.avatar]);
+  }, [isHost, currentStreamer.id, currentStreamer.handle, currentUser.name, currentUser.handle, currentUser.avatar]);
 
   // Cross-tab live frame sync fallback
   useEffect(() => {
@@ -185,20 +184,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       return;
     }
 
-    const targetPeerId =
-      currentStreamer.peerId ||
-      (currentStreamer.isCameraStream
-        ? `privity-live-${currentStreamer.handle.toLowerCase().replace(/[^a-z0-9]/g, '')}`
-        : null);
-
-    if (!targetPeerId) {
+    const isRealCamera = currentStreamer.isCameraStream || currentStreamer.id?.startsWith('live-user-') || currentStreamer.peerId;
+    if (!isRealCamera) {
       setRemoteP2PStream(null);
       setP2pConnectionStatus('idle');
       return;
     }
 
+    const canonicalId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+
     const cleanup = liveStreamSync.connectToRemoteStream(
-      targetPeerId,
+      canonicalId,
       (incomingStream) => {
         setRemoteP2PStream(incomingStream);
         setP2pConnectionStatus('connected');
@@ -241,12 +237,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [streamDurationSec, setStreamDurationSec] = useState(0);
-  const [liveViewersCount, setLiveViewersCount] = useState(185);
-  const [diamondsEarned, setDiamondsEarned] = useState(0);
-  const [likesReceived, setLikesReceived] = useState(1420);
+  const [liveViewersCount, setLiveViewersCount] = useState<number>(() => isRealStream ? (currentStreamer.viewersCount ?? 0) : (currentStreamer.viewersCount || 0));
+  const [diamondsEarned, setDiamondsEarned] = useState<number>(() => isRealStream ? (currentStreamer.diamonds ?? 0) : 0);
+  const [likesReceived, setLikesReceived] = useState<number>(() => isRealStream ? (currentStreamer.likesCount ?? 0) : (currentStreamer.likesCount || 0));
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isConfirmEndOpen, setIsConfirmEndOpen] = useState(false);
   const broadcastStartTimestampRef = useRef<number>(Date.now());
+
+  // Stable references for room subscription handlers to avoid tearing down
+  const liveViewersCountRef = useRef(liveViewersCount);
+  liveViewersCountRef.current = liveViewersCount;
+  const likesReceivedRef = useRef(likesReceived);
+  likesReceivedRef.current = likesReceived;
+  const diamondsEarnedRef = useRef(diamondsEarned);
+  diamondsEarnedRef.current = diamondsEarned;
+  const immediateFrameCaptureRef = useRef<(() => void) | null>(null);
 
   // Initialize start timestamp from stored session if present
   useEffect(() => {
@@ -381,6 +386,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
   // Media & sound
   const [isMuted, setIsMuted] = useState(false);
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
   const [isFullscreen, setIsFullscreen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
 
@@ -485,44 +492,59 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [selectedGiftId, setSelectedGiftId] = useState<string>('rose');
   const [selectedCombo, setSelectedCombo] = useState<number>(1);
 
-  // Chat state
-  const [chatMessages, setChatMessages] = useState<LiveMeChatMessage[]>([
-    {
-      id: 'm1',
-      user: 'Carlos_M',
-      handle: 'carlos_m',
-      level: 49,
-      text: 'welcome back! Looking amazing today in the stream 🔥',
-      timestamp: Date.now() - 40000,
-    },
-    {
-      id: 'm2',
-      user: 'Sarita 🪽',
-      handle: 'sarita_w',
-      level: 40,
-      text: 'FOLLOW FOLLOW FOLLOW everyone! Keep tapping the screen ♥ for the PK battle!',
-      timestamp: Date.now() - 25000,
-    },
-    {
-      id: 'm3',
-      user: 'MrMaxLondon',
-      handle: 'max_ldn',
-      level: 23,
-      text: 'joined the room',
-      isJoin: true,
-      timestamp: Date.now() - 10000,
-    },
-    {
-      id: 'm4',
-      user: 'ShadowWolf',
-      handle: 'shadow_wolf',
-      level: 55,
-      text: 'sent Rose x10! 🌹',
-      isSystem: true,
-      giftInfo: { name: 'Rose', icon: '🌹', count: 10, coins: 10 },
-      timestamp: Date.now() - 4000,
-    },
-  ]);
+  // Chat state (starts clean for real streams, no fake audience or simulated comments)
+  const [chatMessages, setChatMessages] = useState<LiveMeChatMessage[]>(() => {
+    if (isRealStream) {
+      return [
+        {
+          id: 'welcome-sys',
+          user: 'Privity Live',
+          handle: 'privity',
+          level: 1,
+          text: '🔴 Live broadcast started. Tap the screen for hearts ♥ or say hello!',
+          isSystem: true,
+          timestamp: Date.now(),
+        },
+      ];
+    }
+    return [
+      {
+        id: 'm1',
+        user: 'Carlos_M',
+        handle: 'carlos_m',
+        level: 49,
+        text: 'welcome back! Looking amazing today in the stream 🔥',
+        timestamp: Date.now() - 40000,
+      },
+      {
+        id: 'm2',
+        user: 'Sarita 🪽',
+        handle: 'sarita_w',
+        level: 40,
+        text: 'FOLLOW FOLLOW FOLLOW everyone! Keep tapping the screen ♥ for the PK battle!',
+        timestamp: Date.now() - 25000,
+      },
+      {
+        id: 'm3',
+        user: 'MrMaxLondon',
+        handle: 'max_ldn',
+        level: 23,
+        text: 'joined the room',
+        isJoin: true,
+        timestamp: Date.now() - 10000,
+      },
+      {
+        id: 'm4',
+        user: 'ShadowWolf',
+        handle: 'shadow_wolf',
+        level: 55,
+        text: 'sent Rose x10! 🌹',
+        isSystem: true,
+        giftInfo: { name: 'Rose', icon: '🌹', count: 10, coins: 10 },
+        timestamp: Date.now() - 4000,
+      },
+    ];
+  });
   const [chatInput, setChatInput] = useState('');
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
@@ -641,19 +663,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     };
   }, [isHost, userMediaStream, cameraFacing]);
 
-  // 2. CROSS-TAB & CROSS-VIEWER BROADCAST CHANNEL SYNC
+  // 2. BROADCAST SESSION REGISTRATION (STABLE LIFECYCLE - NEVER RESTARTED BY LIKES/JOINS)
   useEffect(() => {
     if (!isHost) return;
 
-    // Register active broadcast session in localStorage & sync bus
+    const roomId = getRoomIdFromHandle(currentUser.handle);
     const hostMeta = {
-      id: `live-user-${currentUser.handle}`,
+      id: `live-user-${roomId}`,
       handle: currentUser.handle,
       name: currentUser.name,
       avatar: currentUser.avatar,
       title: currentStreamer?.title || '🔴 LIVE: High-Energy Room & PK Battle',
       startedAt: Date.now(),
-      viewersCount: liveViewersCount,
+      viewersCount: 0,
+      likesCount: 0,
+      diamonds: 0,
     };
 
     try {
@@ -662,10 +686,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       bus.postMessage({ type: 'LIVE_HOST_STARTED', host: hostMeta });
     } catch {}
 
-    // Start network host broadcast across ALL devices worldwide via MQTT & PeerJS
+    // Start network host broadcast across ALL devices worldwide via MQTT & WebRTC
     liveStreamSync.startHostBroadcast(
       {
-        id: `live-user-${currentUser.handle}`,
+        id: `live-user-${roomId}`,
         creatorHandle: currentUser.handle,
         creatorName: currentUser.name,
         creatorAvatar: currentUser.avatar,
@@ -673,48 +697,59 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         title: currentStreamer?.title || '🔴 LIVE: High-Energy Room & PK Battle',
         category: currentStreamer?.category || 'Featured',
         description: currentStreamer?.description || 'Live streaming sovereign node',
-        viewersCount: liveViewersCount,
-        likesCount: likesReceived,
+        viewersCount: 0,
+        likesCount: 0,
         previewUrl: currentUser.avatar,
         tags: ['LiveNow', 'Host', 'Privity'],
       },
       localStreamRef.current || userMediaStream || null
     ).catch(() => {});
+  }, [isHost, currentUser.handle, currentStreamer?.title, currentStreamer?.category, currentStreamer?.description]);
 
-    // Offscreen Canvas to emit live video frames across tabs
+  // 2B. REAL-TIME VIDEO FRAME STREAMER (ULTRA-LOW LATENCY CANVAS RELAY)
+  useEffect(() => {
+    if (!isHost) return;
+    const roomId = getRoomIdFromHandle(currentUser.handle);
+
     const offscreenCanvas = document.createElement('canvas');
-    offscreenCanvas.width = 360;
-    offscreenCanvas.height = 640;
+    offscreenCanvas.width = 240;
+    offscreenCanvas.height = 360;
     const offscreenCtx = offscreenCanvas.getContext('2d');
     let frameChannel: BroadcastChannel | null = null;
     try {
       frameChannel = new BroadcastChannel('privity_live_frames');
     } catch {}
 
-    const frameSyncInterval = setInterval(() => {
+    const captureAndEmitFrame = () => {
       if (videoRef.current && offscreenCtx && !isVideoOff) {
         try {
-          offscreenCtx.drawImage(videoRef.current, 0, 0, 360, 640);
-          const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.42);
-          liveStreamSync.sendVideoFrame(currentStreamer.id, frameJpeg);
-          if (frameChannel) {
-            frameChannel.postMessage({
-              type: 'FRAME',
-              handle: currentUser.handle,
-              frame: frameJpeg,
-            });
+          if (videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
+            offscreenCtx.drawImage(videoRef.current, 0, 0, 240, 360);
+            const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.32);
+            liveStreamSync.sendVideoFrame(roomId, frameJpeg);
+            if (frameChannel) {
+              frameChannel.postMessage({
+                type: 'FRAME',
+                handle: currentUser.handle,
+                frame: frameJpeg,
+              });
+            }
           }
         } catch {}
       }
-    }, 150);
+    };
+
+    immediateFrameCaptureRef.current = captureAndEmitFrame;
+    const frameSyncInterval = setInterval(captureAndEmitFrame, 350);
 
     return () => {
       clearInterval(frameSyncInterval);
+      immediateFrameCaptureRef.current = null;
       if (frameChannel) frameChannel.close();
     };
-  }, [isHost, currentUser, liveViewersCount, isVideoOff, currentStreamer?.title, currentStreamer?.category, currentStreamer?.description, userMediaStream, likesReceived]);
+  }, [isHost, currentUser.handle, isVideoOff]);
 
-  // 3. BROADCAST DURATION CLOCK & AUDIENCE SIMULATOR
+  // 3. BROADCAST DURATION CLOCK (100% PURE REAL TIME - ZERO FAKE AUDIENCE)
   useEffect(() => {
     if (!isHost) return;
 
@@ -726,14 +761,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     updateTimer();
     const timer = setInterval(updateTimer, 1000);
 
-    // Occasional simulated audience updates
-    const audienceTimer = setInterval(() => {
-      setLiveViewersCount((prev) => Math.max(12, prev + Math.floor(Math.random() * 7 - 2)));
-    }, 4500);
-
     return () => {
       clearInterval(timer);
-      clearInterval(audienceTimer);
     };
   }, [isHost]);
 
@@ -861,7 +890,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
     // Cross-device and cross-tab broadcast like
     try {
-      liveStreamSync.sendRoomEvent(currentStreamer.id, {
+      const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      liveStreamSync.sendRoomEvent(roomId, {
         type: 'LIVE_LIKE',
         streamerId: currentStreamer.id,
         x: posX,
@@ -874,15 +904,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     } catch {}
   };
 
-  // Cross-device room events subscription (real-time live frames, gifts, joins, likes & chat)
+  // Cross-device room events subscription (real-time live frames, gifts, joins, likes, stats & chat)
   useEffect(() => {
-    return liveStreamSync.subscribeToRoomEvents(currentStreamer.id, (evt) => {
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+
+    return liveStreamSync.subscribeToRoomEvents(roomId, (evt) => {
+      if (!evt) return;
+
       if (evt.type === 'LIVE_FRAME' && evt.frame) {
         setRemoteLiveFrame(evt.frame);
       } else if (evt.type === 'LIVE_LIKE') {
-        const sid = evt.streamerId || currentStreamer.id;
+        const sid = currentStreamer.id;
         setStreamerLikesMap((prev) => {
-          const current = prev[sid] ?? currentStreamer.likesCount;
+          const current = prev[sid] ?? 0;
           return { ...prev, [sid]: current + 1 };
         });
         setLikesReceived((prev) => prev + 1);
@@ -914,26 +948,44 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           user: evt.user.name,
           handle: evt.user.handle,
           avatar: evt.user.avatar,
-          level: 28,
+          level: 1,
           badge: 'FAN',
           text: 'joined the live room 👋',
           isSystem: true,
+          isJoin: true,
           timestamp: Date.now(),
         };
         setChatMessages((prev) => [...prev.slice(-35), joinMsg]);
-        setLiveViewersCount((prev) => prev + 1);
 
-        if (isHost) {
-          showToastRef.current(`👋 ${evt.user.name} joined your live stream!`);
-          liveStreamSync.sendRoomEvent(currentStreamer.id, {
-            type: 'LIVE_VIEWER_COUNT',
-            count: liveViewersCount + 1,
-          });
-        }
+        setLiveViewersCount((prev) => {
+          const nextCount = prev + 1;
+          if (isHost) {
+            showToastRef.current(`👋 ${evt.user.name} joined your live stream!`);
+            immediateFrameCaptureRef.current?.();
+            liveStreamSync.sendRoomEvent(roomId, {
+              type: 'LIVE_STATS',
+              count: nextCount,
+              likes: likesReceivedRef.current,
+              diamonds: diamondsEarnedRef.current,
+            });
+          }
+          return nextCount;
+        });
       } else if (evt.type === 'LIVE_LEAVE') {
-        setLiveViewersCount((prev) => Math.max(1, prev - 1));
+        setLiveViewersCount((prev) => Math.max(0, prev - 1));
       } else if (evt.type === 'LIVE_VIEWER_COUNT' && typeof evt.count === 'number') {
         setLiveViewersCount(evt.count);
+      } else if (evt.type === 'LIVE_STATS') {
+        if (typeof evt.count === 'number') {
+          setLiveViewersCount(evt.count);
+        }
+        if (typeof evt.likes === 'number') {
+          setLikesReceived(evt.likes);
+          setStreamerLikesMap((prev) => ({ ...prev, [currentStreamer.id]: evt.likes }));
+        }
+        if (typeof evt.diamonds === 'number') {
+          setDiamondsEarned(evt.diamonds);
+        }
       } else if (evt.type === 'LIVE_GIFT') {
         // Enqueue animation for host & all viewers
         if (evt.giftEvent && evt.animGift) {
@@ -952,7 +1004,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (matchedGift?.soundUrl) {
           try {
             const audio = new Audio(matchedGift.soundUrl);
-            audio.volume = isMuted ? 0 : 0.85;
+            audio.volume = isMutedRef.current ? 0 : 0.85;
             audio.play().catch(() => {});
           } catch {}
         }
@@ -971,13 +1023,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         // Update top contributors facepile
         if (evt.sender) {
           setRoomContributors((prev) => {
-            const existing = prev.find((c) => c.id === evt.sender.handle || c.name === evt.sender.name);
+            const senderId = evt.sender.handle || evt.sender.id || evt.sender.name;
+            const existing = prev.find((c) => c.id === senderId || c.name === evt.sender.name);
             const updated = existing
               ? prev.map((c) => (c.id === existing.id ? { ...c, contribution: c.contribution + diamonds } : c))
               : [
                   ...prev,
                   {
-                    id: evt.sender.handle,
+                    id: senderId,
                     name: evt.sender.name,
                     avatar: evt.sender.avatar,
                     rank: 1 as 1 | 2 | 3,
@@ -997,7 +1050,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         showToastRef.current(`🎁 ${evt.sender?.name || 'Viewer'} sent ${evt.giftEvent?.giftName || 'Gift'}! (+${diamonds} 💎)`);
       }
     });
-  }, [currentStreamer.id, currentStreamer.likesCount, isHost, liveViewersCount, isMuted, isPkBattleActive]);
+  }, [currentStreamer.id, currentStreamer.handle, isHost, isPkBattleActive]);
 
   // Trigger floating PK Hit Damage text
   const triggerPkHit = (text: string, color = '#fbbf24') => {
@@ -1746,7 +1799,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 className="liveme-diamond-score"
                 onClick={() => {
                   spawnHeartReaction();
-                  const likesNow = streamerLikesMap[currentStreamer.id] ?? (isHost ? likesReceived : currentStreamer.likesCount);
+                  const likesNow = streamerLikesMap[currentStreamer.id] ?? (isRealStream ? likesReceived : (currentStreamer.likesCount || 0));
                   showToast(`❤️ Exact Real-Time Likes: ${likesNow.toLocaleString()}`);
                 }}
                 style={{ cursor: 'pointer' }}
@@ -1755,7 +1808,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 <span style={{ color: '#f43f5e' }}>♥</span>
                 <span>
                   {(() => {
-                    const count = streamerLikesMap[currentStreamer.id] ?? (isHost ? likesReceived : currentStreamer.likesCount);
+                    const count = streamerLikesMap[currentStreamer.id] ?? (isRealStream ? likesReceived : (currentStreamer.likesCount || 0));
                     return count >= 1000 ? `${(count / 1000).toFixed(1)}K` : count;
                   })()}
                 </span>

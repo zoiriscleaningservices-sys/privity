@@ -34,6 +34,15 @@ const TOPIC_QUERY = 'privity/v1/query-streams';
 const TOPIC_STREAM_PREFIX = 'privity/v1/stream/';
 const TOPIC_ROOM_PREFIX = 'privity/v1/room/';
 
+export function getRoomIdFromHandle(raw: string): string {
+  if (!raw) return 'live';
+  let cleaned = raw.toLowerCase().trim();
+  if (cleaned.startsWith('@')) cleaned = cleaned.substring(1);
+  if (cleaned.startsWith('live-user-')) cleaned = cleaned.replace('live-user-', '');
+  if (cleaned.startsWith('privity-live-')) cleaned = cleaned.replace('privity-live-', '');
+  return cleaned.replace(/[^a-z0-9]/g, '') || 'live';
+}
+
 class LiveStreamSyncService {
   private mqttClient: MqttClient | null = null;
   private brokerIndex = 0;
@@ -41,6 +50,7 @@ class LiveStreamSyncService {
   private subscribers: Set<(streams: LiveMeStreamer[]) => void> = new Set();
   private roomSubscribers: Map<string, Set<(event: any) => void>> = new Map();
   private hostPeer: Peer | null = null;
+  private hostPeerConnections: Map<string, RTCPeerConnection> = new Map();
   private hostMediaStream: MediaStream | null = null;
   private currentHostSession: RemoteLiveStreamPayload | null = null;
   private heartbeatInterval: any = null;
@@ -290,11 +300,11 @@ class LiveStreamSyncService {
         category: s.category || 'Featured',
         title: s.title || 'Live Broadcast · Sovereign Stream',
         description: s.description || 'Live streaming sovereign node',
-        viewersCount: Math.max(1, s.viewersCount || 1),
-        totalViews: `${Math.max(1, s.viewersCount || 1)}`,
-        popularity: '999+',
-        diamonds: Math.max(100, s.likesCount * 10),
-        likesCount: Math.max(1, s.likesCount || 1),
+        viewersCount: s.viewersCount ?? 0,
+        totalViews: `${s.viewersCount ?? 0}`,
+        popularity: `${s.likesCount ?? 0}`,
+        diamonds: (s as any).diamonds ?? 0,
+        likesCount: s.likesCount ?? 0,
         videoStreamUrl: s.videoStreamUrl,
         posterUrl: s.posterUrl || s.previewUrl || s.creatorAvatar,
         tags: s.tags && s.tags.length > 0 ? s.tags : ['LiveNow', 'Host', 'Privity'],
@@ -353,14 +363,15 @@ class LiveStreamSyncService {
       likesCount?: number;
       previewUrl?: string;
       tags?: string[];
+      peerId?: string;
     },
     cameraStream: MediaStream | null
   ): Promise<string> {
     this.hostMediaStream = cameraStream;
 
-    // Clean alphanumeric unique peer ID for reliable WebRTC signaling
-    const sanitizedHandle = session.creatorHandle.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const peerId = `privity-live-${sanitizedHandle}-${Math.random().toString(36).substring(2, 7)}`;
+    // Clean alphanumeric canonical peer ID matching viewer expectations
+    const roomId = getRoomIdFromHandle(session.creatorHandle || session.id);
+    const peerId = session.peerId || `privity-live-${roomId}`;
 
     this.currentHostSession = {
       id: session.id,
@@ -371,8 +382,8 @@ class LiveStreamSyncService {
       category: session.category || 'Featured',
       title: session.title || 'Live Broadcast',
       description: session.description || 'Decentralized Live Broadcast',
-      viewersCount: session.viewersCount || 1,
-      likesCount: session.likesCount || 1,
+      viewersCount: session.viewersCount ?? 0,
+      likesCount: session.likesCount ?? 0,
       previewUrl: session.previewUrl || session.creatorAvatar,
       posterUrl: session.previewUrl || session.creatorAvatar,
       tags: session.tags || ['LiveNow', 'Host'],
@@ -397,6 +408,9 @@ class LiveStreamSyncService {
 
     // Initialize PeerJS Host Peer
     this.setupHostPeer(peerId);
+
+    // Initialize direct WebRTC room signaling over MQTT
+    this.setupHostWebRTCSignaling(roomId);
 
     // Announce to MQTT immediately with retain flag
     this.announceStream(this.currentHostSession);
@@ -443,18 +457,18 @@ class LiveStreamSyncService {
       peer.on('error', (err) => {
         console.warn('Privity Host Peer notice:', err.type);
         if (err.type === 'unavailable-id') {
-          const sanitizedHandle = peerId.split('-')[2] || 'host';
-          const fallbackId = `privity-live-${sanitizedHandle}-${Math.random().toString(36).substring(2, 7)}`;
-          this.setupHostPeer(fallbackId);
+          setTimeout(() => {
+            if (this.currentHostSession && !this.hostPeer) {
+              this.setupHostPeer(peerId);
+            }
+          }, 1000);
         }
       });
 
       peer.on('call', (call) => {
-        // When a remote viewer calls this host, answer with the host's actual camera stream
         if (this.hostMediaStream) {
           call.answer(this.hostMediaStream);
         } else {
-          // If no media stream, create a blank placeholder canvas stream so WebRTC connects
           const canvas = document.createElement('canvas');
           canvas.width = 320;
           canvas.height = 240;
@@ -467,22 +481,74 @@ class LiveStreamSyncService {
           call.answer(fallbackStream);
         }
       });
-
-      peer.on('error', (err) => {
-        console.warn('Privity Host Peer notice:', err.type);
-      });
     } catch (err) {
       console.warn('Privity host peer init notice:', err);
     }
+  }
+
+  private setupHostWebRTCSignaling(roomId: string) {
+    this.subscribeToRoomEvents(roomId, async (evt) => {
+      if (!this.currentHostSession || !evt) return;
+
+      if (evt.type === 'RTC_OFFER' && evt.offer && evt.viewerId) {
+        try {
+          let pc = this.hostPeerConnections.get(evt.viewerId);
+          if (pc) {
+            try { pc.close(); } catch {}
+          }
+          pc = new RTCPeerConnection({
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:stun1.l.google.com:19302' },
+              { urls: 'stun:stun.cloudflare.com:3478' },
+            ],
+          });
+          this.hostPeerConnections.set(evt.viewerId, pc);
+
+          if (this.hostMediaStream) {
+            this.hostMediaStream.getTracks().forEach((track) => {
+              if (this.hostMediaStream) pc!.addTrack(track, this.hostMediaStream);
+            });
+          }
+
+          pc.onicecandidate = (event) => {
+            if (event.candidate) {
+              this.sendRoomEvent(roomId, {
+                type: 'RTC_HOST_CANDIDATE',
+                viewerId: evt.viewerId,
+                candidate: event.candidate,
+              });
+            }
+          };
+
+          await pc.setRemoteDescription(new RTCSessionDescription(evt.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          this.sendRoomEvent(roomId, {
+            type: 'RTC_ANSWER',
+            viewerId: evt.viewerId,
+            answer,
+          });
+        } catch (err) {
+          console.warn('WebRTC host offer error:', err);
+        }
+      } else if (evt.type === 'RTC_VIEWER_CANDIDATE' && evt.candidate && evt.viewerId) {
+        const pc = this.hostPeerConnections.get(evt.viewerId);
+        if (pc && pc.remoteDescription) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(evt.candidate));
+          } catch {}
+        }
+      }
+    });
   }
 
   private announceStream(stream: RemoteLiveStreamPayload, type: 'STREAM_ACTIVE' | 'STREAM_HEARTBEAT' = 'STREAM_ACTIVE') {
     if (this.mqttClient && this.mqttClient.connected) {
       try {
         const payload = JSON.stringify({ type, stream });
-        // 1. General broadcast topic
         this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, payload, { qos: 0 });
-        // 2. Retained per-stream topic so newly connected or waking devices get it instantly!
         const streamTopic = `${TOPIC_STREAM_PREFIX}${stream.id}`;
         this.mqttClient.publish(streamTopic, payload, { retain: true, qos: 1 });
       } catch {}
@@ -495,10 +561,14 @@ class LiveStreamSyncService {
       this.heartbeatInterval = null;
     }
 
+    this.hostPeerConnections.forEach((pc) => {
+      try { pc.close(); } catch {}
+    });
+    this.hostPeerConnections.clear();
+
     if (this.currentHostSession) {
       const streamId = this.currentHostSession.id;
 
-      // Announce stream ended
       if (this.mqttClient && this.mqttClient.connected) {
         try {
           const endPayload = JSON.stringify({
@@ -507,13 +577,11 @@ class LiveStreamSyncService {
             creatorHandle: this.currentHostSession.creatorHandle,
           });
           this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, endPayload, { qos: 0 });
-          // Update retained topic to ended
           const streamTopic = `${TOPIC_STREAM_PREFIX}${streamId}`;
           this.mqttClient.publish(streamTopic, endPayload, { retain: true, qos: 1 });
         } catch {}
       }
 
-      // Broadcast on local bus
       try {
         this.broadcastBus?.postMessage({
           type: 'LIVE_HOST_ENDED',
@@ -542,19 +610,90 @@ class LiveStreamSyncService {
   // =========================================================================
 
   public connectToRemoteStream(
-    peerId: string,
+    peerIdOrHandle: string,
     onStream: (stream: MediaStream) => void,
     onStatusChange?: (status: 'connecting' | 'connected' | 'failed') => void
   ): () => void {
     let viewerPeer: Peer | null = null;
     let callInstance: any = null;
+    let rtcPeerConnection: RTCPeerConnection | null = null;
     let isCleanedUp = false;
+    let hasStreamConnected = false;
 
     if (onStatusChange) onStatusChange('connecting');
 
+    const roomId = getRoomIdFromHandle(peerIdOrHandle);
+    const targetPeerId = `privity-live-${roomId}`;
+    const viewerId = `privity-v-${Math.random().toString(36).substring(2, 9)}`;
+
+    const handleStreamSuccess = (remoteStream: MediaStream) => {
+      if (isCleanedUp || hasStreamConnected) return;
+      hasStreamConnected = true;
+      if (onStatusChange) onStatusChange('connected');
+      onStream(remoteStream);
+    };
+
+    // 1. Direct WebRTC Signaling over MQTT Room
     try {
-      const randomViewerId = `privity-viewer-${Math.random().toString(36).substring(2, 8)}`;
-      viewerPeer = new Peer(randomViewerId, {
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
+        ],
+      });
+      rtcPeerConnection = pc;
+
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          handleStreamSuccess(event.streams[0]);
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && !isCleanedUp) {
+          this.sendRoomEvent(roomId, {
+            type: 'RTC_VIEWER_CANDIDATE',
+            viewerId,
+            candidate: event.candidate,
+          });
+        }
+      };
+
+      this.subscribeToRoomEvents(roomId, async (evt) => {
+        if (isCleanedUp || !evt) return;
+        if (evt.type === 'RTC_ANSWER' && evt.viewerId === viewerId && evt.answer) {
+          try {
+            if (pc.signalingState !== 'stable') {
+              await pc.setRemoteDescription(new RTCSessionDescription(evt.answer));
+            }
+          } catch {}
+        } else if (evt.type === 'RTC_HOST_CANDIDATE' && evt.viewerId === viewerId && evt.candidate) {
+          try {
+            if (pc.remoteDescription) {
+              await pc.addIceCandidate(new RTCIceCandidate(evt.candidate));
+            }
+          } catch {}
+        }
+      });
+
+      pc.createOffer().then(async (offer) => {
+        if (isCleanedUp) return;
+        await pc.setLocalDescription(offer);
+        this.sendRoomEvent(roomId, {
+          type: 'RTC_OFFER',
+          viewerId,
+          offer,
+        });
+      }).catch(() => {});
+    } catch {}
+
+    // 2. PeerJS in parallel as secondary P2P transport
+    try {
+      viewerPeer = new Peer(viewerId, {
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
@@ -564,45 +703,29 @@ class LiveStreamSyncService {
       });
 
       viewerPeer.on('open', () => {
-        if (isCleanedUp || !viewerPeer) return;
+        if (isCleanedUp || !viewerPeer || hasStreamConnected) return;
 
-        // Create a minimal 16x16 canvas stream for answering WebRTC call requirements
         const canvas = document.createElement('canvas');
         canvas.width = 16;
         canvas.height = 16;
         const dummyStream = canvas.captureStream(1);
 
         try {
-          const call = viewerPeer.call(peerId, dummyStream);
+          const call = viewerPeer.call(targetPeerId, dummyStream);
           callInstance = call;
 
           call.on('stream', (remoteStream: MediaStream) => {
-            if (isCleanedUp) return;
-            if (onStatusChange) onStatusChange('connected');
-            onStream(remoteStream);
+            handleStreamSuccess(remoteStream);
           });
-
-          call.on('error', () => {
-            if (onStatusChange) onStatusChange('failed');
-          });
-
-          call.on('close', () => {
-            if (onStatusChange) onStatusChange('failed');
-          });
-        } catch {
-          if (onStatusChange) onStatusChange('failed');
-        }
+        } catch {}
       });
-
-      viewerPeer.on('error', () => {
-        if (onStatusChange) onStatusChange('failed');
-      });
-    } catch {
-      if (onStatusChange) onStatusChange('failed');
-    }
+    } catch {}
 
     return () => {
       isCleanedUp = true;
+      try {
+        if (rtcPeerConnection) rtcPeerConnection.close();
+      } catch {}
       try {
         if (callInstance) callInstance.close();
       } catch {}
@@ -616,42 +739,43 @@ class LiveStreamSyncService {
   // ROOM REAL-TIME EVENTS (LIKES, HEARTS, CHAT)
   // =========================================================================
 
-  public sendRoomEvent(streamId: string, event: any) {
-    const topic = `${TOPIC_ROOM_PREFIX}${streamId}`;
+  public sendRoomEvent(streamIdOrHandle: string, event: any) {
+    const roomId = getRoomIdFromHandle(streamIdOrHandle);
+    const topic = `${TOPIC_ROOM_PREFIX}${roomId}`;
     if (this.mqttClient && this.mqttClient.connected) {
       try {
         this.mqttClient.publish(topic, JSON.stringify(event));
       } catch {}
     }
 
-    // Local bus
     try {
       this.broadcastBus?.postMessage({
         type: 'LIVE_ROOM_EVENT',
-        streamId,
+        streamId: roomId,
         event,
       });
     } catch {}
 
-    // Dispatch locally too
-    this.dispatchRoomEvent(streamId, event);
+    this.dispatchRoomEvent(roomId, event);
   }
 
-  public sendVideoFrame(streamId: string, frameData: string) {
-    this.sendRoomEvent(streamId, {
+  public sendVideoFrame(streamIdOrHandle: string, frameData: string) {
+    const roomId = getRoomIdFromHandle(streamIdOrHandle);
+    this.sendRoomEvent(roomId, {
       type: 'LIVE_FRAME',
-      streamerId: streamId,
+      streamerId: roomId,
       frame: frameData,
     });
   }
 
-  public subscribeToRoomEvents(streamId: string, onEvent: (event: any) => void): () => void {
-    if (!this.roomSubscribers.has(streamId)) {
-      this.roomSubscribers.set(streamId, new Set());
+  public subscribeToRoomEvents(streamIdOrHandle: string, onEvent: (event: any) => void): () => void {
+    const roomId = getRoomIdFromHandle(streamIdOrHandle);
+    if (!this.roomSubscribers.has(roomId)) {
+      this.roomSubscribers.set(roomId, new Set());
     }
-    this.roomSubscribers.get(streamId)!.add(onEvent);
+    this.roomSubscribers.get(roomId)!.add(onEvent);
 
-    const topic = `${TOPIC_ROOM_PREFIX}${streamId}`;
+    const topic = `${TOPIC_ROOM_PREFIX}${roomId}`;
     if (this.mqttClient && this.mqttClient.connected) {
       try {
         this.mqttClient.subscribe(topic);
@@ -659,11 +783,11 @@ class LiveStreamSyncService {
     }
 
     return () => {
-      const set = this.roomSubscribers.get(streamId);
+      const set = this.roomSubscribers.get(roomId);
       if (set) {
         set.delete(onEvent);
         if (set.size === 0) {
-          this.roomSubscribers.delete(streamId);
+          this.roomSubscribers.delete(roomId);
           if (this.mqttClient && this.mqttClient.connected) {
             try {
               this.mqttClient.unsubscribe(topic);

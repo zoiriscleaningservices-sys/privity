@@ -3318,8 +3318,8 @@ export function App() {
       category: 'Visionary Host',
       title: 'Decentralized Live Broadcast · Sovereign Node',
       description: 'Streaming live directly to authorized circles with local encryption keys.',
-      viewersCount: 1,
-      likesCount: 1,
+      viewersCount: 0,
+      likesCount: 0,
       dailyRank: '🔥 Genesis Host',
       previewUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
       battleInfo: {
@@ -5180,7 +5180,7 @@ export function App() {
     setHostLiveCameraStream(cameraStream || null);
     setIsHostBroadcasting(true);
     const userStream: LiveStreamSession = {
-      id: `live-user-${Date.now()}`,
+      id: `live-user-${myProfile.handle}`,
       creatorHandle: myProfile.handle,
       creatorName: myProfile.name,
       creatorAvatar: myProfile.avatar,
@@ -5188,8 +5188,8 @@ export function App() {
       category: category || 'Visionary Host',
       title: title || 'Live Broadcast · Sovereign Node',
       description: `Streaming live directly to authorized circles. ${goal}`,
-      viewersCount: 1,
-      likesCount: 1,
+      viewersCount: 0,
+      likesCount: 0,
       dailyRank: '🔥 Genesis Host',
       previewUrl: myProfile.coverUrl || myProfile.avatar,
       battleInfo: {

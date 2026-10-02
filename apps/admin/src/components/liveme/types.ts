@@ -19,13 +19,15 @@ export interface LiveMeStreamer {
   isHost?: boolean;
   isCameraStream?: boolean;
   peerId?: string;
-  topContributors: Array<{
-    id: string;
-    name: string;
-    avatar: string;
-    rank: 1 | 2 | 3;
-    contribution: number;
-  }>;
+  topContributors: LiveMeContributor[];
+}
+
+export interface LiveMeContributor {
+  id: string;
+  name: string;
+  avatar: string;
+  rank: 1 | 2 | 3;
+  contribution: number;
 }
 
 export interface LiveMeChatMessage {
