@@ -1979,6 +1979,10 @@ export function App() {
             safeSaveStorage('privity_stories_v3', next);
             return next;
           });
+          const cleanAuthor = (story.authorHandle || '').replace(/^@/, '');
+          if (cleanAuthor && cleanAuthor.toLowerCase() !== cleanMyHandle.toLowerCase()) {
+            triggerToast(`📸 ${story.authorName || `@${cleanAuthor}`} added a new story!`);
+          }
           break;
         }
 
@@ -1993,39 +1997,89 @@ export function App() {
           break;
         }
 
-        case 'LIVE_STARTED': {
+        case 'LIVE_STARTED':
+        case 'LIVE_HEARTBEAT': {
           const { host } = event;
-          if (!host || !host.id) return;
+          if (!host || !host.id || host.isLive === false) return;
+          const cleanHostHandle = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
+          liveStreamSync.clearStreamEnded(host.id, cleanHostHandle);
           liveStreamSync.notifyStreamStarted(host);
           setNetworkLiveStreamers((prev) => {
-            const cleanHostHandle = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
             const filtered = prev.filter((s) => {
               const sHandle = ((s as any).creatorHandle || s.handle || '').toLowerCase().replace('@', '').trim();
               return s.id !== host.id && sHandle !== cleanHostHandle;
             });
-            return [host, ...filtered];
+            const streamItem: LiveMeStreamer = {
+              id: host.id,
+              handle: cleanHostHandle,
+              name: `${(host.creatorName || host.name || 'Host').replace(' (LIVE NOW 🔴)', '')} (LIVE NOW 🔴)`,
+              avatar: host.creatorAvatar || host.avatar || '',
+              isVerified: !!host.isVerified,
+              category: host.category || 'Featured',
+              title: host.title || 'Live Broadcast · Sovereign Stream',
+              description: host.description || 'Live streaming sovereign node',
+              viewersCount: Math.max(1, host.viewersCount ?? 1),
+              totalViews: `${Math.max(1, host.viewersCount ?? 1)}`,
+              popularity: `${host.likesCount ?? 0}`,
+              diamonds: 0,
+              likesCount: host.likesCount ?? 0,
+              posterUrl: host.previewUrl || host.posterUrl || host.avatar,
+              tags: ['LiveNow', 'Host', 'Privity'],
+              tagBadge: 'LIVE NOW',
+              isHost: false,
+              isCameraStream: true,
+              topContributors: [],
+            };
+            return [streamItem, ...filtered];
           });
-          const hostName = host.creatorName || host.name || `@${host.creatorHandle || 'someone'}`;
-          triggerToast(`🔴 ${hostName} is now LIVE!`);
+          if (event.action === 'LIVE_STARTED') {
+            const hostName = host.creatorName || host.name || `@${cleanHostHandle || 'someone'}`;
+            triggerToast(`🔴 ${hostName} is now LIVE!`);
+          }
+          break;
+        }
+
+        case 'QUERY_LIVES': {
+          if (isHostBroadcasting && activeLiveStream) {
+            const cleanHost = (myProfile.handle || '').replace(/^@/, '');
+            broadcastSyncEvent({
+              action: 'LIVE_HEARTBEAT',
+              host: {
+                id: activeLiveStream.id,
+                creatorHandle: cleanHost,
+                creatorName: myProfile.name,
+                creatorAvatar: myProfile.avatar,
+                handle: cleanHost,
+                name: myProfile.name,
+                avatar: myProfile.avatar,
+                isVerified: myProfile.isVerified,
+                category: (activeLiveStream as any).category || 'Featured',
+                title: (activeLiveStream as any).title || 'Live Broadcast',
+                startedAt: (activeLiveStream as any).startedAt || Date.now(),
+                lastHeartbeat: Date.now(),
+                isLive: true,
+              },
+            });
+          }
           break;
         }
 
         case 'LIVE_ENDED': {
           const { streamId, handle } = event;
           if (!streamId && !handle) return;
-          liveStreamSync.notifyStreamEnded(streamId || '', handle);
+          const cleanTarget = (handle || '').toLowerCase().replace('@', '').trim();
+          liveStreamSync.notifyStreamEnded(streamId || '', cleanTarget);
           setNetworkLiveStreamers((prev) => {
-            const cleanTarget = (handle || '').toLowerCase().replace('@', '').trim();
             return prev.filter((s) => {
               const sHandle = ((s as any).creatorHandle || s.handle || '').toLowerCase().replace('@', '').trim();
               return s.id !== streamId && (!cleanTarget || sHandle !== cleanTarget);
             });
           });
-          if (activeLiveStream && (activeLiveStream.id === streamId || (handle && (activeLiveStream as any).creatorHandle === handle))) {
+          if (activeLiveStream && (activeLiveStream.id === streamId || (cleanTarget && (((activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '').toLowerCase().replace('@', '').trim() === cleanTarget)))) {
             setActiveLiveStream(null);
             triggerToast('Live broadcast ended by host');
           }
-          if (minimizedLiveStream && (minimizedLiveStream.id === streamId || (handle && (minimizedLiveStream as any).creatorHandle === handle))) {
+          if (minimizedLiveStream && (minimizedLiveStream.id === streamId || (cleanTarget && (((minimizedLiveStream as any).creatorHandle || (minimizedLiveStream as any).handle || '').toLowerCase().replace('@', '').trim() === cleanTarget)))) {
             setMinimizedLiveStream(null);
           }
           break;
@@ -2625,6 +2679,35 @@ export function App() {
       unsub();
     };
   }, [isHostBroadcasting, hostLiveCameraStream]);
+
+  // Continuous host heartbeat loop: guarantees that all devices on the network continually receive live status
+  useEffect(() => {
+    if (!isHostBroadcasting || !activeLiveStream) return;
+    const cleanHandle = (myProfile.handle || '').replace(/^@/, '');
+    const hbInterval = setInterval(() => {
+      const hostMeta = {
+        id: activeLiveStream.id,
+        creatorHandle: cleanHandle,
+        creatorName: myProfile.name,
+        creatorAvatar: myProfile.avatar,
+        handle: cleanHandle,
+        name: myProfile.name,
+        avatar: myProfile.avatar,
+        isVerified: myProfile.isVerified,
+        category: (activeLiveStream as any).category || 'Featured',
+        title: (activeLiveStream as any).title || 'Live Broadcast',
+        startedAt: (activeLiveStream as any).startedAt || Date.now(),
+        lastHeartbeat: Date.now(),
+        isLive: true,
+      };
+      broadcastSyncEvent({
+        action: 'LIVE_HEARTBEAT',
+        host: hostMeta,
+      });
+    }, 2500);
+
+    return () => clearInterval(hbInterval);
+  }, [isHostBroadcasting, activeLiveStream?.id, myProfile.handle, myProfile.name, myProfile.avatar, myProfile.isVerified]);
 
   // Comment input per post
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});

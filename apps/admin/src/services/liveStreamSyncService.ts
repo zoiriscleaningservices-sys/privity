@@ -108,22 +108,19 @@ class LiveStreamSyncService {
     if (normId) {
       this.endedStreams.set(normId, { endedAt: now, creatorHandle: normHandle });
     }
-    if (normHandle) {
-      this.endedStreams.set(normHandle, { endedAt: now, creatorHandle: normHandle });
-    }
     this.saveEndedStreams();
   }
 
-  public isStreamEnded(streamId?: string, rawHandle?: string, startedAt?: number): boolean {
+  public isStreamEnded(streamId?: string, _rawHandle?: string, startedAt?: number): boolean {
     const normId = (streamId || '').toLowerCase().trim();
-    const normHandle = (rawHandle || '').toLowerCase().replace('@', '').trim();
-    const record = (normId && this.endedStreams.get(normId)) || (normHandle && this.endedStreams.get(normHandle));
-    if (!record) return false;
-    // If startedAt is after the stream was ended (plus 1s buffer), it's a brand new live broadcast
-    if (startedAt && startedAt > record.endedAt + 1000) {
-      return false;
+    if (normId && this.endedStreams.has(normId)) {
+      const record = this.endedStreams.get(normId);
+      if (record && startedAt && startedAt > record.endedAt) {
+        return false;
+      }
+      return true;
     }
-    return true;
+    return false;
   }
 
   public clearStreamEnded(streamId?: string, rawHandle?: string) {
@@ -131,6 +128,11 @@ class LiveStreamSyncService {
     const normHandle = (rawHandle || '').toLowerCase().replace('@', '').trim();
     if (normId) this.endedStreams.delete(normId);
     if (normHandle) this.endedStreams.delete(normHandle);
+    for (const [id, rec] of Array.from(this.endedStreams.entries())) {
+      if (rec.creatorHandle === normHandle || id === normId) {
+        this.endedStreams.delete(id);
+      }
+    }
     this.saveEndedStreams();
   }
 
@@ -208,10 +210,10 @@ class LiveStreamSyncService {
           const parsed = JSON.parse(savedHost);
           if (parsed && parsed.id) {
             const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
-            // If the host session was marked ended or heartbeat is older than 4.5s:
+            // If the host session was marked ended or heartbeat is older than 12s:
             if (
               this.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
-              (parsed.lastHeartbeat && now - parsed.lastHeartbeat > 4500)
+              (parsed.lastHeartbeat && now - parsed.lastHeartbeat > 12000)
             ) {
               localStorage.removeItem('privity_current_live_host');
               localStorage.removeItem('privity_is_host_broadcasting');
@@ -232,7 +234,7 @@ class LiveStreamSyncService {
         list.forEach((s) => {
           const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
           if (this.isStreamEnded(s.id, normHandle, s.startedAt)) return;
-          if (now - (s.lastHeartbeat || s.startedAt) < 4500) {
+          if (now - (s.lastHeartbeat || s.startedAt) < 12000) {
             s.creatorHandle = normHandle;
             s.creatorName = s.creatorName || (s as any).name || 'Host';
             s.creatorAvatar = s.creatorAvatar || (s as any).avatar || '';
@@ -249,7 +251,7 @@ class LiveStreamSyncService {
       const list = Array.from(this.activeStreams.values()).filter((s) => {
         const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
         if (this.isStreamEnded(s.id, normHandle, s.startedAt)) return false;
-        if (now - (s.lastHeartbeat || s.startedAt) > 4500) return false;
+        if (now - (s.lastHeartbeat || s.startedAt) > 12000) return false;
         return true;
       });
       localStorage.setItem('privity_remote_active_streams', JSON.stringify(list));
@@ -380,15 +382,18 @@ class LiveStreamSyncService {
     const streamId = (stream.id || '').toLowerCase().trim();
     const now = Date.now();
 
-    // 1. Blacklist check: If stream was marked ended, drop it immediately!
+    // 1. Immediately clear any past ended marker for this creator handle when an active stream arrives
+    this.clearStreamEnded(streamId, normHandle);
+
+    // 2. Blacklist check: only drop if this specific stream ID was marked ended after stream started
     if (this.isStreamEnded(streamId, normHandle, stream.startedAt)) {
       return;
     }
 
-    // 2. Strict timestamp staleness check:
-    // If the message has a timestamp older than 4.5 seconds, it is stale / delayed / retained!
+    // 3. Strict timestamp staleness check:
+    // If the message has a timestamp older than 8 seconds, it is stale / delayed / retained!
     const msgTimestamp = stream.lastHeartbeat || stream.startedAt;
-    if (msgTimestamp && (now - msgTimestamp > 4500)) {
+    if (msgTimestamp && (now - msgTimestamp > 8000)) {
       return;
     }
 
@@ -436,7 +441,8 @@ class LiveStreamSyncService {
   public notifyStreamStarted(stream: any) {
     if (!stream) return;
     const normHandle = (stream.creatorHandle || stream.handle || '').toLowerCase().replace('@', '').trim();
-    if (stream.id) this.clearStreamEnded(stream.id, normHandle);
+    const streamId = (stream.id || '').toLowerCase().trim();
+    if (streamId) this.clearStreamEnded(streamId, normHandle);
     this.handleIncomingStream(stream);
   }
 
@@ -455,14 +461,15 @@ class LiveStreamSyncService {
           continue;
         }
         const normHandle = (stream.creatorHandle || (stream as any).handle || '').toLowerCase().replace('@', '').trim();
-        // If stream is marked ended, prune immediately
+        // If this specific stream is marked ended, prune immediately
         if (this.isStreamEnded(id, normHandle, stream.startedAt)) {
           this.activeStreams.delete(id);
           changed = true;
           continue;
         }
-        // Remote streams without a heartbeat for 4.5 seconds are considered ended
-        if (now - (stream.lastHeartbeat || stream.startedAt) > 4500) {
+        // Remote streams without a heartbeat for 8 seconds are considered ended
+        const lastHb = stream.lastHeartbeat || stream.startedAt || now;
+        if (now - lastHb > 8000) {
           this.markStreamEnded(id, normHandle);
           this.activeStreams.delete(id);
           changed = true;
@@ -472,7 +479,7 @@ class LiveStreamSyncService {
         this.saveCachedStreams();
         this.notifySubscribers();
       }
-    }, 1000);
+    }, 1500);
   }
 
   private startQueryLoop() {
@@ -512,7 +519,7 @@ class LiveStreamSyncService {
       if (this.isStreamEnded(s.id, normHandle, s.startedAt)) {
         continue;
       }
-      if (now - (s.lastHeartbeat || s.startedAt) > 4500 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
+      if (now - (s.lastHeartbeat || s.startedAt) > 12000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
         continue;
       }
 
