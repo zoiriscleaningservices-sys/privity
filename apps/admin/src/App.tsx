@@ -69,6 +69,7 @@ import {
   StoryItem,
 } from './components/feed/TikTokSlideFeed';
 import { authService, UserAccount } from './services/authService';
+import { getSupabaseClient } from './services/supabaseClient';
 import { AuthModal } from './components/auth';
 
 export const BANNED_MOCK_HANDLES = new Set([
@@ -87,6 +88,10 @@ export const BANNED_MOCK_HANDLES = new Set([
   'gatty_live',
   'kenji_tokyo',
   'elena_r',
+  'sam_arch',
+  'jess_film',
+  'sam_archer',
+  'jessica_vance',
 ]);
 
 export const isMockHandle = (handle?: string): boolean => {
@@ -115,7 +120,7 @@ export const isMockPost = (p: any): boolean => {
 };
 
 // Guaranteed Absolute Zero Reset: Wipes legacy cached fake/mock data in localStorage
-if (typeof window !== 'undefined' && localStorage.getItem('privity_absolute_wipe_zero_v102') !== 'done') {
+if (typeof window !== 'undefined' && localStorage.getItem('privity_absolute_wipe_zero_v105') !== 'done') {
   try {
     const keysToRemove = [
       'privity_posts_v5',
@@ -137,7 +142,7 @@ if (typeof window !== 'undefined' && localStorage.getItem('privity_absolute_wipe
       'privity_explore_streams',
     ];
     keysToRemove.forEach((k) => localStorage.removeItem(k));
-    localStorage.setItem('privity_absolute_wipe_zero_v102', 'done');
+    localStorage.setItem('privity_absolute_wipe_zero_v105', 'done');
   } catch (e) {}
 }
 
@@ -965,17 +970,42 @@ export function App() {
     safeSaveStorage('privity_direct_messages_v5', directMessages);
   }, [directMessages]);
 
-  // 1. Persistent Profiles State (purges any mock profiles)
+  // 1. Persistent Profiles State (purges any mock profiles & registers all real accounts)
   const [profiles, setProfiles] = useState<Record<string, UserProfile>>(() => {
     const loaded = readStorage<Record<string, UserProfile>>('privity_profiles_v5', INITIAL_PROFILES_REGISTRY);
     const cleaned: Record<string, UserProfile> = {};
     if (loaded && typeof loaded === 'object') {
       for (const [k, v] of Object.entries(loaded)) {
         if (!isMockHandle(k) && !isMockHandle(v?.handle)) {
-          cleaned[k] = v;
+          cleaned[k] = { ...v, isVerified: Boolean(v?.isVerified) };
         }
       }
     }
+    try {
+      const allAccs = authService.getAllAccounts();
+      for (const acc of Object.values(allAccs)) {
+        const h = acc.handle.toLowerCase().replace(/^@/, '');
+        if (h && !isMockHandle(h) && !cleaned[h]) {
+          cleaned[h] = {
+            id: acc.id,
+            name: acc.name,
+            handle: acc.handle,
+            avatar: acc.avatar,
+            coverUrl: acc.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+            isVerified: false,
+            bio: acc.bio || 'Privity creator sharing private-first moments and authentic updates.',
+            location: 'Global',
+            joinedDate: 'Joined 2026',
+            circleStatus: 'Public Connection',
+            isPrivate: false,
+            followersList: [],
+            followingList: [],
+            trustCirclesList: [],
+            mediaItems: [],
+          };
+        }
+      }
+    } catch {}
     return cleaned;
   });
 
@@ -1012,6 +1042,98 @@ export function App() {
   useEffect(() => {
     safeSaveStorage('privity_profiles_v5', profiles);
   }, [profiles]);
+
+  // Ensure current authenticated user is registered into profiles state
+  useEffect(() => {
+    if (currentAuthUser && currentAuthUser.handle && !isMockHandle(currentAuthUser.handle)) {
+      const h = currentAuthUser.handle.toLowerCase().replace(/^@/, '');
+      setProfiles((prev) => {
+        const existing = prev[h];
+        if (!existing || existing.name !== currentAuthUser.name || existing.avatar !== currentAuthUser.avatar) {
+          const next: Record<string, UserProfile> = {
+            ...prev,
+            [h]: {
+              id: currentAuthUser.id,
+              name: currentAuthUser.name,
+              handle: currentAuthUser.handle,
+              avatar: currentAuthUser.avatar,
+              coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+              isVerified: false,
+              bio: currentAuthUser.bio || existing?.bio || 'Privity creator sharing private-first moments and authentic updates.',
+              location: 'Global',
+              joinedDate: existing?.joinedDate || 'Joined 2026',
+              circleStatus: 'You' as const,
+              isPrivate: false,
+              followersList: existing?.followersList || [],
+              followingList: existing?.followingList || [],
+              trustCirclesList: existing?.trustCirclesList || [],
+              mediaItems: existing?.mediaItems || [],
+            },
+          };
+          safeSaveStorage('privity_profiles_v5', next);
+          return next;
+        }
+        return prev;
+      });
+    }
+  }, [currentAuthUser]);
+
+  // Sync real registered users from Supabase into profiles for Discovery
+  useEffect(() => {
+    let isSubscribed = true;
+    const syncRemoteProfiles = async () => {
+      try {
+        const sb = getSupabaseClient();
+        if (!sb) return;
+        const { data, error } = await sb.from('profiles').select('*');
+        if (!error && Array.isArray(data) && isSubscribed) {
+          setProfiles((prev) => {
+            let changed = false;
+            const next: Record<string, UserProfile> = { ...prev };
+            for (const sp of data) {
+              const h = (sp.handle || '').toLowerCase().replace(/^@/, '');
+              if (h && !isMockHandle(h)) {
+                if (!next[h] || next[h].name !== sp.name || next[h].avatar !== sp.avatar) {
+                  next[h] = {
+                    id: sp.id,
+                    name: sp.name || h,
+                    handle: sp.handle,
+                    avatar: sp.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${h}`,
+                    coverUrl: sp.cover_url || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+                    isVerified: false,
+                    bio: sp.bio || 'Privity creator sharing private-first moments and authentic updates.',
+                    location: 'Global',
+                    joinedDate: 'Joined 2026',
+                    circleStatus: 'Public Connection' as const,
+                    isPrivate: false,
+                    followersList: next[h]?.followersList || [],
+                    followingList: next[h]?.followingList || [],
+                    trustCirclesList: next[h]?.trustCirclesList || [],
+                    mediaItems: next[h]?.mediaItems || [],
+                  };
+                  changed = true;
+                }
+              }
+            }
+            if (changed) {
+              safeSaveStorage('privity_profiles_v5', next);
+              return next;
+            }
+            return prev;
+          });
+        }
+      } catch (err) {
+        console.warn('Discovery profile sync:', err);
+      }
+    };
+
+    syncRemoteProfiles();
+    const interval = setInterval(syncRemoteProfiles, 30000);
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     safeSaveStorage('privity_posts_v5', posts);
@@ -2861,10 +2983,23 @@ export function App() {
     });
   };
 
-  // Notifications & Follow Requests (Real-Time & LocalStorage Persistent)
-  const [followRequests, setFollowRequests] = useState<Array<{ id: string; name: string; handle: string; avatar: string }>>(() =>
-    readStorage('privity_follow_requests_v5', [])
-  );
+  // Notifications & Follow Requests (Real-Time & LocalStorage Persistent - strictly zero mock accounts)
+  const [followRequests, setFollowRequests] = useState<Array<{ id: string; name: string; handle: string; avatar: string }>>(() => {
+    const raw = readStorage<Array<{ id: string; name: string; handle: string; avatar: string }>>('privity_follow_requests_v5', []);
+    if (Array.isArray(raw)) {
+      return raw.filter(
+        (r) =>
+          r &&
+          r.handle &&
+          !isMockHandle(r.handle) &&
+          r.handle.toLowerCase() !== 'sam_arch' &&
+          r.handle.toLowerCase() !== 'jess_film' &&
+          !r.name?.toLowerCase().includes('archer') &&
+          !r.name?.toLowerCase().includes('vance')
+      );
+    }
+    return [];
+  });
 
   useEffect(() => {
     safeSaveStorage('privity_follow_requests_v5', followRequests);
@@ -4655,41 +4790,34 @@ export function App() {
           <span>New Dispatch</span>
         </button>
 
-        <div style={{ padding: '0 8px', marginBottom: '8px' }}>
-          <button
-            type="button"
-            className="btn-auth-trigger"
-            onClick={() => setIsAuthModalOpen(true)}
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              padding: '8px 12px',
-              borderRadius: '12px',
-              background: currentAuthUser ? 'rgba(255,255,255,0.06)' : 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.2))',
-              border: currentAuthUser ? '1px solid var(--glass-border)' : '1px solid rgba(168,85,247,0.4)',
-              color: 'var(--text-main)',
-              fontSize: '12px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-            }}
-          >
-            {currentAuthUser?.provider === 'google' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-              </svg>
-            ) : (
+        {!currentAuthUser && (
+          <div style={{ padding: '0 8px', marginBottom: '8px' }}>
+            <button
+              type="button"
+              className="btn-auth-trigger"
+              onClick={() => setIsAuthModalOpen(true)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '8px 12px',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.2))',
+                border: '1px solid rgba(168,85,247,0.4)',
+                color: 'var(--text-main)',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
               <IconKey size={14} color="var(--brand)" />
-            )}
-            <span>{currentAuthUser ? `Account (@${myProfile.handle})` : 'Log In / Sign Up'}</span>
-          </button>
-        </div>
+              <span>Log In / Sign Up</span>
+            </button>
+          </div>
+        )}
 
         <div
           className="user-identity-card"
@@ -4706,7 +4834,9 @@ export function App() {
             <div>
               <div style={{ fontSize: '13px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
                 {myProfile.name}
-                <VerifiedBadge authorName={myProfile.name} category={myProfile.verifiedCategory} since={myProfile.verifiedSince} proofId={myProfile.cryptoProofId} />
+                {myProfile.isVerified && (
+                  <VerifiedBadge authorName={myProfile.name} category={myProfile.verifiedCategory} since={myProfile.verifiedSince} proofId={myProfile.cryptoProofId} />
+                )}
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{myProfile.handle}</div>
             </div>
@@ -5844,7 +5974,7 @@ export function App() {
 
             <div className="glass-panel-card" style={{ marginBottom: '24px' }}>
               <div className="panel-title-text">
-                {discoverSearch ? 'Search Results' : 'Featured Verified Creators'}
+                {discoverSearch ? 'Search Results' : 'Discover Community Creators'}
               </div>
               {(() => {
                 const creators = Object.values(profiles)
@@ -5870,7 +6000,7 @@ export function App() {
 
                 return creators.map((u) => {
                   const isF = !!followingMap[u.handle];
-                  const isSelf = u.handle.toLowerCase() === myProfile.handle.toLowerCase();
+                  const isSelf = Boolean(myProfile.handle) && u.handle.toLowerCase() === myProfile.handle.toLowerCase();
                   return (
                     <div key={u.handle} className="creator-entry-row">
                       <div
@@ -5884,6 +6014,11 @@ export function App() {
                           <div className="creator-title-bold">
                             {u.name}
                             {u.isVerified && <VerifiedBadge authorName={u.name} category={u.category} />}
+                            {isSelf && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: '11px', color: 'var(--brand-cyan)', marginLeft: '6px', fontWeight: 600 }}>
+                                (You)
+                              </span>
+                            )}
                             {u.isPrivate && (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: 'var(--text-muted)', marginLeft: '6px' }}>
                                 <IconLock size={11} color="var(--cf-emerald)" /> Private
@@ -9957,16 +10092,18 @@ export function App() {
                       <div>
                         <div style={{ fontSize: '16px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '6px' }}>
                           {myProfile.name}
-                          <VerifiedBadge
-                            authorName={myProfile.name}
-                            category={myProfile.verifiedCategory}
-                            since={myProfile.verifiedSince}
-                            proofId={myProfile.cryptoProofId}
-                          />
+                          {myProfile.isVerified && (
+                            <VerifiedBadge
+                              authorName={myProfile.name}
+                              category={myProfile.verifiedCategory}
+                              since={myProfile.verifiedSince}
+                              proofId={myProfile.cryptoProofId}
+                            />
+                          )}
                         </div>
                         <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>@{myProfile.handle}</div>
                         <div style={{ fontSize: '11.5px', color: 'var(--brand-cyan)', marginTop: '2px' }}>
-                          {userSettings.membershipTier} · Verified Identity
+                          {userSettings.membershipTier} {myProfile.isVerified ? '· Verified Identity' : '· Member'}
                         </div>
                       </div>
                     </div>

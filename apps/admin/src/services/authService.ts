@@ -126,6 +126,9 @@ class AuthService {
       const raw = localStorage.getItem(STORAGE_SESSION_KEY);
       if (raw) {
         this.currentUser = JSON.parse(raw);
+        if (this.currentUser) {
+          this.currentUser.isVerified = false;
+        }
       }
     } catch (e) {
       console.warn('Failed to load auth session:', e);
@@ -158,6 +161,9 @@ class AuthService {
   }
 
   private setSession(user: UserAccount | null) {
+    if (user) {
+      user.isVerified = false;
+    }
     this.currentUser = user;
     if (user) {
       try {
@@ -166,6 +172,25 @@ class AuthService {
         const accounts = this.getAllAccounts();
         accounts[user.handle.toLowerCase()] = user;
         this.saveAccounts(accounts);
+
+        // Attempt upsert to Supabase public.profiles table so other users discover them
+        const sb = getSupabaseClient();
+        if (sb) {
+          const profilePayload: any = {
+            handle: user.handle.toLowerCase(),
+            name: user.name,
+            email: user.email,
+            avatar: user.avatar,
+            cover_url: user.coverUrl || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&auto=format&fit=crop&q=85',
+            bio: user.bio || '',
+            is_verified: false,
+            updated_at: new Date().toISOString(),
+          };
+          if (user.id && user.id.length === 36 && user.id.includes('-')) {
+            profilePayload.id = user.id;
+          }
+          Promise.resolve(sb.from('profiles').upsert(profilePayload, { onConflict: 'handle' })).catch(() => {});
+        }
       } catch (e) {
         console.warn('Failed to save auth session:', e);
       }
