@@ -29,10 +29,15 @@ const BROKERS = [
   'wss://test.mosquitto.org:8081/mqtt',
 ];
 
-const TOPIC_ACTIVE_STREAMS = 'privity/v1/active-streams';
-const TOPIC_QUERY = 'privity/v1/query-streams';
-const TOPIC_STREAM_PREFIX = 'privity/v1/stream/';
-const TOPIC_ROOM_PREFIX = 'privity/v1/room/';
+const TOPIC_ACTIVE_STREAMS = 'privity/v2/active-streams';
+const TOPIC_QUERY = 'privity/v2/query-streams';
+const TOPIC_STREAM_PREFIX = 'privity/v2/stream/';
+const TOPIC_ROOM_PREFIX = 'privity/v2/room/';
+
+export interface EndedStreamEntry {
+  endedAt: number;
+  creatorHandle: string;
+}
 
 export function getRoomIdFromHandle(raw: string): string {
   if (!raw) return 'live';
@@ -47,6 +52,7 @@ class LiveStreamSyncService {
   private mqttClient: MqttClient | null = null;
   private brokerIndex = 0;
   private activeStreams: Map<string, RemoteLiveStreamPayload> = new Map();
+  private endedStreams: Map<string, EndedStreamEntry> = new Map();
   private subscribers: Set<(streams: LiveMeStreamer[]) => void> = new Set();
   private roomSubscribers: Map<string, Set<(event: any) => void>> = new Map();
   private hostPeer: Peer | null = null;
@@ -60,6 +66,7 @@ class LiveStreamSyncService {
   private isConnecting = false;
 
   constructor() {
+    this.loadEndedStreams();
     this.initBroadcastBus();
     this.initMqtt();
     this.startPruneLoop();
@@ -68,15 +75,76 @@ class LiveStreamSyncService {
     this.setupLifecycleListeners();
   }
 
+  private loadEndedStreams() {
+    try {
+      const raw = localStorage.getItem('privity_ended_streams_v2');
+      if (raw) {
+        const data = JSON.parse(raw);
+        const now = Date.now();
+        // Keep ended records from the last 6 hours
+        for (const [key, val] of Object.entries(data as Record<string, EndedStreamEntry>)) {
+          if (now - val.endedAt < 6 * 60 * 60 * 1000) {
+            this.endedStreams.set(key.toLowerCase(), val);
+          }
+        }
+      }
+    } catch {}
+  }
+
+  private saveEndedStreams() {
+    try {
+      const obj: Record<string, EndedStreamEntry> = {};
+      for (const [k, v] of this.endedStreams.entries()) {
+        obj[k] = v;
+      }
+      localStorage.setItem('privity_ended_streams_v2', JSON.stringify(obj));
+    } catch {}
+  }
+
+  public markStreamEnded(streamId: string, rawHandle?: string) {
+    const now = Date.now();
+    const normId = (streamId || '').toLowerCase().trim();
+    const normHandle = (rawHandle || '').toLowerCase().replace('@', '').trim();
+    if (normId) {
+      this.endedStreams.set(normId, { endedAt: now, creatorHandle: normHandle });
+    }
+    if (normHandle) {
+      this.endedStreams.set(normHandle, { endedAt: now, creatorHandle: normHandle });
+    }
+    this.saveEndedStreams();
+  }
+
+  public isStreamEnded(streamId?: string, rawHandle?: string, startedAt?: number): boolean {
+    const normId = (streamId || '').toLowerCase().trim();
+    const normHandle = (rawHandle || '').toLowerCase().replace('@', '').trim();
+    const record = (normId && this.endedStreams.get(normId)) || (normHandle && this.endedStreams.get(normHandle));
+    if (!record) return false;
+    // If startedAt is after the stream was ended (plus 1s buffer), it's a brand new live broadcast
+    if (startedAt && startedAt > record.endedAt + 1000) {
+      return false;
+    }
+    return true;
+  }
+
+  public clearStreamEnded(streamId?: string, rawHandle?: string) {
+    const normId = (streamId || '').toLowerCase().trim();
+    const normHandle = (rawHandle || '').toLowerCase().replace('@', '').trim();
+    if (normId) this.endedStreams.delete(normId);
+    if (normHandle) this.endedStreams.delete(normHandle);
+    this.saveEndedStreams();
+  }
+
   private initBroadcastBus() {
     try {
       this.broadcastBus = new BroadcastChannel('privity_sync_bus');
       this.broadcastBus.onmessage = (e) => {
         if (!e.data) return;
         if (e.data.type === 'LIVE_HOST_STARTED' && e.data.host) {
+          const normHandle = (e.data.host.creatorHandle || '').toLowerCase().replace('@', '').trim();
+          this.clearStreamEnded(e.data.host.id, normHandle);
           this.handleIncomingStream(e.data.host);
-        } else if (e.data.type === 'LIVE_HOST_ENDED' && e.data.streamId) {
-          this.handleStreamEnded(e.data.streamId);
+        } else if (e.data.type === 'LIVE_HOST_ENDED') {
+          this.handleStreamEnded(e.data.streamId || '', e.data.handle);
         } else if (e.data.type === 'LIVE_ROOM_EVENT' && e.data.streamId) {
           this.dispatchRoomEvent(e.data.streamId, e.data.event);
         }
@@ -91,7 +159,8 @@ class LiveStreamSyncService {
         if (
           e.key === 'privity_remote_active_streams' ||
           e.key === 'privity_current_live_host' ||
-          e.key === 'privity_is_host_broadcasting'
+          e.key === 'privity_is_host_broadcasting' ||
+          e.key === 'privity_ended_streams_v2'
         ) {
           this.loadCachedStreams();
           this.notifySubscribers();
@@ -115,49 +184,58 @@ class LiveStreamSyncService {
         this.ensureConnected();
         this.queryNetworkStreams();
       });
+      window.addEventListener('beforeunload', () => {
+        if (this.currentHostSession) {
+          this.stopHostBroadcast();
+        }
+      });
+      window.addEventListener('pagehide', () => {
+        if (this.currentHostSession) {
+          this.stopHostBroadcast();
+        }
+      });
     } catch {}
   }
 
   private loadCachedStreams() {
     try {
+      this.loadEndedStreams();
+      const now = Date.now();
       const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
       const savedHost = localStorage.getItem('privity_current_live_host');
       if (isBroadcasting && savedHost) {
         try {
           const parsed = JSON.parse(savedHost);
           if (parsed && parsed.id) {
-            const h: RemoteLiveStreamPayload = {
-              id: parsed.id,
-              creatorHandle: parsed.creatorHandle || parsed.handle || 'host',
-              creatorName: parsed.creatorName || parsed.name || 'Host',
-              creatorAvatar: parsed.creatorAvatar || parsed.avatar || '',
-              category: parsed.category || 'Featured',
-              title: parsed.title || 'Live Broadcast',
-              description: parsed.description || 'Decentralized Live Broadcast',
-              viewersCount: parsed.viewersCount || 1,
-              likesCount: parsed.likesCount || 0,
-              previewUrl: parsed.previewUrl || parsed.avatar || '',
-              startedAt: parsed.startedAt || Date.now(),
-              isLive: true,
-              lastHeartbeat: Date.now(),
-            };
-            this.activeStreams.set(h.id, h);
+            const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
+            // If the host session was marked ended or heartbeat is older than 4.5s:
+            if (
+              this.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
+              (parsed.lastHeartbeat && now - parsed.lastHeartbeat > 4500)
+            ) {
+              localStorage.removeItem('privity_current_live_host');
+              localStorage.removeItem('privity_is_host_broadcasting');
+              localStorage.removeItem('privity_active_live_session');
+            } else if (this.currentHostSession) {
+              this.activeStreams.set(this.currentHostSession.id, this.currentHostSession);
+            }
           }
-        } catch {}
+        } catch {
+          localStorage.removeItem('privity_current_live_host');
+          localStorage.removeItem('privity_is_host_broadcasting');
+        }
       }
 
       const saved = localStorage.getItem('privity_remote_active_streams');
       if (saved) {
         const list: RemoteLiveStreamPayload[] = JSON.parse(saved);
-        const now = Date.now();
         list.forEach((s) => {
-          if (now - (s.lastHeartbeat || s.startedAt) < 30000) {
-            const creatorHandle = s.creatorHandle || (s as any).handle || '';
-            const creatorName = s.creatorName || (s as any).name || 'Host';
-            const creatorAvatar = s.creatorAvatar || (s as any).avatar || '';
-            s.creatorHandle = creatorHandle;
-            s.creatorName = creatorName;
-            s.creatorAvatar = creatorAvatar;
+          const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
+          if (this.isStreamEnded(s.id, normHandle, s.startedAt)) return;
+          if (now - (s.lastHeartbeat || s.startedAt) < 4500) {
+            s.creatorHandle = normHandle;
+            s.creatorName = s.creatorName || (s as any).name || 'Host';
+            s.creatorAvatar = s.creatorAvatar || (s as any).avatar || '';
             this.activeStreams.set(s.id, s);
           }
         });
@@ -167,7 +245,13 @@ class LiveStreamSyncService {
 
   private saveCachedStreams() {
     try {
-      const list = Array.from(this.activeStreams.values());
+      const now = Date.now();
+      const list = Array.from(this.activeStreams.values()).filter((s) => {
+        const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
+        if (this.isStreamEnded(s.id, normHandle, s.startedAt)) return false;
+        if (now - (s.lastHeartbeat || s.startedAt) > 4500) return false;
+        return true;
+      });
       localStorage.setItem('privity_remote_active_streams', JSON.stringify(list));
     } catch {}
   }
@@ -191,11 +275,14 @@ class LiveStreamSyncService {
 
       client.on('connect', () => {
         this.isConnecting = false;
-        // Subscribe to broadcasts, query topic, and retained stream prefix
-        client.subscribe([TOPIC_ACTIVE_STREAMS, TOPIC_QUERY, `${TOPIC_STREAM_PREFIX}+`], { qos: 1 });
+        // Subscribe to live broadcasts and query topic without retain
+        client.subscribe([TOPIC_ACTIVE_STREAMS, TOPIC_QUERY, `${TOPIC_STREAM_PREFIX}+`], { qos: 0 });
 
         // Query active streams immediately across the network
         this.queryNetworkStreams();
+
+        // Also clean up any legacy retained topics on the old v1 prefix
+        client.subscribe('privity/v1/stream/+', { qos: 1 });
 
         // If this device is currently hosting, immediately announce to the newly connected broker
         if (this.currentHostSession) {
@@ -205,6 +292,14 @@ class LiveStreamSyncService {
 
       client.on('message', (topic, payload) => {
         try {
+          // If receiving on legacy v1 topic, immediately clear the retained message on the broker
+          if (topic.startsWith('privity/v1/stream/')) {
+            if (payload && payload.length > 0) {
+              client.publish(topic, '', { retain: true, qos: 1 });
+            }
+            return;
+          }
+
           const text = payload.toString();
           if (!text || text.trim() === '') return;
           const data = JSON.parse(text);
@@ -213,14 +308,14 @@ class LiveStreamSyncService {
             if (data.type === 'STREAM_ACTIVE' || data.type === 'STREAM_HEARTBEAT') {
               this.handleIncomingStream(data.stream);
             } else if (data.type === 'STREAM_ENDED') {
-              this.handleStreamEnded(data.streamId);
+              this.handleStreamEnded(data.streamId, data.creatorHandle);
             }
           } else if (topic.startsWith(TOPIC_STREAM_PREFIX)) {
             const streamId = topic.replace(TOPIC_STREAM_PREFIX, '');
             if (data.type === 'STREAM_ACTIVE' || data.type === 'STREAM_HEARTBEAT') {
               this.handleIncomingStream(data.stream);
             } else if (data.type === 'STREAM_ENDED') {
-              this.handleStreamEnded(data.streamId || streamId);
+              this.handleStreamEnded(data.streamId || streamId, data.creatorHandle);
             }
           } else if (topic === TOPIC_QUERY) {
             if (data.type === 'QUERY_ACTIVE_STREAMS' && this.currentHostSession) {
@@ -276,10 +371,27 @@ class LiveStreamSyncService {
   private handleIncomingStream(stream: any) {
     if (!stream || !stream.id) return;
     if (stream.isLive === false) {
-      this.handleStreamEnded(stream.id);
+      this.handleStreamEnded(stream.id, stream.creatorHandle || stream.handle);
       return;
     }
+
     const creatorHandle = stream.creatorHandle || stream.handle || '';
+    const normHandle = creatorHandle.toLowerCase().replace('@', '').trim();
+    const streamId = (stream.id || '').toLowerCase().trim();
+    const now = Date.now();
+
+    // 1. Blacklist check: If stream was marked ended, drop it immediately!
+    if (this.isStreamEnded(streamId, normHandle, stream.startedAt)) {
+      return;
+    }
+
+    // 2. Strict timestamp staleness check:
+    // If the message has a timestamp older than 4.5 seconds, it is stale / delayed / retained!
+    const msgTimestamp = stream.lastHeartbeat || stream.startedAt;
+    if (msgTimestamp && (now - msgTimestamp > 4500)) {
+      return;
+    }
+
     const creatorName = stream.creatorName || stream.name || 'Host';
     const creatorAvatar = stream.creatorAvatar || stream.avatar || '';
     stream.creatorHandle = creatorHandle;
@@ -287,8 +399,7 @@ class LiveStreamSyncService {
     stream.creatorAvatar = creatorAvatar;
     stream.isLive = true;
 
-    const normHandle = creatorHandle.toLowerCase().replace('@', '').trim();
-    // Remove any older session IDs for the same creator handle to prevent duplicates
+    // Deduplicate: remove any older session IDs for the same creator handle
     if (normHandle) {
       for (const [id, s] of Array.from(this.activeStreams.entries())) {
         if (id !== stream.id && (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim() === normHandle) {
@@ -296,17 +407,18 @@ class LiveStreamSyncService {
         }
       }
     }
-    stream.lastHeartbeat = Date.now();
+
+    stream.lastHeartbeat = msgTimestamp || now;
     this.activeStreams.set(stream.id, stream);
     this.saveCachedStreams();
     this.notifySubscribers();
   }
 
-  private handleStreamEnded(streamId: string) {
-    let deletedHandle = '';
+  private handleStreamEnded(streamId: string, rawHandle?: string) {
+    let deletedHandle = (rawHandle || '').toLowerCase().replace('@', '').trim();
     const target = this.activeStreams.get(streamId);
     if (target) {
-      deletedHandle = (target.creatorHandle || '').toLowerCase().replace('@', '').trim();
+      deletedHandle = deletedHandle || (target.creatorHandle || '').toLowerCase().replace('@', '').trim();
       this.activeStreams.delete(streamId);
     }
     if (deletedHandle) {
@@ -316,6 +428,7 @@ class LiveStreamSyncService {
         }
       }
     }
+    this.markStreamEnded(streamId, deletedHandle);
     this.saveCachedStreams();
     this.notifySubscribers();
   }
@@ -330,8 +443,16 @@ class LiveStreamSyncService {
         if (this.currentHostSession && this.currentHostSession.id === id) {
           continue;
         }
-        // Remote streams without a heartbeat for 12 seconds are considered ended
-        if (now - (stream.lastHeartbeat || stream.startedAt) > 12000) {
+        const normHandle = (stream.creatorHandle || (stream as any).handle || '').toLowerCase().replace('@', '').trim();
+        // If stream is marked ended, prune immediately
+        if (this.isStreamEnded(id, normHandle, stream.startedAt)) {
+          this.activeStreams.delete(id);
+          changed = true;
+          continue;
+        }
+        // Remote streams without a heartbeat for 4.5 seconds are considered ended
+        if (now - (stream.lastHeartbeat || stream.startedAt) > 4500) {
+          this.markStreamEnded(id, normHandle);
           this.activeStreams.delete(id);
           changed = true;
         }
@@ -340,7 +461,7 @@ class LiveStreamSyncService {
         this.saveCachedStreams();
         this.notifySubscribers();
       }
-    }, 2500);
+    }, 1000);
   }
 
   private startQueryLoop() {
@@ -348,7 +469,7 @@ class LiveStreamSyncService {
     this.queryInterval = setInterval(() => {
       // Periodically query to refresh active streams across all devices
       this.queryNetworkStreams();
-    }, 2500);
+    }, 2000);
   }
 
   private notifySubscribers() {
@@ -364,48 +485,26 @@ class LiveStreamSyncService {
     const handleMap = new Map<string, RemoteLiveStreamPayload>();
     const now = Date.now();
 
-    // 1. If this device has an active currentHostSession, ALWAYS include it
+    // 1. If this device has an active currentHostSession, include it
     if (this.currentHostSession && this.currentHostSession.isLive !== false) {
       const normHandle = (this.currentHostSession.creatorHandle || '').toLowerCase().replace('@', '').trim();
-      if (normHandle) {
+      if (normHandle && !this.isStreamEnded(this.currentHostSession.id, normHandle, this.currentHostSession.startedAt)) {
         handleMap.set(normHandle, this.currentHostSession);
       }
     }
 
-    // 2. Check localStorage host broadcast session as well
-    try {
-      const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
-      const savedHost = localStorage.getItem('privity_current_live_host');
-      if (isBroadcasting && savedHost) {
-        const parsedHost = JSON.parse(savedHost);
-        const normHandle = (parsedHost.creatorHandle || parsedHost.handle || '').toLowerCase().replace('@', '').trim();
-        if (normHandle && !handleMap.has(normHandle)) {
-          handleMap.set(normHandle, {
-            id: parsedHost.id || `live-user-${normHandle}`,
-            creatorHandle: parsedHost.creatorHandle || parsedHost.handle,
-            creatorName: parsedHost.creatorName || parsedHost.name || 'Host',
-            creatorAvatar: parsedHost.creatorAvatar || parsedHost.avatar || '',
-            category: parsedHost.category || 'Featured',
-            title: parsedHost.title || 'Live Broadcast',
-            description: parsedHost.description || 'Live Stream',
-            viewersCount: Math.max(1, parsedHost.viewersCount || 1),
-            likesCount: parsedHost.likesCount || 0,
-            previewUrl: parsedHost.previewUrl || parsedHost.avatar || '',
-            startedAt: parsedHost.startedAt || Date.now(),
-            isLive: true,
-            lastHeartbeat: Date.now(),
-          });
-        }
-      }
-    } catch {}
-
-    // 3. Active network streams
+    // 2. Active network streams (strictly filtered against ended streams and stale heartbeats)
     for (const s of this.activeStreams.values()) {
-      if (now - (s.lastHeartbeat || s.startedAt) > 12000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
-        continue;
-      }
       const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
       if (!normHandle) continue;
+
+      if (this.isStreamEnded(s.id, normHandle, s.startedAt)) {
+        continue;
+      }
+      if (now - (s.lastHeartbeat || s.startedAt) > 4500 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
+        continue;
+      }
+
       const existing = handleMap.get(normHandle);
       if (!existing || (s.lastHeartbeat || s.startedAt) > (existing.lastHeartbeat || existing.startedAt)) {
         handleMap.set(normHandle, s);
@@ -461,17 +560,20 @@ class LiveStreamSyncService {
   }
 
   public isLocalHost(streamId?: string): boolean {
-    if (this.currentHostSession) {
+    if (this.currentHostSession && this.currentHostSession.isLive !== false) {
       if (!streamId) return true;
       return this.currentHostSession.id === streamId;
     }
     try {
       const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
       if (!isBroadcasting) return false;
-      if (!streamId) return true;
       const savedHost = localStorage.getItem('privity_current_live_host');
       if (savedHost) {
         const parsed = JSON.parse(savedHost);
+        const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
+        if (this.isStreamEnded(parsed.id, normHandle, parsed.startedAt)) return false;
+        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500) return false;
+        if (!streamId) return true;
         return parsed.id === streamId;
       }
     } catch {}
@@ -479,7 +581,13 @@ class LiveStreamSyncService {
   }
 
   public getHostSession(): RemoteLiveStreamPayload | null {
-    return this.currentHostSession;
+    if (this.currentHostSession && this.currentHostSession.isLive !== false) {
+      const normHandle = (this.currentHostSession.creatorHandle || '').toLowerCase().replace('@', '').trim();
+      if (!this.isStreamEnded(this.currentHostSession.id, normHandle, this.currentHostSession.startedAt)) {
+        return this.currentHostSession;
+      }
+    }
+    return null;
   }
 
   public updateHostMediaStream(stream: MediaStream | null) {
@@ -513,6 +621,10 @@ class LiveStreamSyncService {
     // Clean alphanumeric canonical peer ID matching viewer expectations
     const roomId = getRoomIdFromHandle(session.creatorHandle || session.id);
     const peerId = session.peerId || `privity-live-${roomId}`;
+    const cleanHandle = (session.creatorHandle || session.id).toLowerCase().replace('@', '').trim();
+
+    // Clear ended blacklist for this creator handle and ID so the new broadcast is instantly unblocked!
+    this.clearStreamEnded(session.id, cleanHandle);
 
     this.currentHostSession = {
       id: session.id,
@@ -553,17 +665,17 @@ class LiveStreamSyncService {
     // Initialize direct WebRTC room signaling over MQTT
     this.setupHostWebRTCSignaling(roomId);
 
-    // Announce to MQTT immediately with retain flag
+    // Announce to MQTT immediately without retain
     this.announceStream(this.currentHostSession);
 
-    // Start 2.5-second heartbeat loop
+    // Start 1.5-second heartbeat loop
     if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
     this.heartbeatInterval = setInterval(() => {
       if (this.currentHostSession) {
         this.currentHostSession.lastHeartbeat = Date.now();
         this.announceStream(this.currentHostSession, 'STREAM_HEARTBEAT');
       }
-    }, 2500);
+    }, 1500);
 
     return peerId;
   }
@@ -689,9 +801,9 @@ class LiveStreamSyncService {
     if (this.mqttClient && this.mqttClient.connected) {
       try {
         const payload = JSON.stringify({ type, stream });
-        this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, payload, { qos: 0 });
+        this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, payload, { qos: 0, retain: false });
         const streamTopic = `${TOPIC_STREAM_PREFIX}${stream.id}`;
-        this.mqttClient.publish(streamTopic, payload, { retain: true, qos: 1 });
+        this.mqttClient.publish(streamTopic, payload, { qos: 0, retain: false });
       } catch {}
     }
   }
@@ -707,47 +819,77 @@ class LiveStreamSyncService {
     });
     this.hostPeerConnections.clear();
 
-    if (this.currentHostSession) {
-      const streamId = this.currentHostSession.id;
-      const handle = (this.currentHostSession.creatorHandle || '').toLowerCase().replace('@', '').trim();
+    const session = this.currentHostSession;
+    let streamId = session?.id || '';
+    let handle = session?.creatorHandle || '';
+
+    // Check localStorage fallback if currentHostSession was already cleared
+    if (!streamId || !handle) {
+      try {
+        const saved = localStorage.getItem('privity_current_live_host');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          streamId = streamId || parsed.id;
+          handle = handle || parsed.creatorHandle || parsed.handle || '';
+        }
+      } catch {}
+    }
+
+    if (streamId || handle) {
+      const normHandle = handle.toLowerCase().replace('@', '').trim();
+      this.markStreamEnded(streamId, normHandle);
 
       if (this.mqttClient && this.mqttClient.connected) {
         try {
           const endPayload = JSON.stringify({
             type: 'STREAM_ENDED',
             streamId,
-            creatorHandle: this.currentHostSession.creatorHandle,
+            creatorHandle: handle,
           });
           this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, endPayload, { qos: 0 });
-          const streamTopic = `${TOPIC_STREAM_PREFIX}${streamId}`;
-          // Empty payload with retain: true deletes the retained topic permanently on MQTT brokers!
-          this.mqttClient.publish(streamTopic, '', { retain: true, qos: 1 });
+          if (streamId) {
+            this.mqttClient.publish(`${TOPIC_STREAM_PREFIX}${streamId}`, endPayload, { retain: false, qos: 0 });
+            // Clean up any legacy retained topics
+            this.mqttClient.publish(`privity/v1/stream/${streamId}`, '', { retain: true, qos: 1 });
+            this.mqttClient.publish(`${TOPIC_STREAM_PREFIX}${streamId}`, '', { retain: true, qos: 1 });
+          }
         } catch {}
       }
+
+      // Room event to notify viewers (graceful countdown)
+      try {
+        const roomId = getRoomIdFromHandle(handle || streamId);
+        this.sendRoomEvent(roomId, {
+          type: 'LIVE_ENDED',
+          streamId,
+          hostHandle: handle,
+        });
+      } catch {}
 
       try {
         this.broadcastBus?.postMessage({
           type: 'LIVE_HOST_ENDED',
           streamId,
-          handle,
+          handle: normHandle,
         });
       } catch {}
 
       for (const [id, s] of Array.from(this.activeStreams.entries())) {
-        if (id === streamId || (s.creatorHandle || '').toLowerCase().replace('@', '').trim() === handle) {
+        if (id === streamId || (s.creatorHandle || '').toLowerCase().replace('@', '').trim() === normHandle) {
           this.activeStreams.delete(id);
         }
       }
-      this.currentHostSession = null;
-      try {
-        localStorage.removeItem('privity_current_live_host');
-        localStorage.removeItem('privity_is_host_broadcasting');
-        localStorage.removeItem('privity_active_live_session');
-        localStorage.removeItem('privity_remote_active_streams');
-      } catch {}
-      this.saveCachedStreams();
-      this.notifySubscribers();
     }
+
+    this.currentHostSession = null;
+    try {
+      localStorage.removeItem('privity_current_live_host');
+      localStorage.removeItem('privity_is_host_broadcasting');
+      localStorage.removeItem('privity_active_live_session');
+      localStorage.removeItem('privity_remote_active_streams');
+    } catch {}
+    this.saveCachedStreams();
+    this.notifySubscribers();
 
     if (this.hostPeer) {
       try {
@@ -756,7 +898,12 @@ class LiveStreamSyncService {
       this.hostPeer = null;
     }
 
-    this.hostMediaStream = null;
+    if (this.hostMediaStream) {
+      try {
+        this.hostMediaStream.getTracks().forEach((t) => t.stop());
+      } catch {}
+      this.hostMediaStream = null;
+    }
   }
 
   // =========================================================================

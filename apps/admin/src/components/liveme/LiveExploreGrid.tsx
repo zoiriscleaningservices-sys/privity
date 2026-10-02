@@ -50,7 +50,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     });
   }, []);
 
-  // Cross-tab active live host detection fallback - only active if actually broadcasting
+  // Cross-tab active live host detection fallback - only active if actually broadcasting and alive
   const [activeHost, setActiveHost] = useState<any>(() => {
     const syncHost = liveStreamSync.getHostSession();
     if (syncHost && syncHost.isLive !== false) return syncHost;
@@ -58,7 +58,11 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
       const saved = localStorage.getItem('privity_current_live_host');
       if (isBroadcasting && saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
+        if (liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt)) return null;
+        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500) return null;
+        return parsed;
       }
       return null;
     } catch {
@@ -106,11 +110,28 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     } catch {}
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'privity_is_host_broadcasting' || e.key === 'privity_current_live_host') {
+      if (
+        e.key === 'privity_is_host_broadcasting' ||
+        e.key === 'privity_current_live_host' ||
+        e.key === 'privity_ended_streams_v2'
+      ) {
         const isB = localStorage.getItem('privity_is_host_broadcasting') === 'true';
         const saved = localStorage.getItem('privity_current_live_host');
         if (isB && saved) {
-          try { setActiveHost(JSON.parse(saved)); } catch { setActiveHost(null); }
+          try {
+            const parsed = JSON.parse(saved);
+            const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
+            if (
+              liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
+              (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500)
+            ) {
+              setActiveHost(null);
+            } else {
+              setActiveHost(parsed);
+            }
+          } catch {
+            setActiveHost(null);
+          }
         } else {
           setActiveHost(null);
         }
@@ -125,32 +146,21 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     };
   }, []);
 
-  // Filter streamers - STRICT HANDLE DEDUPLICATION (zero repeating cards)
+  // Filter streamers - STRICT HANDLE DEDUPLICATION & ZERO ZOMBIE GHOSTS
   const userHandle = (currentUser?.handle || 'luciano').toLowerCase().replace('@', '').trim();
   const isUserBroadcasting =
-    liveStreamSync.isLocalHost() ||
-    !!liveStreamSync.getHostSession() ||
-    localStorage.getItem('privity_is_host_broadcasting') === 'true' ||
-    (activeHost && activeHost.isLive !== false);
+    (liveStreamSync.isLocalHost() && !!liveStreamSync.getHostSession()) ||
+    (activeHost &&
+      activeHost.isLive !== false &&
+      !liveStreamSync.isStreamEnded(activeHost.id, activeHost.creatorHandle || activeHost.handle, activeHost.startedAt) &&
+      (!activeHost.lastHeartbeat || Date.now() - activeHost.lastHeartbeat <= 4500));
 
-  const currentHost =
-    liveStreamSync.getHostSession() ||
-    activeHost ||
-    (isUserBroadcasting
-      ? (() => {
-          try {
-            const s = localStorage.getItem('privity_current_live_host');
-            return s ? JSON.parse(s) : null;
-          } catch {
-            return null;
-          }
-        })()
-      : null);
+  const currentHost = liveStreamSync.getHostSession() || (isUserBroadcasting ? activeHost : null);
 
   const streamersByHandle = new Map<string, LiveMeStreamer>();
 
   // 1. Host card: ALWAYS show if host is ACTUALLY broadcasting right now!
-  if (isUserBroadcasting && currentHost) {
+  if (isUserBroadcasting && currentHost && !liveStreamSync.isStreamEnded(currentHost.id, currentHost.creatorHandle || currentHost.handle, currentHost.startedAt)) {
     const rawHandle = currentHost.creatorHandle || currentHost.handle || userHandle;
     const hostHandle = rawHandle.toLowerCase().replace('@', '').trim();
     const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Luciano';
@@ -185,24 +195,28 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     });
   }
 
-  // 2. Active network streamers (include all active network broadcasts, never drop host!)
+  // 2. Active network streamers (strictly filter out ended streams)
   for (const s of networkStreamers) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
     if (!normHandle) continue;
+    if (liveStreamSync.isStreamEnded(s.id, normHandle)) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
   }
 
-  // 3. Fallback catalog streamers: add only if creator not already active
+  // 3. Fallback catalog streamers: add only if creator not already active and not ended
   for (const s of LIVEME_STREAMERS) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
+    if (liveStreamSync.isStreamEnded(s.id, normHandle)) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
   }
 
-  const allStreamers: LiveMeStreamer[] = Array.from(streamersByHandle.values());
+  const allStreamers: LiveMeStreamer[] = Array.from(streamersByHandle.values()).filter(
+    (s) => !liveStreamSync.isStreamEnded(s.id, s.handle)
+  );
 
   const filteredStreamers = allStreamers
     .filter((s) => {
@@ -219,12 +233,13 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
 
       // ANY real active live broadcast must ALWAYS be shown across all categories & chips!
       const isRealActiveStream =
-        s.tagBadge === 'LIVE NOW' ||
-        s.isCameraStream ||
-        s.isHost ||
-        s.id.startsWith('live-user-') ||
-        s.id === 'liveme-host-myself' ||
-        networkStreamers.some((ns) => ns.id === s.id);
+        (s.tagBadge === 'LIVE NOW' ||
+          s.isCameraStream ||
+          s.isHost ||
+          s.id.startsWith('live-user-') ||
+          s.id === 'liveme-host-myself' ||
+          networkStreamers.some((ns) => ns.id === s.id)) &&
+        !liveStreamSync.isStreamEnded(s.id, s.handle);
 
       if (isRealActiveStream) {
         return true;

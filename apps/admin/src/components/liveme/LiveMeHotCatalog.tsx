@@ -37,7 +37,7 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
   const [isCoinGamesOpen, setIsCoinGamesOpen] = useState(false);
 
-  // Cross-tab active live host detection - only if broadcasting
+  // Cross-tab active live host detection - only if broadcasting and alive
   const [activeHost, setActiveHost] = useState<any>(() => {
     const syncHost = liveStreamSync.getHostSession();
     if (syncHost && syncHost.isLive !== false) return syncHost;
@@ -45,7 +45,11 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
       const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
       const saved = localStorage.getItem('privity_current_live_host');
       if (isBroadcasting && saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
+        if (liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt)) return null;
+        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500) return null;
+        return parsed;
       }
       return null;
     } catch {
@@ -67,11 +71,28 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
     } catch {}
 
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'privity_is_host_broadcasting' || e.key === 'privity_current_live_host') {
+      if (
+        e.key === 'privity_is_host_broadcasting' ||
+        e.key === 'privity_current_live_host' ||
+        e.key === 'privity_ended_streams_v2'
+      ) {
         const isB = localStorage.getItem('privity_is_host_broadcasting') === 'true';
         const saved = localStorage.getItem('privity_current_live_host');
         if (isB && saved) {
-          try { setActiveHost(JSON.parse(saved)); } catch { setActiveHost(null); }
+          try {
+            const parsed = JSON.parse(saved);
+            const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
+            if (
+              liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
+              (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500)
+            ) {
+              setActiveHost(null);
+            } else {
+              setActiveHost(parsed);
+            }
+          } catch {
+            setActiveHost(null);
+          }
         } else {
           setActiveHost(null);
         }
@@ -98,28 +119,17 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   // Strict handle deduplication
   const userHandle = (currentUser?.handle || 'luciano').toLowerCase().replace('@', '').trim();
   const isUserBroadcasting =
-    liveStreamSync.isLocalHost() ||
-    !!liveStreamSync.getHostSession() ||
-    localStorage.getItem('privity_is_host_broadcasting') === 'true' ||
-    (activeHost && activeHost.isLive !== false);
+    (liveStreamSync.isLocalHost() && !!liveStreamSync.getHostSession()) ||
+    (activeHost &&
+      activeHost.isLive !== false &&
+      !liveStreamSync.isStreamEnded(activeHost.id, activeHost.creatorHandle || activeHost.handle, activeHost.startedAt) &&
+      (!activeHost.lastHeartbeat || Date.now() - activeHost.lastHeartbeat <= 4500));
 
-  const currentHost =
-    liveStreamSync.getHostSession() ||
-    activeHost ||
-    (isUserBroadcasting
-      ? (() => {
-          try {
-            const s = localStorage.getItem('privity_current_live_host');
-            return s ? JSON.parse(s) : null;
-          } catch {
-            return null;
-          }
-        })()
-      : null);
+  const currentHost = liveStreamSync.getHostSession() || (isUserBroadcasting ? activeHost : null);
 
   const streamersByHandle = new Map<string, LiveMeStreamer>();
 
-  if (isUserBroadcasting && currentHost) {
+  if (isUserBroadcasting && currentHost && !liveStreamSync.isStreamEnded(currentHost.id, currentHost.creatorHandle || currentHost.handle, currentHost.startedAt)) {
     const rawHandle = currentHost.creatorHandle || currentHost.handle || userHandle;
     const hostHandle = rawHandle.toLowerCase().replace('@', '').trim();
     const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Luciano';
@@ -157,6 +167,7 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   for (const s of networkStreamers) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
     if (!normHandle) continue;
+    if (liveStreamSync.isStreamEnded(s.id, normHandle)) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
@@ -164,20 +175,23 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
 
   for (const s of LIVEME_STREAMERS) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
+    if (liveStreamSync.isStreamEnded(s.id, normHandle)) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
   }
 
-  const allStreamers = Array.from(streamersByHandle.values()).sort((a, b) => {
-    const aIsMyHost = a.isHost || (isUserBroadcasting && (a.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
-    const bIsMyHost = b.isHost || (isUserBroadcasting && (b.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
-    if (aIsMyHost && !bIsMyHost) return -1;
-    if (!aIsMyHost && bIsMyHost) return 1;
+  const allStreamers = Array.from(streamersByHandle.values())
+    .filter((s) => !liveStreamSync.isStreamEnded(s.id, s.handle))
+    .sort((a, b) => {
+      const aIsMyHost = a.isHost || (isUserBroadcasting && (a.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
+      const bIsMyHost = b.isHost || (isUserBroadcasting && (b.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
+      if (aIsMyHost && !bIsMyHost) return -1;
+      if (!aIsMyHost && bIsMyHost) return 1;
 
-    const aLive = a.tagBadge === 'LIVE NOW' || a.isCameraStream || a.isHost || networkStreamers.some((ns) => ns.id === a.id);
-    const bLive = b.tagBadge === 'LIVE NOW' || b.isCameraStream || b.isHost || networkStreamers.some((ns) => ns.id === b.id);
-    if (aLive && !bLive) return -1;
+      const aLive = (a.tagBadge === 'LIVE NOW' || a.isCameraStream || a.isHost || networkStreamers.some((ns) => ns.id === a.id)) && !liveStreamSync.isStreamEnded(a.id, a.handle);
+      const bLive = (b.tagBadge === 'LIVE NOW' || b.isCameraStream || b.isHost || networkStreamers.some((ns) => ns.id === b.id)) && !liveStreamSync.isStreamEnded(b.id, b.handle);
+      if (aLive && !bLive) return -1;
     if (!aLive && bLive) return 1;
 
     return (b.viewersCount || 0) - (a.viewersCount || 0);

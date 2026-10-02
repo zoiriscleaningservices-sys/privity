@@ -2911,10 +2911,44 @@ export function App() {
   );
 
   useEffect(() => {
-    return liveStreamSync.subscribeToActiveStreams((streams) => {
+    // If not actively broadcasting on this tab upon mount/refresh, ensure any dead host state is cleared
+    if (!isHostBroadcasting && !hostLiveCameraStream) {
+      const savedHost = localStorage.getItem('privity_current_live_host');
+      if (savedHost) {
+        try {
+          const parsed = JSON.parse(savedHost);
+          const handle = parsed.creatorHandle || parsed.handle || '';
+          if (
+            liveStreamSync.isStreamEnded(parsed.id, handle, parsed.startedAt) ||
+            (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500)
+          ) {
+            localStorage.removeItem('privity_current_live_host');
+            localStorage.removeItem('privity_is_host_broadcasting');
+            localStorage.removeItem('privity_active_live_session');
+          }
+        } catch {
+          localStorage.removeItem('privity_current_live_host');
+          localStorage.removeItem('privity_is_host_broadcasting');
+        }
+      }
+    }
+
+    const handleBeforeUnload = () => {
+      if (isHostBroadcasting) {
+        liveStreamSync.stopHostBroadcast();
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    const unsub = liveStreamSync.subscribeToActiveStreams((streams) => {
       setNetworkLiveStreamers(streams);
     });
-  }, []);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      unsub();
+    };
+  }, [isHostBroadcasting, hostLiveCameraStream]);
 
   // Comment input per post
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
@@ -5143,8 +5177,10 @@ export function App() {
     setHostLiveCameraStream(cameraStream || null);
     setIsHostBroadcasting(true);
     const cleanHandle = (myProfile.handle || 'luciano').toLowerCase().replace('@', '').trim();
+    const streamSessionId = `live-user-${cleanHandle}-${Date.now()}`;
+    liveStreamSync.clearStreamEnded(streamSessionId, cleanHandle);
     const userStream: LiveStreamSession = {
-      id: `live-user-${cleanHandle}`,
+      id: streamSessionId,
       creatorHandle: cleanHandle,
       creatorName: myProfile.name,
       creatorAvatar: myProfile.avatar,
@@ -8874,6 +8910,10 @@ export function App() {
               setMinimizedLiveStream(null);
               setActiveLiveStream(null);
               setIsHostBroadcasting(false);
+              if (activeLiveStream?.id) {
+                const targetHandle = (activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '';
+                liveStreamSync.markStreamEnded(activeLiveStream.id, targetHandle);
+              }
               liveStreamSync.stopHostBroadcast();
               try {
                 localStorage.removeItem('privity_is_host_broadcasting');
@@ -8897,6 +8937,10 @@ export function App() {
             setActiveLiveStream(null);
           }}
           onEndBroadcast={() => {
+            if (activeLiveStream?.id) {
+              const targetHandle = (activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '';
+              liveStreamSync.markStreamEnded(activeLiveStream.id, targetHandle);
+            }
             setActiveLiveStream(null);
             setMinimizedLiveStream(null);
             setIsHostBroadcasting(false);

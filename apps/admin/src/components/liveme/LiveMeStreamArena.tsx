@@ -1539,13 +1539,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       });
     } catch {}
 
+    if (currentStreamer?.id) {
+      liveStreamSync.markStreamEnded(currentStreamer.id, currentUser.handle);
+    }
     liveStreamSync.stopHostBroadcast();
     try {
       const bus = new BroadcastChannel('privity_sync_bus');
-      bus.postMessage({ type: 'LIVE_HOST_ENDED', handle: currentUser.handle });
+      bus.postMessage({ type: 'LIVE_HOST_ENDED', streamId: currentStreamer.id, handle: currentUser.handle });
       localStorage.removeItem('privity_current_live_host');
       localStorage.removeItem('privity_is_host_broadcasting');
       localStorage.removeItem('privity_active_live_session');
+      localStorage.removeItem('privity_remote_active_streams');
     } catch {}
 
     setIsSummaryOpen(true);
