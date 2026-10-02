@@ -5,3 +5,4 @@ export * from './LiveMeHotCatalog';
 export * from './LiveMeRechargeModal';
 export * from './LiveMeCoinGamesModal';
 export * from './LiveMePkMatchModal';
+export * from './LiveExploreGrid';

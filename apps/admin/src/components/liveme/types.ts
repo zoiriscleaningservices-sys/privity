@@ -15,6 +15,7 @@ export interface LiveMeStreamer {
   videoStreamUrl?: string;
   posterUrl: string;
   tags: string[];
+  tagBadge?: string;
   isHost?: boolean;
   isCameraStream?: boolean;
   topContributors: Array<{

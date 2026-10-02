@@ -61,7 +61,7 @@ import {
 } from './gifts';
 import './gifts/gifts.css';
 import { CameraModal } from './camera';
-import { LiveMeStreamArena } from './components/liveme';
+import { LiveMeStreamArena, LiveExploreGrid, LIVEME_STREAMERS } from './components/liveme';
 import {
   TikTokSlideFeed,
   EXCLUSIVE_FORYOU_POSTS,
@@ -5244,7 +5244,7 @@ export function App() {
   }, [posts]);
 
   return (
-    <div className={`app-container ${activeTab === 'feed' && feedFilter === 'live' ? 'live-mode-active' : ''}`}>
+    <div className={`app-container ${activeLiveStream ? 'live-mode-active' : ''}`}>
       {/* Apple visionOS Mirror Glass Toast Notification */}
       {toastMsg && (
         <div className="apple-glass-toast">
@@ -5531,17 +5531,20 @@ export function App() {
               </header>
             )}
 
-            {/* LIVE BROADCASTS 100% FAITHFUL LIVEME STREAM ARENA & HOT CATALOG */}
+            {/* LIVE BROADCASTS 2-COLUMN EXPLORE DISCOVER ARENA */}
             {feedFilter === 'live' ? (
-              <LiveMeStreamArena
-                onClose={() => setFeedFilter('feed')}
+              <LiveExploreGrid
+                onOpenStream={(streamerId) => {
+                  const target = LIVEME_STREAMERS.find((s) => s.id === streamerId) || LIVEME_STREAMERS[0];
+                  setActiveLiveStream(target as any);
+                }}
+                onBackToFeed={() => setFeedFilter('feed')}
+                onGoLive={() => setIsCameraOpen(true)}
                 currentUser={{
                   name: myProfile.name,
                   handle: myProfile.handle,
                   avatar: myProfile.avatar,
                 }}
-                userCoins={userSparksBalance}
-                onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
                 showToast={triggerToast}
               />
             ) : feedViewMode === 'slide' ? (
@@ -10884,8 +10887,7 @@ export function App() {
           isFeedCommentsOpen ||
           isFeedStoryOpen ||
           dmActiveStoryIndex !== null ||
-          isViewersModalOpen ||
-          (activeTab === 'feed' && feedFilter === 'live')
+          isViewersModalOpen
         );
 
         if (shouldHideMobileBottomNav) return null;
