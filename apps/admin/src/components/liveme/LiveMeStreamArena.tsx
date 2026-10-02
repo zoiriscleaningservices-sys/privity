@@ -50,9 +50,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   onClose,
   initialStreamerId,
   currentUser = {
-    name: 'LUCIANO 4E 🥷',
+    name: 'Luciano',
     handle: 'luciano',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
   },
   userCoins,
   onCoinsChange,
@@ -396,9 +396,33 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const pkRivalRef = useRef(pkRival);
   pkRivalRef.current = pkRival;
 
-  // Followed creators map
-  const [followedMap, setFollowedMap] = useState<Record<string, boolean>>({});
-  const isFollowing = !!followedMap[currentStreamer.handle];
+  // Followed creators map (Synchronized with global privity_following_v5)
+  const [followedMap, setFollowedMap] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('privity_following_v5');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const map: Record<string, boolean> = {};
+          parsed.forEach((h: string) => { map[h.replace(/^@/, '').toLowerCase()] = true; });
+          return map;
+        } else if (typeof parsed === 'object') {
+          const map: Record<string, boolean> = {};
+          Object.keys(parsed).forEach((k) => {
+            if (parsed[k]) map[k.replace(/^@/, '').toLowerCase()] = true;
+          });
+          return map;
+        }
+      }
+    } catch {}
+    return {};
+  });
+  const streamerHandleKey = (currentStreamer.handle || '').replace(/^@/, '').toLowerCase();
+  const isFollowing = !!followedMap[streamerHandleKey];
+
+  // Expanded chat input dock state
+  const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const expandedInputRef = useRef<HTMLInputElement>(null);
 
   // Media & sound
   const [isMuted, setIsMuted] = useState(false);
@@ -515,13 +539,26 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     handle: string,
     fallback?: { name?: string; avatar?: string; level?: number; contribution?: number }
   ) => {
+    // 1. Instantly close Room Viewers modal so the profile opens cleanly
+    setIsViewersModalOpen(false);
+
+    // 2. Identify if target is the current viewer/user
+    const clean = handle.replace(/^@/, '').toLowerCase();
+    const isSelf = clean === (currentUser.handle || '').replace(/^@/, '').toLowerCase();
+
+    // 3. Look up audience member or contributor to get exact stats
+    const audienceMember = activeAudience.find((v) => v.handle.replace(/^@/, '').toLowerCase() === clean);
+    const contributor = roomContributors.find((c) => c.name.replace(/^@/, '').toLowerCase() === clean);
+
     const profile = getUserLiveProfile(handle, {
-      name: fallback?.name,
-      avatar: fallback?.avatar,
-      level: fallback?.level,
+      name: isSelf ? currentUser.name : (fallback?.name || audienceMember?.name || contributor?.name),
+      avatar: isSelf ? currentUser.avatar : (fallback?.avatar || audienceMember?.avatar || contributor?.avatar),
+      level: isSelf ? getDeterministicLevel(currentUser.handle) : (fallback?.level || audienceMember?.level),
     });
     setSelectedProfileUser(profile);
-    setSelectedProfileContribution(fallback?.contribution || 0);
+    setSelectedProfileContribution(
+      fallback?.contribution ?? audienceMember?.contribution ?? contributor?.contribution ?? 0
+    );
     setIsUserProfileModalOpen(true);
   };
 
@@ -1515,13 +1552,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   };
 
   // Follow / Unfollow streamer
-  const handleToggleFollow = () => {
-    const nextState = !isFollowing;
-    setFollowedMap((prev) => ({
-      ...prev,
-      [currentStreamer.handle]: nextState,
-    }));
-    showToast(nextState ? `Followed ${currentStreamer.name}! ✨` : `Unfollowed ${currentStreamer.name}`);
+  const handleToggleFollow = (targetHandle?: string) => {
+    const handleToToggle = (targetHandle || currentStreamer.handle || '').replace(/^@/, '').toLowerCase();
+    const nextState = !followedMap[handleToToggle];
+    setFollowedMap((prev) => {
+      const updated = {
+        ...prev,
+        [handleToToggle]: nextState,
+      };
+      try {
+        localStorage.setItem('privity_following_v5', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    const streamerObj = streamers.find((s) => s.handle.replace(/^@/, '').toLowerCase() === handleToToggle) || currentStreamer;
+    showToast(nextState ? `Followed @${streamerObj.name || handleToToggle}! ✨` : `Unfollowed @${streamerObj.name || handleToToggle}`);
   };
 
   // Send Direct Message from Mini-Profile or Chat
@@ -1600,7 +1645,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       id: `gift-${Date.now()}`,
       user: currentUser.name,
       handle: currentUser.handle,
-      level: 45,
+      level: getDeterministicLevel(currentUser.handle),
       text: `sent ${gift.name} x${selectedCombo}! ${gift.icon}`,
       isSystem: true,
       giftInfo: {
@@ -2253,9 +2298,16 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {/* 4. TOP BAR: STREAMER INFO (LEFT) & CLOSE / AUDIENCE (RIGHT)      */}
         {/* ================================================================ */}
         <div className="liveme-top-bar">
-          {/* Top-Left Streamer Capsule (Only Avatar + Name + Likes) */}
+          {/* Top-Left Streamer Capsule (Avatar + Full Name + Likes + Small Plus Button) */}
           <div className="liveme-capsule-main">
-            <div className="liveme-streamer-avatar-wrap">
+            <div
+              className="liveme-streamer-avatar-wrap"
+              onClick={() => handleOpenUserProfile(currentStreamer.handle, {
+                name: currentStreamer.name,
+                avatar: currentStreamer.avatar,
+              })}
+              title={`View ${currentStreamer.name}'s profile`}
+            >
               <img
                 src={currentStreamer.avatar}
                 alt={currentStreamer.name}
@@ -2263,18 +2315,26 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               />
             </div>
 
-            <div className="liveme-streamer-meta">
+            <div
+              className="liveme-streamer-meta"
+              onClick={() => handleOpenUserProfile(currentStreamer.handle, {
+                name: currentStreamer.name,
+                avatar: currentStreamer.avatar,
+              })}
+              style={{ cursor: 'pointer' }}
+              title={`View ${currentStreamer.name}'s profile`}
+            >
               <div className="liveme-streamer-name">
                 {currentStreamer.name}
               </div>
               <div
                 className="liveme-diamond-score"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   spawnHeartReaction();
                   const likesNow = streamerLikesMap[currentStreamer.id] ?? (isRealStream ? likesReceived : (currentStreamer.likesCount || 0));
                   showToast(`❤️ Exact Real-Time Likes: ${likesNow.toLocaleString()}`);
                 }}
-                style={{ cursor: 'pointer' }}
                 title="Tap to like & view exact real-time hearts count"
               >
                 <span style={{ color: '#f43f5e' }}>♥</span>
@@ -2287,13 +2347,18 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               </div>
             </div>
 
-            {!isHost && (
+            {!isHost && !isFollowing && (
               <button
                 type="button"
-                className={`liveme-follow-btn ${isFollowing ? 'following' : ''}`}
-                onClick={handleToggleFollow}
+                className="liveme-pill-follow-plus-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleFollow();
+                }}
+                title={`Follow ${currentStreamer.name}`}
+                aria-label={`Follow ${currentStreamer.name}`}
               >
-                {isFollowing ? 'Following' : '+ Join'}
+                +
               </button>
             )}
           </div>
@@ -2365,17 +2430,39 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
         {/* Row 2: Sub-pills row (Exact TikTok LIVE Spec: Daily Ranking, Goal, Gallery) */}
         <div className="liveme-sub-pills-row">
-          <div className="liveme-sub-pill ranking">
+          <div
+            className="liveme-sub-pill ranking"
+            onClick={() => showToast(`🔥 Daily Creator Ranking: #1 in Privity LIVE (${diamondsEarned > 0 ? diamondsEarned.toLocaleString() : '12.4K'} pts)`)}
+            style={{ cursor: 'pointer' }}
+            title="Click to view Daily Ranking details"
+          >
             <span>🔥</span>
-            <span>Daily Ranking</span>
+            <span>Daily Ranking #1</span>
           </div>
-          <div className="liveme-sub-pill goal">
-            <span>🎆</span>
-            <span>0/1</span>
+          <div
+            className={`liveme-sub-pill goal ${chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0) >= 10 ? 'completed' : ''}`}
+            onClick={() => {
+              const giftCount = chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0);
+              if (giftCount >= 10) {
+                showToast(`🎉 Live Goal Achieved! ${giftCount}/10 gifts sent!`);
+              } else {
+                showToast(`🎯 Live Stream Goal: ${giftCount}/10 gifts sent to reach the creator milestone!`);
+              }
+            }}
+            style={{ cursor: 'pointer' }}
+            title="Live Gift Goal Progress"
+          >
+            <span>{chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0) >= 10 ? '🏆' : '🎯'}</span>
+            <span>{Math.min(10, chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0))}/10</span>
           </div>
-          <div className="liveme-sub-pill gallery">
-            <span>Gift Gallery...</span>
-            <span>🏎️</span>
+          <div
+            className="liveme-sub-pill gallery"
+            onClick={() => setIsGiftTrayOpen(true)}
+            style={{ cursor: 'pointer' }}
+            title="Open Gift Gallery"
+          >
+            <span>Gift Gallery</span>
+            <span>🎁</span>
           </div>
         </div>
 
@@ -2419,7 +2506,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 key={msg.id}
                 className={`liveme-chat-row ${msg.isSystem ? 'gift-notice' : ''} ${msg.isJoin ? 'join-notice' : ''}`}
                 onClick={() => {
-                  if (msg.user && !msg.isSystem) {
+                  if (msg.user) {
                     handleOpenUserProfile(msg.handle || msg.user, {
                       name: msg.user,
                       avatar: msg.avatar,
@@ -2427,8 +2514,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                     });
                   }
                 }}
-                style={{ cursor: msg.user && !msg.isSystem ? 'pointer' : 'default' }}
-                title={msg.user && !msg.isSystem ? `Click @${msg.user}'s profile` : undefined}
+                style={{ cursor: msg.user ? 'pointer' : 'default' }}
+                title={msg.user ? `Click @${msg.user}'s profile` : undefined}
               >
                 {msg.level && (
                   <span
@@ -2451,21 +2538,53 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {/* ================================================================ */}
         <div className="liveme-bottom-bar">
           {/* Chat Input Form (Type... with Smiley) */}
-          <form onSubmit={handleSendChat} className="liveme-input-form">
-            <div className={`liveme-chat-input-wrap ${isUserMuted ? 'muted' : ''}`}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (chatInput.trim()) {
+                handleSendChat(e);
+              } else {
+                setIsChatExpanded(true);
+                setTimeout(() => expandedInputRef.current?.focus(), 80);
+              }
+            }}
+            className="liveme-input-form"
+          >
+            <div
+              className={`liveme-chat-input-wrap ${isUserMuted ? 'muted' : ''}`}
+              onClick={() => {
+                if (!isUserMuted) {
+                  setIsChatExpanded(true);
+                  setTimeout(() => expandedInputRef.current?.focus(), 80);
+                }
+              }}
+            >
               <input
                 type="text"
                 className="liveme-chat-input"
                 placeholder={isUserMuted ? "🔇 You are muted by the host" : "Type..."}
                 value={chatInput}
                 disabled={isUserMuted}
+                onFocus={() => {
+                  if (!isUserMuted) {
+                    setIsChatExpanded(true);
+                    setTimeout(() => expandedInputRef.current?.focus(), 80);
+                  }
+                }}
                 onChange={(e) => setChatInput(e.target.value)}
               />
               <button
                 type="button"
                 className="liveme-chat-smiley-btn"
                 disabled={isUserMuted}
-                onClick={() => !isUserMuted && setChatInput((prev) => prev + ' 😊')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!isUserMuted) {
+                    setIsChatExpanded(true);
+                    setChatInput((prev) => prev + ' 😊');
+                    setTimeout(() => expandedInputRef.current?.focus(), 80);
+                  }
+                }}
               >
                 😊
               </button>
@@ -2601,6 +2720,70 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             )}
           </div>
         </div>
+
+        {/* 6b. EXPANDED REAL-APP TYPING DOCK (Opens when clicking to type for full message visibility) */}
+        {isChatExpanded && (
+          <div
+            className="liveme-expanded-typing-backdrop"
+            onClick={() => setIsChatExpanded(false)}
+          >
+            <div
+              className="liveme-expanded-typing-dock"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Quick Reactions Bar */}
+              <div className="liveme-quick-emojis-bar">
+                {['😊', '🔥', '❤️', '👑', '👏', '🌹', '✨', '💯', '🚀', '😍', '🎉', '💪'].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className="liveme-quick-emoji-btn"
+                    onClick={() => {
+                      setChatInput((prev) => prev + emoji);
+                      expandedInputRef.current?.focus();
+                    }}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+
+              {/* Expanded Full-Width Typing Form */}
+              <form
+                onSubmit={(e) => {
+                  handleSendChat(e);
+                  expandedInputRef.current?.focus();
+                }}
+                className="liveme-expanded-input-row"
+              >
+                <input
+                  ref={expandedInputRef}
+                  type="text"
+                  className="liveme-expanded-chat-input"
+                  placeholder={isUserMuted ? "🔇 You are muted by the host" : "Send a message in LIVE chat..."}
+                  value={chatInput}
+                  disabled={isUserMuted}
+                  onChange={(e) => setChatInput(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="liveme-expanded-send-btn"
+                  disabled={isUserMuted || !chatInput.trim()}
+                >
+                  Send ➤
+                </button>
+                <button
+                  type="button"
+                  className="liveme-expanded-close-btn"
+                  onClick={() => setIsChatExpanded(false)}
+                  title="Collapse Typing Bar"
+                >
+                  ✕
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* ================================================================ */}
         {/* 8. FLOATING INTERACTIVE GIFT TRAY (FEATURING REAL PROJECT GIFTS) */}
@@ -2847,8 +3030,15 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         viewersCount={isHost ? liveViewersCount : currentStreamer.viewersCount}
         viewers={activeAudience}
         isHost={isHost}
-        onViewProfile={(handle) => {
-          handleOpenUserProfile(handle);
+        followedMap={followedMap}
+        onFollowToggle={handleToggleFollow}
+        onViewProfile={(handle, viewerObj) => {
+          handleOpenUserProfile(handle, viewerObj ? {
+            name: viewerObj.name,
+            avatar: viewerObj.avatar,
+            level: viewerObj.level,
+            contribution: viewerObj.contribution,
+          } : undefined);
         }}
         showToast={showToast}
       />
@@ -2947,6 +3137,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         onClose={() => setIsUserProfileModalOpen(false)}
         user={selectedProfileUser}
         isHost={isHost}
+        isFollowing={!!followedMap[(selectedProfileUser?.handle || '').replace(/^@/, '').toLowerCase()]}
+        onToggleFollow={handleToggleFollow}
         isMuted={mutedUsers.some((u) => u.handle.toLowerCase() === selectedProfileUser?.handle.toLowerCase())}
         isBlocked={blockedUsers.some((u) => u.handle.toLowerCase() === selectedProfileUser?.handle.toLowerCase())}
         onMuteUser={handleMuteUser}

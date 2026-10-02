@@ -64,42 +64,69 @@ export function getUserLiveProfile(
   const cleanHandle = (handle || 'user').toLowerCase().replace(/^@/, '').trim();
   const hash = hashString(cleanHandle);
 
+  // Check stored real profiles
+  let storedProf: any = null;
+  try {
+    const raw = localStorage.getItem('privity_profiles_v5');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      storedProf =
+        parsed[cleanHandle] ||
+        Object.values(parsed).find(
+          (p: any) => (p.handle || '').toLowerCase().replace(/^@/, '') === cleanHandle
+        );
+    }
+  } catch {}
+
   const level = partial?.level ?? getDeterministicLevel(cleanHandle);
   const levelTitle = getLevelTitle(level);
 
   const followers =
     partial?.followers ??
-    (cleanHandle.includes('luciano')
-      ? 18400
-      : 800 + (hash % 45000));
+    (storedProf?.followersCount ||
+      storedProf?.followersList?.length ||
+      (cleanHandle.includes('luciano') ? 18400 : 800 + (hash % 45000)));
 
   const following =
     partial?.following ??
-    (cleanHandle.includes('luciano')
-      ? 342
-      : 85 + (hash % 600));
+    (storedProf?.followingCount ||
+      storedProf?.followingList?.length ||
+      (cleanHandle.includes('luciano') ? 342 : 85 + (hash % 600)));
 
   const likes =
     partial?.likes ??
-    (cleanHandle.includes('luciano')
-      ? 142500
-      : 5000 + (hash % 120000));
+    (storedProf?.likesCount ||
+      (cleanHandle.includes('luciano') ? 142500 : 5000 + (hash % 120000)));
 
   const banner =
     partial?.banner ||
+    storedProf?.coverUrl ||
+    storedProf?.banner ||
     DEFAULT_BANNERS[hash % DEFAULT_BANNERS.length];
 
-  const defaultBio = cleanHandle.includes('luciano')
-    ? 'Official Privity Live Host & Creator 🎙️ | High-energy battles & daily streams!'
-    : `Privity creator & live stream fan ✨ Level ${level} supporter!`;
+  const defaultBio =
+    storedProf?.bio ||
+    (cleanHandle.includes('luciano')
+      ? 'Official Privity Live Host & Creator 🎙️ | High-energy battles & daily streams!'
+      : `Privity creator & live stream fan ✨ Level ${level} supporter!`);
+
+  const avatar =
+    partial?.avatar ||
+    storedProf?.avatar ||
+    (cleanHandle.includes('luciano')
+      ? 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400'
+      : `https://images.unsplash.com/photo-${1534528741775 + (hash % 1000)}?w=300`);
+
+  const name =
+    partial?.name ||
+    storedProf?.name ||
+    (cleanHandle.includes('luciano') ? 'Luciano' : cleanHandle.charAt(0).toUpperCase() + cleanHandle.slice(1));
 
   return {
-    id: partial?.id || `user_${cleanHandle}`,
-    name: partial?.name || cleanHandle.charAt(0).toUpperCase() + cleanHandle.slice(1),
+    id: partial?.id || storedProf?.id || `user_${cleanHandle}`,
+    name,
     handle: cleanHandle,
-    avatar:
-      partial?.avatar ||
-      `https://images.unsplash.com/photo-${1534528741775 + (hash % 1000)}?w=300`,
+    avatar,
     banner,
     level,
     levelTitle,
@@ -108,7 +135,7 @@ export function getUserLiveProfile(
     likes,
     bio: partial?.bio || defaultBio,
     badge: partial?.badge || (level >= 40 ? 'VIP Gifter 💎' : 'Active Fan ⭐'),
-    isVerified: partial?.isVerified ?? (level >= 45),
+    isVerified: partial?.isVerified ?? (storedProf?.isVerified || level >= 45),
   };
 }
 

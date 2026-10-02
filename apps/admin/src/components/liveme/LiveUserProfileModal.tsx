@@ -40,7 +40,13 @@ export const LiveUserProfileModal: React.FC<LiveUserProfileModalProps> = ({
 }) => {
   const [followingState, setFollowingState] = useState(isFollowing);
 
+  React.useEffect(() => {
+    setFollowingState(isFollowing);
+  }, [isFollowing]);
+
   if (!isOpen || !user) return null;
+
+  const isSelf = user.handle.toLowerCase().replace(/^@/, '') === 'luciano';
 
   const handleFollowClick = () => {
     const next = !followingState;
@@ -84,40 +90,48 @@ export const LiveUserProfileModal: React.FC<LiveUserProfileModalProps> = ({
           </button>
         </div>
 
-        {/* Content Sheet */}
-        <div className="live-profile-body">
-          {/* Avatar with Level Ring */}
-          <div className="live-profile-avatar-row">
-            <div className="live-profile-avatar-wrap">
-              <img
-                src={user.avatar}
-                alt={user.name}
-                className="live-profile-avatar-img"
-              />
-              <span className="live-profile-level-badge">
-                Lv.{user.level}
-              </span>
-            </div>
-
-            <div className="live-profile-head-actions">
-              <button
-                type="button"
-                className={`live-profile-follow-btn ${followingState ? 'is-following' : ''}`}
-                onClick={handleFollowClick}
-              >
-                {followingState ? '✓ Following' : '+ Follow'}
-              </button>
-              <button
-                type="button"
-                className="live-profile-greet-btn"
-                onClick={handleSayHi}
-                title="Say Hi in Chat"
-              >
-                👋 Say Hi
-              </button>
-            </div>
+        {/* Overlapping Avatar Row with Level Badge and Action Buttons (Directly on top of banner) */}
+        <div className="live-profile-avatar-row">
+          <div className="live-profile-avatar-wrap">
+            <img
+              src={user.avatar}
+              alt={user.name}
+              className="live-profile-avatar-img square"
+            />
+            <span className="live-profile-level-badge">
+              Lv.{user.level}
+            </span>
           </div>
 
+          <div className="live-profile-head-actions">
+            {!isSelf ? (
+              <>
+                <button
+                  type="button"
+                  className={`live-profile-follow-btn ${followingState ? 'is-following' : ''}`}
+                  onClick={handleFollowClick}
+                >
+                  {followingState ? '✓ Following' : '+ Follow'}
+                </button>
+                <button
+                  type="button"
+                  className="live-profile-greet-btn"
+                  onClick={handleSayHi}
+                  title="Say Hi in Chat"
+                >
+                  👋 Say Hi
+                </button>
+              </>
+            ) : (
+              <span className="live-profile-self-tag">
+                👑 Your Profile
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Scrollable Content Details Sheet */}
+        <div className="live-profile-body">
           {/* User Name & Handle */}
           <div className="live-profile-meta">
             <div className="live-profile-title-line">

@@ -21,8 +21,9 @@ export interface LiveMeViewersModalProps {
   viewersCount: number;
   viewers: RoomViewer[];
   isHost?: boolean;
-  onViewProfile?: (handle: string) => void;
+  onViewProfile?: (handle: string, viewer?: RoomViewer) => void;
   onFollowToggle?: (handle: string) => void;
+  followedMap?: Record<string, boolean>;
   showToast: (msg: string) => void;
 }
 
@@ -35,6 +36,7 @@ export const LiveMeViewersModal: React.FC<LiveMeViewersModalProps> = ({
   isHost = false,
   onViewProfile,
   onFollowToggle,
+  followedMap,
   showToast,
 }) => {
   const [activeTab, setActiveTab] = useState<'all' | 'vip'>('all');
@@ -144,13 +146,15 @@ export const LiveMeViewersModal: React.FC<LiveMeViewersModalProps> = ({
             </div>
           ) : (
             filteredViewers.map((viewer, idx) => {
-              const isFollowing = followingMap[viewer.handle] ?? viewer.isFollowing ?? false;
+              const cleanViewerHandle = viewer.handle.replace(/^@/, '').toLowerCase();
+              const isSelfViewer = cleanViewerHandle === 'luciano';
+              const isFollowing = (followedMap && followedMap[cleanViewerHandle]) ?? followingMap[viewer.handle] ?? viewer.isFollowing ?? false;
               return (
                 <div
                   key={viewer.id}
                   className="liveme-viewer-row"
                   onClick={() => {
-                    if (onViewProfile) onViewProfile(viewer.handle);
+                    if (onViewProfile) onViewProfile(viewer.handle, viewer);
                     else showToast(`Selected @${viewer.handle}`);
                   }}
                 >
@@ -198,13 +202,19 @@ export const LiveMeViewersModal: React.FC<LiveMeViewersModalProps> = ({
 
                   {/* Follow / Host Controls */}
                   <div className="liveme-viewer-actions">
-                    <button
-                      type="button"
-                      className={`liveme-viewer-follow-btn ${isFollowing ? 'following' : ''}`}
-                      onClick={(e) => handleToggle(viewer.handle, e)}
-                    >
-                      {isFollowing ? 'Following' : '+ Follow'}
-                    </button>
+                    {isSelfViewer ? (
+                      <span className="liveme-viewer-badge-tag" style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)' }}>
+                        👑 Host
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`liveme-viewer-follow-btn ${isFollowing ? 'following' : ''}`}
+                        onClick={(e) => handleToggle(viewer.handle, e)}
+                      >
+                        {isFollowing ? '✓ Following' : '+ Follow'}
+                      </button>
+                    )}
                     {isHost && (
                       <button
                         type="button"
