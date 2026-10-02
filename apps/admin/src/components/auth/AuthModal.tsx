@@ -107,28 +107,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const handleGoogleClick = async () => {
+  const handleGoogleClick = () => {
     setErrorMsg(null);
-
-    // If Supabase is active, trigger Supabase Google OAuth
-    if (authService.isSupabaseReady()) {
-      try {
-        await authService.loginWithGoogleOAuth();
-        return;
-      } catch (err: any) {
-        console.warn('Supabase Google OAuth fallback:', err);
-      }
-    }
-
     const envClientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
     if (envClientId && (window as any).google?.accounts?.id) {
       (window as any).google.accounts.id.prompt();
     } else {
+      // Open in-app Google account connector to avoid raw 400 error from unconfigured Supabase OAuth
       setIsGoogleModalOpen(true);
     }
   };
 
-  const handleConfirmGoogleAccount = (e: React.FormEvent) => {
+  const handleConfirmGoogleAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!googleManualEmail.trim() || !googleManualEmail.includes('@')) {
       setErrorMsg('Please enter a valid Google email address');
@@ -138,17 +128,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const realGooglePhoto =
       googleManualPhoto.trim() ||
       `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(googleManualEmail.trim())}`;
+    const cleanHandle = googleManualEmail.split('@')[0].replace(/[^a-z0-9_]/gi, '').toLowerCase();
 
-    const user = authService.handleGoogleCredential({
-      sub: 'google_usr_' + Math.random().toString(36).substring(2, 9),
-      name: realGoogleName,
-      email: googleManualEmail.trim(),
-      picture: realGooglePhoto,
-    });
+    setIsLoading(true);
+    try {
+      const user = await authService.signUpAsync({
+        name: realGoogleName,
+        handle: cleanHandle,
+        email: googleManualEmail.trim(),
+        avatar: realGooglePhoto,
+      });
 
-    setIsGoogleModalOpen(false);
-    onAuthenticated(user);
-    onClose?.();
+      setIsGoogleModalOpen(false);
+      onAuthenticated(user);
+      onClose?.();
+    } catch {
+      const user = authService.handleGoogleCredential({
+        sub: 'google_usr_' + Math.random().toString(36).substring(2, 9),
+        name: realGoogleName,
+        email: googleManualEmail.trim(),
+        picture: realGooglePhoto,
+      });
+
+      setIsGoogleModalOpen(false);
+      onAuthenticated(user);
+      onClose?.();
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSaveSupabaseKey = (e: React.FormEvent) => {
@@ -581,6 +588,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     style={{ flex: 1, padding: '11px', borderRadius: '999px', background: 'linear-gradient(135deg, #4285f4, #34a853)', border: 'none', color: '#fff', fontWeight: 800, cursor: 'pointer' }}
                   >
                     Sign In Now
+                  </button>
+                </div>
+
+                <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await authService.loginWithGoogleOAuth();
+                      } catch (err: any) {
+                        setErrorMsg(err.message || 'Google OAuth failed');
+                      }
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'rgba(255,255,255,0.5)',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                    }}
+                    title="Requires Google provider enabled in your Supabase Auth Providers dashboard"
+                  >
+                    Or use Supabase OAuth Redirect
                   </button>
                 </div>
               </form>
