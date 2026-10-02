@@ -244,6 +244,39 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [isConfirmEndOpen, setIsConfirmEndOpen] = useState(false);
   const broadcastStartTimestampRef = useRef<number>(Date.now());
 
+  // Live Arena Experience Modes:
+  // - 'normal': Standard live broadcast overlay
+  // - 'chat_reader': Large readable comments mode (triggered by swiping left)
+  // - 'stream_hud': Time, duration, clocks & telemetry stats HUD (triggered by swiping right)
+  const [arenaMode, setArenaMode] = useState<'normal' | 'chat_reader' | 'stream_hud'>('normal');
+  const [readerFontSize, setReaderFontSize] = useState<number>(22);
+  const [currentClockTime, setCurrentClockTime] = useState<Date>(() => new Date());
+  const [modeFeedbackToast, setModeFeedbackToast] = useState<string | null>(null);
+  const modeToastTimeoutRef = useRef<any>(null);
+
+  const triggerModeChange = useCallback((newMode: 'normal' | 'chat_reader' | 'stream_hud') => {
+    setArenaMode(newMode);
+    if (modeToastTimeoutRef.current) clearTimeout(modeToastTimeoutRef.current);
+    const label =
+      newMode === 'chat_reader'
+        ? '💬 Big Chat Mode • Large Messages'
+        : newMode === 'stream_hud'
+        ? '⏱️ Stream HUD • Time & Telemetry'
+        : '🔴 Live Broadcast View';
+    setModeFeedbackToast(label);
+    modeToastTimeoutRef.current = setTimeout(() => {
+      setModeFeedbackToast(null);
+    }, 1800);
+  }, []);
+
+  // Real-world clock updates every second
+  useEffect(() => {
+    const clockTimer = setInterval(() => {
+      setCurrentClockTime(new Date());
+    }, 1000);
+    return () => clearInterval(clockTimer);
+  }, []);
+
   // Stable references for room subscription handlers to avoid tearing down
   const liveViewersCountRef = useRef(liveViewersCount);
   liveViewersCountRef.current = liveViewersCount;
@@ -500,6 +533,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       fallback?.contribution ?? audienceMember?.contribution ?? contributor?.contribution ?? 0
     );
     setIsUserProfileModalOpen(true);
+    if (onViewProfile) {
+      onViewProfile(handle);
+    }
   };
 
   // Host Moderation Action Handlers
@@ -873,8 +909,6 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
   // 3. BROADCAST DURATION CLOCK (100% PURE REAL TIME - ZERO FAKE AUDIENCE)
   useEffect(() => {
-    if (!isHost) return;
-
     const updateTimer = () => {
       const elapsed = Math.max(0, Math.floor((Date.now() - broadcastStartTimestampRef.current) / 1000));
       setStreamDurationSec(elapsed);
@@ -886,7 +920,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     return () => {
       clearInterval(timer);
     };
-  }, [isHost]);
+  }, []);
 
   // 4. PK BATTLE ROUND COUNTDOWN & SCORE DYNAMICS
   useEffect(() => {
@@ -1693,6 +1727,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Format Extended Live Elapsed Duration (e.g. 00:24:15 or 01:12:45)
+  const formatDurationExtended = (totalSeconds: number) => {
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    if (hrs > 0) {
+      return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // Calculate PK Tug-of-War percentage widths
   const hostPkPercentage = useMemo(() => {
     const total = hostPkScore + rivalPkScore;
@@ -1700,18 +1745,34 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     return Math.max(12, Math.min(88, Math.round((hostPkScore / total) * 100)));
   }, [hostPkScore, rivalPkScore]);
 
-  // Mobile Gestures:
-  // - Swipe Up: Next live room
-  // - Swipe Down: Previous live room
-  // - Swipe Right: Minimize live stream to PiP
-  // - Swipe Left: Open creator's profile page
+  // Organic Gestures Handling (Mobile Touch Swipes + Desktop Pointer Drag):
+  // - Swipe Left (deltaX < 0): Enters Large Messages Chat Reader (or returns from HUD to Live)
+  // - Swipe Right (deltaX > 0): Enters Stream HUD, Clock & Telemetry (or returns from Reader to Live)
+  // - Swipe Up/Down: Next/Prev room (for viewers only)
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const pointerStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+
+  const handleSwipeLeft = useCallback(() => {
+    if (arenaMode === 'stream_hud') {
+      triggerModeChange('normal');
+    } else if (arenaMode === 'normal') {
+      triggerModeChange('chat_reader');
+    }
+  }, [arenaMode, triggerModeChange]);
+
+  const handleSwipeRight = useCallback(() => {
+    if (arenaMode === 'chat_reader') {
+      triggerModeChange('normal');
+    } else if (arenaMode === 'normal') {
+      triggerModeChange('stream_hud');
+    }
+  }, [arenaMode, triggerModeChange]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     const target = e.target as HTMLElement | null;
     if (
       target?.closest(
-        'input, textarea, button, .liveme-gift-tray-panel, .liveme-viewers-sheet, .liveme-recharge-modal, .liveme-coin-games-modal, .liveme-pk-modal, .liveme-chat-scroll-box'
+        'input, textarea, button, select, a, .liveme-gift-tray-panel, .liveme-viewers-sheet, .liveme-recharge-modal, .liveme-coin-games-modal, .liveme-pk-modal, .liveme-reader-font-controls'
       )
     ) {
       return;
@@ -1730,33 +1791,63 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     const duration = Date.now() - touchStartRef.current.time;
     touchStartRef.current = null;
 
-    if (duration > 750) return;
+    if (duration > 850) return;
 
-    // Vertical Swipes: Up = Next Live, Down = Previous Live
-    if (absY > 45 && absY > absX * 1.2) {
-      if (deltaY < 0) {
-        handleNextStream();
-      } else {
-        handlePrevStream();
+    // Vertical Swipes: Up = Next Live, Down = Previous Live (Viewers only)
+    if (absY > 48 && absY > absX * 1.3) {
+      if (!isHost) {
+        if (deltaY < 0) {
+          handleNextStream();
+        } else {
+          handlePrevStream();
+        }
       }
       return;
     }
 
-    // Horizontal Swipes:
-    // Right swipe: Minimize stream to PiP (or back out)
-    if (deltaX > 55 && absX > absY * 1.2) {
-      onClose();
-      return;
-    }
-
-    // Left swipe: Open creator profile
-    if (deltaX < -55 && absX > absY * 1.2) {
-      if (onViewProfile) {
-        onViewProfile(currentStreamer.handle);
+    // Horizontal Swipes (Real-deal organic live experience):
+    // Swipe Left: Enter Chat Reader (or return from HUD)
+    // Swipe Right: Enter Stream HUD & Clocks (or return from Reader)
+    if (absX > 42 && absX > absY * 1.15) {
+      if (deltaX < 0) {
+        handleSwipeLeft();
       } else {
-        showToast(`Viewing @${currentStreamer.handle}'s profile`);
+        handleSwipeRight();
       }
       return;
+    }
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest(
+        'input, textarea, button, select, a, .liveme-gift-tray-panel, .liveme-viewers-sheet, .liveme-recharge-modal, .liveme-coin-games-modal, .liveme-pk-modal, .liveme-reader-font-controls, .liveme-chat-scroll-box'
+      )
+    ) {
+      return;
+    }
+    pointerStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!pointerStartRef.current) return;
+    const deltaX = e.clientX - pointerStartRef.current.x;
+    const deltaY = e.clientY - pointerStartRef.current.y;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+    const duration = Date.now() - pointerStartRef.current.time;
+    pointerStartRef.current = null;
+
+    if (duration > 850) return;
+
+    if (absX > 42 && absX > absY * 1.15) {
+      if (deltaX < 0) {
+        handleSwipeLeft();
+      } else {
+        handleSwipeRight();
+      }
     }
   };
 
@@ -1782,6 +1873,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       className="liveme-room-root"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
     >
       {/* 1. AMBIENT BLURRED VIDEO WINGS (LEFT & RIGHT) */}
       <div className="liveme-ambient-wings">
@@ -2362,115 +2455,371 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           </div>
         </div>
 
-        {/* Row 2: Sub-pills row (Exact TikTok LIVE Spec: Daily Ranking, Goal, Gallery) */}
-        <div className="liveme-sub-pills-row">
-          <div
-            className="liveme-sub-pill ranking"
-            onClick={() => showToast(`🔥 Daily Creator Ranking: #1 in Privity LIVE (${diamondsEarned > 0 ? diamondsEarned.toLocaleString() : '12.4K'} pts)`)}
-            style={{ cursor: 'pointer' }}
-            title="Click to view Daily Ranking details"
+        {/* ORGANIC 3-MODE STREAM SWITCHER BAR (SWIPE LEFT = CHAT READER, SWIPE RIGHT = TIME & HUD) */}
+        <div className="liveme-mode-switcher-bar" role="tablist" aria-label="Stream Display Modes">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={arenaMode === 'chat_reader'}
+            className={`liveme-mode-pill ${arenaMode === 'chat_reader' ? 'active' : ''}`}
+            onClick={() => triggerModeChange(arenaMode === 'chat_reader' ? 'normal' : 'chat_reader')}
+            title="Swipe Left or tap for Large Messages Chat Reader"
           >
-            <span>🔥</span>
-            <span>Daily Ranking #1</span>
-          </div>
-          <div
-            className={`liveme-sub-pill goal ${chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0) >= 10 ? 'completed' : ''}`}
-            onClick={() => {
-              const giftCount = chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0);
-              if (giftCount >= 10) {
-                showToast(`🎉 Live Goal Achieved! ${giftCount}/10 gifts sent!`);
-              } else {
-                showToast(`🎯 Live Stream Goal: ${giftCount}/10 gifts sent to reach the creator milestone!`);
-              }
-            }}
-            style={{ cursor: 'pointer' }}
-            title="Live Gift Goal Progress"
+            <span className="liveme-mode-pill-icon">💬</span>
+            <span className="liveme-mode-pill-label">Big Chat</span>
+            {arenaMode === 'chat_reader' && <span className="liveme-mode-pill-dot" />}
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={arenaMode === 'normal'}
+            className={`liveme-mode-pill ${arenaMode === 'normal' ? 'active' : ''}`}
+            onClick={() => triggerModeChange('normal')}
+            title="Center Normal Live Broadcast View"
           >
-            <span>{chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0) >= 10 ? '🏆' : '🎯'}</span>
-            <span>{Math.min(10, chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0))}/10</span>
-          </div>
-          <div
-            className="liveme-sub-pill gallery"
-            onClick={() => setIsGiftTrayOpen(true)}
-            style={{ cursor: 'pointer' }}
-            title="Open Gift Gallery"
+            <span className="liveme-mode-pill-icon">🔴</span>
+            <span className="liveme-mode-pill-label">Live</span>
+            {arenaMode === 'normal' && <span className="liveme-mode-pill-dot" />}
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={arenaMode === 'stream_hud'}
+            className={`liveme-mode-pill ${arenaMode === 'stream_hud' ? 'active' : ''}`}
+            onClick={() => triggerModeChange(arenaMode === 'stream_hud' ? 'normal' : 'stream_hud')}
+            title="Swipe Right or tap for Time, Duration & Telemetry HUD"
           >
-            <span>Gift Gallery</span>
-            <span>🎁</span>
-          </div>
+            <span className="liveme-mode-pill-icon">⏱️</span>
+            <span className="liveme-mode-pill-label">Time & HUD</span>
+            {arenaMode === 'stream_hud' && <span className="liveme-mode-pill-dot" />}
+          </button>
         </div>
 
-        {/* ================================================================ */}
-        {/* 5. FLOATING LIVE CHAT STREAM (EXACT TIKTOK LIVE SPEC)            */}
-        {/* ================================================================ */}
-        <div className="liveme-chat-stream-layer">
-          <div className="liveme-chat-scroll-box" ref={chatScrollRef}>
-            {/* Privity LIVE Official Welcome & Match Banners */}
-            <div className="liveme-chat-system-banner">
-              <span className="liveme-tiktok-icon">🔴</span>
-              <p>Welcome to Privity LIVE! Have fun interacting with others in real time. Creators must be 18 or older to go LIVE. Viewers must be 18 or older to recharge and send Gifts. Remember to follow our Community Guidelines.</p>
-            </div>
+        {/* Organic Gesture Mode Feedback Toast */}
+        {modeFeedbackToast && (
+          <div className="liveme-mode-feedback-toast" role="status" aria-live="polite">
+            <span>{modeFeedbackToast}</span>
+          </div>
+        )}
 
-            {isPkBattleActive && (
-              <div className="liveme-chat-system-banner match-start">
-                <span className="liveme-tiktok-icon">🎵</span>
-                <p>LIVE Match has started! Cheer on your creator, like the match, and send Gifts.</p>
+        {/* Row 2: Sub-pills row (Exact TikTok LIVE Spec: Daily Ranking, Goal, Gallery) */}
+        {arenaMode !== 'stream_hud' && (
+          <div className="liveme-sub-pills-row">
+            <div
+              className="liveme-sub-pill ranking"
+              onClick={() => showToast(`🔥 Daily Creator Ranking: #1 in Privity LIVE (${diamondsEarned > 0 ? diamondsEarned.toLocaleString() : '12.4K'} pts)`)}
+              style={{ cursor: 'pointer' }}
+              title="Click to view Daily Ranking details"
+            >
+              <span>🔥</span>
+              <span>Daily Ranking #1</span>
+            </div>
+            <div
+              className={`liveme-sub-pill goal ${chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0) >= 10 ? 'completed' : ''}`}
+              onClick={() => {
+                const giftCount = chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0);
+                if (giftCount >= 10) {
+                  showToast(`🎉 Live Goal Achieved! ${giftCount}/10 gifts sent!`);
+                } else {
+                  showToast(`🎯 Live Stream Goal: ${giftCount}/10 gifts sent to reach the creator milestone!`);
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+              title="Live Gift Goal Progress"
+            >
+              <span>{chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0) >= 10 ? '🏆' : '🎯'}</span>
+              <span>{Math.min(10, chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0))}/10</span>
+            </div>
+            <div
+              className="liveme-sub-pill gallery"
+              onClick={() => setIsGiftTrayOpen(true)}
+              style={{ cursor: 'pointer' }}
+              title="Open Gift Gallery"
+            >
+              <span>Gift Gallery</span>
+              <span>🎁</span>
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================ */}
+        {/* 5. FLOATING LIVE CHAT STREAM (NORMAL & LARGE READER MODES)        */}
+        {/* ================================================================ */}
+        {arenaMode !== 'stream_hud' && (
+          <div
+            className={`liveme-chat-stream-layer ${arenaMode === 'chat_reader' ? 'is-large-reader' : ''}`}
+            style={
+              arenaMode === 'chat_reader'
+                ? ({ '--chat-reader-font-size': `${readerFontSize}px` } as React.CSSProperties)
+                : undefined
+            }
+          >
+            {/* Large Chat Reader Mode Control Header */}
+            {arenaMode === 'chat_reader' && (
+              <div className="liveme-reader-header-bar">
+                <div className="liveme-reader-header-left">
+                  <span className="liveme-reader-badge">💬 BIG MESSAGES</span>
+                  <span className="liveme-reader-hint">Swipe ➔ to Live</span>
+                </div>
+
+                {/* Font Size Adjusters: A- (18px), A (22px), A+ (26px), A++ (30px) */}
+                <div className="liveme-reader-font-controls" onClick={(e) => e.stopPropagation()}>
+                  <span className="font-control-label">Size:</span>
+                  {[18, 22, 26, 30].map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      className={`liveme-font-size-btn ${readerFontSize === size ? 'active' : ''}`}
+                      onClick={() => setReaderFontSize(size)}
+                      title={`Set message font size to ${size}px`}
+                    >
+                      {size === 18 ? 'A-' : size === 22 ? 'A' : size === 26 ? 'A+' : 'A++'}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
-            <div
-              className="liveme-chat-join-row"
-              onClick={() =>
-                handleOpenUserProfile(currentUser.handle, {
-                  name: currentUser.name,
-                  avatar: currentUser.avatar,
-                })
-              }
-              style={{ cursor: 'pointer' }}
-              title="Click to view profile"
-            >
-              <span className="liveme-join-hand">👋</span>
-              <span className="liveme-join-gem">💎{getDeterministicLevel(currentUser.handle)}</span>
-              <span className="liveme-join-name">{currentUser.name} 🇨🇺</span>
-              <span className="liveme-join-text">joined</span>
+            <div className="liveme-chat-scroll-box" ref={chatScrollRef}>
+              {/* Privity LIVE Official Welcome & Match Banners */}
+              <div className="liveme-chat-system-banner">
+                <span className="liveme-tiktok-icon">🔴</span>
+                <p>Welcome to Privity LIVE! Have fun interacting with others in real time. Creators must be 18 or older to go LIVE. Viewers must be 18 or older to recharge and send Gifts. Remember to follow our Community Guidelines.</p>
+              </div>
+
+              {isPkBattleActive && (
+                <div className="liveme-chat-system-banner match-start">
+                  <span className="liveme-tiktok-icon">🎵</span>
+                  <p>LIVE Match has started! Cheer on your creator, like the match, and send Gifts.</p>
+                </div>
+              )}
+
+              <div
+                className="liveme-chat-join-row"
+                onClick={() =>
+                  handleOpenUserProfile(currentUser.handle, {
+                    name: currentUser.name,
+                    avatar: currentUser.avatar,
+                  })
+                }
+                style={{ cursor: 'pointer' }}
+                title="Click to view profile"
+              >
+                <span className="liveme-join-hand">👋</span>
+                <span className="liveme-join-gem">💎{getDeterministicLevel(currentUser.handle)}</span>
+                <span className="liveme-join-name">{currentUser.name} 🇨🇺</span>
+                <span className="liveme-join-text">joined</span>
+              </div>
+
+              {chatMessages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`liveme-chat-row ${arenaMode === 'chat_reader' ? 'is-reader-row' : ''} ${msg.isSystem ? 'gift-notice' : ''} ${msg.isJoin ? 'join-notice' : ''}`}
+                  onClick={() => {
+                    if (msg.user) {
+                      handleOpenUserProfile(msg.handle || msg.user, {
+                        name: msg.user,
+                        avatar: msg.avatar,
+                        level: msg.level,
+                      });
+                    }
+                  }}
+                  style={{ cursor: msg.user ? 'pointer' : 'default' }}
+                  title={msg.user ? `Click @${msg.user}'s profile` : undefined}
+                >
+                  {arenaMode === 'chat_reader' && msg.avatar && (
+                    <img src={msg.avatar} alt={msg.user || 'User'} className="liveme-reader-avatar" />
+                  )}
+                  {msg.level && (
+                    <span
+                      className={`liveme-level-badge ${
+                        msg.level > 40 ? 'cyan' : msg.level > 25 ? 'blue' : 'green'
+                      }`}
+                    >
+                      ⭐ {msg.level}
+                    </span>
+                  )}
+                  <span className="liveme-chat-user">@{msg.user}:</span>
+                  <span className="liveme-chat-text">{msg.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ================================================================ */}
+        {/* 5B. STREAM HUD / TIME & TELEMETRY OVERLAY (SWIPE RIGHT)           */}
+        {/* ================================================================ */}
+        {arenaMode === 'stream_hud' && (
+          <div className="liveme-stream-hud-overlay">
+            {/* Top HUD Hint Bar */}
+            <div className="liveme-hud-top-hint">
+              <div className="liveme-hud-pill-tag">
+                <span className="pulse-dot green" />
+                <span>BROADCAST TELEMETRY & TIME</span>
+              </div>
+              <button
+                type="button"
+                className="liveme-hud-return-btn"
+                onClick={() => triggerModeChange('normal')}
+                title="Return to normal live feed"
+              >
+                ⬅️ Swipe Left / Tap for Live
+              </button>
             </div>
 
-            {chatMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`liveme-chat-row ${msg.isSystem ? 'gift-notice' : ''} ${msg.isJoin ? 'join-notice' : ''}`}
-                onClick={() => {
-                  if (msg.user) {
-                    handleOpenUserProfile(msg.handle || msg.user, {
-                      name: msg.user,
-                      avatar: msg.avatar,
-                      level: msg.level,
-                    });
-                  }
-                }}
-                style={{ cursor: msg.user ? 'pointer' : 'default' }}
-                title={msg.user ? `Click @${msg.user}'s profile` : undefined}
-              >
-                {msg.level && (
-                  <span
-                    className={`liveme-level-badge ${
-                      msg.level > 40 ? 'cyan' : msg.level > 25 ? 'blue' : 'green'
-                    }`}
-                  >
-                    ⭐ {msg.level}
-                  </span>
-                )}
-                <span className="liveme-chat-user">@{msg.user}:</span>
-                <span className="liveme-chat-text">{msg.text}</span>
+            {/* Hero Clocks Section */}
+            <div className="liveme-hud-clocks-hero">
+              {/* 1. Live Elapsed Broadcast Timer */}
+              <div className="liveme-hud-clock-card live-duration">
+                <div className="liveme-hud-card-label">
+                  <span className="live-pulsing-badge">● LIVE</span>
+                  <span>BROADCAST DURATION</span>
+                </div>
+                <div className="liveme-hud-clock-digits neon-green">
+                  {formatDurationExtended(streamDurationSec)}
+                </div>
+                <div className="liveme-hud-clock-sub">
+                  Continuous broadcast uptime
+                </div>
               </div>
-            ))}
+
+              {/* 2. Real-World Local Clock */}
+              <div className="liveme-hud-clock-card local-time">
+                <div className="liveme-hud-card-label">
+                  <span>🕒</span>
+                  <span>REAL-WORLD LOCAL TIME</span>
+                </div>
+                <div className="liveme-hud-clock-digits neon-blue">
+                  {currentClockTime.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  })}
+                </div>
+                <div className="liveme-hud-clock-sub">
+                  {currentClockTime.toLocaleDateString([], {
+                    weekday: 'long',
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Stream Metrics Grid (All that other stuff) */}
+            <div className="liveme-hud-metrics-grid">
+              {/* Card 1: Diamonds Earned */}
+              <div className="liveme-hud-metric-card">
+                <div className="hud-metric-header">
+                  <span className="hud-metric-icon">💎</span>
+                  <span className="hud-metric-title">Diamonds Earned</span>
+                </div>
+                <div className="hud-metric-value">{diamondsEarned.toLocaleString()}</div>
+                <div className="hud-metric-footer">
+                  ≈ ${(diamondsEarned * 0.005).toFixed(2)} USD creator balance
+                </div>
+              </div>
+
+              {/* Card 2: Viewers & Likes */}
+              <div className="liveme-hud-metric-card">
+                <div className="hud-metric-header">
+                  <span className="hud-metric-icon">👥</span>
+                  <span className="hud-metric-title">Live Audience</span>
+                </div>
+                <div className="hud-metric-value">{liveViewersCount.toLocaleString()}</div>
+                <div className="hud-metric-footer">
+                  ❤️ {likesReceived.toLocaleString()} total likes
+                </div>
+              </div>
+
+              {/* Card 3: Virtual Gifts Received */}
+              <div className="liveme-hud-metric-card">
+                <div className="hud-metric-header">
+                  <span className="hud-metric-icon">🎁</span>
+                  <span className="hud-metric-title">Gifts Received</span>
+                </div>
+                <div className="hud-metric-value">
+                  {chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0)}
+                </div>
+                <div className="hud-metric-footer">
+                  {roomContributors[0] ? `Top: @${roomContributors[0].name}` : 'No gifts yet this session'}
+                </div>
+              </div>
+
+              {/* Card 4: Network & Hardware Health */}
+              <div className="liveme-hud-metric-card">
+                <div className="hud-metric-header">
+                  <span className="hud-metric-icon">📶</span>
+                  <span className="hud-metric-title">Stream Health</span>
+                </div>
+                <div className="hud-metric-value neon-quality">1080p 60fps</div>
+                <div className="hud-metric-footer">
+                  🟢 Direct Sovereign P2P WebRTC
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Broadcast Controls (for Host) */}
+            {isHost && (
+              <div className="liveme-hud-quick-tools">
+                <button
+                  type="button"
+                  className="liveme-hud-tool-btn"
+                  onClick={handleFlipCamera}
+                  title="Switch between front and back cameras"
+                >
+                  <span>🔄</span>
+                  <span>{cameraFacing === 'user' ? 'Front Cam' : 'Back Cam'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`liveme-hud-tool-btn ${isMirrored ? 'active' : ''}`}
+                  onClick={handleToggleMirror}
+                  title="Toggle camera mirror view"
+                >
+                  <span>🪞</span>
+                  <span>{isMirrored ? 'Mirrored: ON' : 'Mirrored: OFF'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`liveme-hud-tool-btn ${isMicMuted ? 'muted' : ''}`}
+                  onClick={handleToggleMic}
+                  title="Mute / unmute microphone"
+                >
+                  <span>{isMicMuted ? '🔇' : '🎙️'}</span>
+                  <span>{isMicMuted ? 'Mic Muted' : 'Mic Live'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`liveme-hud-tool-btn ${isVideoOff ? 'off' : ''}`}
+                  onClick={handleToggleVideo}
+                  title="Toggle camera video stream"
+                >
+                  <span>{isVideoOff ? '🚫' : '📹'}</span>
+                  <span>{isVideoOff ? 'Cam Paused' : 'Cam Active'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Bottom swipe guide */}
+            <div className="liveme-hud-bottom-guide">
+              <span>⬅️ Swipe Left to return to Live Chat</span>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* ================================================================ */}
         {/* 6. UNIFIED MODERN BOTTOM CONTROLS BAR                             */}
         {/* ================================================================ */}
-        <div className="liveme-bottom-bar">
+        {arenaMode !== 'stream_hud' && (
+          <div className="liveme-bottom-bar">
           {/* Chat Input Form (Type... with Smiley) */}
           <form
             onSubmit={(e) => {
@@ -2654,6 +3003,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             )}
           </div>
         </div>
+        )}
 
         {/* 6b. EXPANDED REAL-APP TYPING DOCK (Opens when clicking to type for full message visibility) */}
         {isChatExpanded && (
