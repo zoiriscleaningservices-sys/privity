@@ -510,32 +510,69 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   // Open User Profile Mini-Card ("Little Tab" that does not disrupt the live stream)
   const handleOpenUserProfile = (
     handle: string,
-    fallback?: { name?: string; avatar?: string; level?: number; contribution?: number }
+    fallback?: {
+      name?: string;
+      avatar?: string;
+      level?: number;
+      contribution?: number;
+      followers?: number;
+      likes?: number;
+      bio?: string;
+      banner?: string;
+      isVerified?: boolean;
+    }
   ) => {
     // 1. Instantly close Room Viewers modal so the profile opens cleanly
     setIsViewersModalOpen(false);
 
-    // 2. Identify if target is the current viewer/user
-    const clean = handle.replace(/^@/, '').toLowerCase();
-    const isSelf = clean === (currentUser.handle || '').replace(/^@/, '').toLowerCase();
+    // 2. Identify if target is the current viewer/user or host
+    const clean = handle.replace(/^@/, '').toLowerCase().trim();
+    const myClean = (currentUser.handle || '').replace(/^@/, '').toLowerCase().trim();
+    const isSelf = myClean ? clean === myClean : false;
+    const streamerClean = (currentStreamer.handle || '').replace(/^@/, '').toLowerCase().trim();
+    const isStreamer = streamerClean ? clean === streamerClean : false;
 
     // 3. Look up audience member or contributor to get exact stats
-    const audienceMember = activeAudience.find((v) => v.handle.replace(/^@/, '').toLowerCase() === clean);
-    const contributor = roomContributors.find((c) => c.name.replace(/^@/, '').toLowerCase() === clean);
+    const audienceMember = activeAudience.find((v) => v.handle.replace(/^@/, '').toLowerCase().trim() === clean);
+    const contributor = roomContributors.find((c) => c.name.replace(/^@/, '').toLowerCase().trim() === clean);
 
     const profile = getUserLiveProfile(handle, {
-      name: isSelf ? currentUser.name : (fallback?.name || audienceMember?.name || contributor?.name),
-      avatar: isSelf ? currentUser.avatar : (fallback?.avatar || audienceMember?.avatar || contributor?.avatar),
-      level: isSelf ? getDeterministicLevel(currentUser.handle) : (fallback?.level || audienceMember?.level),
+      name: isSelf
+        ? currentUser.name
+        : isStreamer
+        ? currentStreamer.name
+        : (fallback?.name || audienceMember?.name || contributor?.name),
+      avatar: isSelf
+        ? currentUser.avatar
+        : isStreamer
+        ? currentStreamer.avatar
+        : (fallback?.avatar || audienceMember?.avatar || contributor?.avatar),
+      level: isSelf
+        ? getDeterministicLevel(currentUser.handle)
+        : (fallback?.level || audienceMember?.level || getDeterministicLevel(clean)),
+      followers: isStreamer
+        ? ((currentStreamer as any).followersCount || currentStreamer.viewersCount)
+        : fallback?.followers,
+      likes: isStreamer
+        ? ((currentStreamer.likesCount || 0) + likesReceived)
+        : fallback?.likes,
+      bio: isStreamer
+        ? (currentStreamer.description || currentStreamer.title)
+        : fallback?.bio,
+      banner: isStreamer
+        ? (currentStreamer.posterUrl || currentStreamer.avatar)
+        : fallback?.banner,
+      isVerified: isStreamer
+        ? currentStreamer.isVerified
+        : fallback?.isVerified,
     });
+
     setSelectedProfileUser(profile);
     setSelectedProfileContribution(
       fallback?.contribution ?? audienceMember?.contribution ?? contributor?.contribution ?? 0
     );
     setIsUserProfileModalOpen(true);
-    if (onViewProfile) {
-      onViewProfile(handle);
-    }
+    // Keep user in live stream with bottom sheet open; full navigation happens via View Full Profile button
   };
 
   // Host Moderation Action Handlers
@@ -1512,6 +1549,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         bus.postMessage({
           action: 'TOGGLE_FOLLOW',
           targetHandle: handleToToggle,
+          followerHandle: currentUser.handle,
+          followerName: currentUser.name,
+          followerAvatar: currentUser.avatar,
           isFollowing: nextState,
         });
         bus.close();
@@ -2454,48 +2494,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             </button>
           </div>
         </div>
-
-        {/* ORGANIC 3-MODE STREAM SWITCHER BAR (SWIPE LEFT = CHAT READER, SWIPE RIGHT = TIME & HUD) */}
-        <div className="liveme-mode-switcher-bar" role="tablist" aria-label="Stream Display Modes">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={arenaMode === 'chat_reader'}
-            className={`liveme-mode-pill ${arenaMode === 'chat_reader' ? 'active' : ''}`}
-            onClick={() => triggerModeChange(arenaMode === 'chat_reader' ? 'normal' : 'chat_reader')}
-            title="Swipe Left or tap for Large Messages Chat Reader"
-          >
-            <span className="liveme-mode-pill-icon">💬</span>
-            <span className="liveme-mode-pill-label">Big Chat</span>
-            {arenaMode === 'chat_reader' && <span className="liveme-mode-pill-dot" />}
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={arenaMode === 'normal'}
-            className={`liveme-mode-pill ${arenaMode === 'normal' ? 'active' : ''}`}
-            onClick={() => triggerModeChange('normal')}
-            title="Center Normal Live Broadcast View"
-          >
-            <span className="liveme-mode-pill-icon">🔴</span>
-            <span className="liveme-mode-pill-label">Live</span>
-            {arenaMode === 'normal' && <span className="liveme-mode-pill-dot" />}
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={arenaMode === 'stream_hud'}
-            className={`liveme-mode-pill ${arenaMode === 'stream_hud' ? 'active' : ''}`}
-            onClick={() => triggerModeChange(arenaMode === 'stream_hud' ? 'normal' : 'stream_hud')}
-            title="Swipe Right or tap for Time, Duration & Telemetry HUD"
-          >
-            <span className="liveme-mode-pill-icon">⏱️</span>
-            <span className="liveme-mode-pill-label">Time & HUD</span>
-            {arenaMode === 'stream_hud' && <span className="liveme-mode-pill-dot" />}
-          </button>
-        </div>
+        {/* Organic Gesture Mode Feedback Toast (Active only when sliding left/right) */}
 
         {/* Organic Gesture Mode Feedback Toast */}
         {modeFeedbackToast && (
@@ -3434,6 +3433,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         onOpenModerationManagement={() => setIsModerationModalOpen(true)}
         showToast={showToast}
         roomContribution={selectedProfileContribution}
+        onNavigateToProfile={(targetHandle) => {
+          setIsUserProfileModalOpen(false);
+          if (onViewProfile) onViewProfile(targetHandle);
+        }}
       />
 
       {/* ================================================================ */}

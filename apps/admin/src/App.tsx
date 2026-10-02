@@ -919,6 +919,8 @@ export function App() {
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [isDmSearchOpen, setIsDmSearchOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+  const [messageModalMode, setMessageModalMode] = useState<'dm' | 'group'>('dm');
+  const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupSelectedMembers, setNewGroupSelectedMembers] = useState<string[]>([]);
   const [isProfileDrawerOpen, setIsProfileDrawerOpen] = useState(false);
@@ -1018,6 +1020,8 @@ export function App() {
     } catch {}
     return cleaned;
   });
+  const profilesRef = React.useRef(profiles);
+  profilesRef.current = profiles;
 
   // 2. Persistent Posts State (strictly filters out any mock posts)
   const [posts, setPosts] = useState<PostItem[]>(() => {
@@ -1053,37 +1057,54 @@ export function App() {
     safeSaveStorage('privity_profiles_v5', profiles);
   }, [profiles]);
 
-  // Ensure current authenticated user is registered into profiles state
+  // Ensure current authenticated user is registered into profiles state and announced globally
   useEffect(() => {
     if (currentAuthUser && currentAuthUser.handle && !isMockHandle(currentAuthUser.handle)) {
       const h = currentAuthUser.handle.toLowerCase().replace(/^@/, '');
+      let updatedProf: UserProfile | null = null;
       setProfiles((prev) => {
         const existing = prev[h];
         if (!existing || existing.name !== currentAuthUser.name || existing.avatar !== currentAuthUser.avatar) {
+          updatedProf = {
+            id: currentAuthUser.id,
+            name: currentAuthUser.name,
+            handle: currentAuthUser.handle,
+            avatar: currentAuthUser.avatar,
+            coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+            isVerified: false,
+            bio: currentAuthUser.bio || existing?.bio || 'Privity creator sharing private-first moments and authentic updates.',
+            location: 'Global',
+            joinedDate: existing?.joinedDate || 'Joined 2026',
+            circleStatus: 'You' as const,
+            isPrivate: false,
+            followersList: existing?.followersList || [],
+            followingList: existing?.followingList || [],
+            trustCirclesList: existing?.trustCirclesList || [],
+            mediaItems: existing?.mediaItems || [],
+          };
           const next: Record<string, UserProfile> = {
             ...prev,
-            [h]: {
-              id: currentAuthUser.id,
-              name: currentAuthUser.name,
-              handle: currentAuthUser.handle,
-              avatar: currentAuthUser.avatar,
-              coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
-              isVerified: false,
-              bio: currentAuthUser.bio || existing?.bio || 'Privity creator sharing private-first moments and authentic updates.',
-              location: 'Global',
-              joinedDate: existing?.joinedDate || 'Joined 2026',
-              circleStatus: 'You' as const,
-              isPrivate: false,
-              followersList: existing?.followersList || [],
-              followingList: existing?.followingList || [],
-              trustCirclesList: existing?.trustCirclesList || [],
-              mediaItems: existing?.mediaItems || [],
-            },
+            [h]: updatedProf,
           };
           safeSaveStorage('privity_profiles_v5', next);
           return next;
         }
         return prev;
+      });
+
+      // Announce profile across tabs and devices so other users see them instantly
+      const broadcastProfile = updatedProf || {
+        id: currentAuthUser.id,
+        name: currentAuthUser.name,
+        handle: currentAuthUser.handle,
+        avatar: currentAuthUser.avatar,
+        coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+        bio: currentAuthUser.bio || 'Privity creator sharing private-first moments and authentic updates.',
+        isVerified: false,
+      };
+      broadcastSyncEventRef.current({
+        action: 'UPDATE_PROFILE',
+        profile: broadcastProfile,
       });
     }
   }, [currentAuthUser]);
@@ -1101,21 +1122,26 @@ export function App() {
             let changed = false;
             const next: Record<string, UserProfile> = { ...prev };
             for (const sp of data) {
-              const h = (sp.handle || '').toLowerCase().replace(/^@/, '');
+              const h = (sp.handle || sp.username || '').toLowerCase().replace(/^@/, '');
               if (h && !isMockHandle(h)) {
-                if (!next[h] || next[h].name !== sp.name || next[h].avatar !== sp.avatar) {
+                const name = sp.name || sp.full_name || h;
+                const avatar = sp.avatar || sp.avatar_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${h}`;
+                const cover = sp.cover_url || sp.cover || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600';
+                const bio = sp.bio || 'Privity creator sharing private-first moments and authentic updates.';
+                const isVerified = !!(sp.is_verified || sp.isVerified);
+                if (!next[h] || next[h].name !== name || next[h].avatar !== avatar) {
                   next[h] = {
                     id: sp.id,
-                    name: sp.name || h,
-                    handle: sp.handle,
-                    avatar: sp.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${h}`,
-                    coverUrl: sp.cover_url || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
-                    isVerified: false,
-                    bio: sp.bio || 'Privity creator sharing private-first moments and authentic updates.',
-                    location: 'Global',
-                    joinedDate: 'Joined 2026',
+                    name,
+                    handle: sp.handle || `@${h}`,
+                    avatar,
+                    coverUrl: cover,
+                    isVerified,
+                    bio,
+                    location: sp.location || 'Global',
+                    joinedDate: sp.joinedDate || 'Joined 2026',
                     circleStatus: 'Public Connection' as const,
-                    isPrivate: false,
+                    isPrivate: !!sp.isPrivate,
                     followersList: next[h]?.followersList || [],
                     followingList: next[h]?.followingList || [],
                     trustCirclesList: next[h]?.trustCirclesList || [],
@@ -1265,6 +1291,8 @@ export function App() {
       mediaItems: [],
     };
   }, [profiles, activeAuthHandle, currentAuthUser]);
+  const myProfileRef = React.useRef(myProfile);
+  myProfileRef.current = myProfile;
 
   // ========================================================
   // REAL-TIME MULTI-DEVICE SYNCHRONIZATION ENGINE
@@ -1648,6 +1676,13 @@ export function App() {
             safeSaveStorage('privity_direct_messages_v5', updated);
             return updated;
           });
+          if (
+            cleanMyHandle &&
+            (recipientHandle || '').toLowerCase().replace(/^@/, '') === cleanMyHandle.toLowerCase() &&
+            (senderHandle || '').toLowerCase().replace(/^@/, '') !== cleanMyHandle.toLowerCase()
+          ) {
+            triggerToast(`💬 @${(senderHandle || 'user').replace(/^@/, '')}: ${message.text || (message.isVoiceMemo ? 'Sent a voice memo 🎙️' : 'Sent an attachment')}`);
+          }
           break;
         }
 
@@ -2064,6 +2099,56 @@ export function App() {
           break;
         }
 
+        case 'QUERY_PROFILES': {
+          if (myProfileRef.current && myProfileRef.current.handle) {
+            broadcastSyncEventRef.current({
+              action: 'UPDATE_PROFILE',
+              profile: myProfileRef.current,
+            });
+          }
+          break;
+        }
+
+        case 'SYNC_PROFILES_REGISTRY': {
+          const { registry } = event;
+          if (registry && typeof registry === 'object') {
+            setProfiles((prev) => {
+              let changed = false;
+              const next = { ...prev };
+              for (const prof of Object.values(registry as Record<string, UserProfile>)) {
+                if (prof && prof.handle) {
+                  const cleanK = prof.handle.replace(/^@/, '').toLowerCase();
+                  if (!next[cleanK] || next[cleanK].name !== prof.name || next[cleanK].avatar !== prof.avatar) {
+                    next[cleanK] = { ...(next[cleanK] || {}), ...prof };
+                    changed = true;
+                  }
+                }
+              }
+              if (changed) {
+                safeSaveStorage('privity_profiles_v5', next);
+                return next;
+              }
+              return prev;
+            });
+          }
+          break;
+        }
+
+        case 'TYPING_DM': {
+          const { senderHandle, recipientHandle, isTyping } = event;
+          const cleanSender = (senderHandle || '').toLowerCase().replace(/^@/, '');
+          const cleanRecipient = (recipientHandle || '').toLowerCase().replace(/^@/, '');
+          if (
+            cleanMyHandle &&
+            cleanRecipient === cleanMyHandle.toLowerCase() &&
+            activeChatUser &&
+            cleanSender === (activeChatUser.handle || '').toLowerCase().replace(/^@/, '')
+          ) {
+            setIsRecipientTyping(Boolean(isTyping));
+          }
+          break;
+        }
+
         case 'LIVE_ENDED': {
           const { streamId, handle } = event;
           if (!streamId && !handle) return;
@@ -2259,7 +2344,14 @@ export function App() {
     window.addEventListener('focus', handleWake);
     window.addEventListener('online', fullCatchUp);
 
+    // 8. Query active sovereign lives and community profiles on startup
+    const queryStartupTimer = setTimeout(() => {
+      broadcastSyncEventRef.current({ action: 'QUERY_LIVES' });
+      broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
+    }, 600);
+
     return () => {
+      clearTimeout(queryStartupTimer);
       clearInterval(pollInterval);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       es?.close();
@@ -3940,70 +4032,6 @@ export function App() {
     triggerToast(`Encrypted channel with @${cleanRecipient} cleared`);
   };
 
-  // Organic Conversational Response Generator (Eliminates robotic repetitive replies)
-  const getOrganicContactReply = (senderName: string, text: string, isMedia?: boolean, isVoice?: boolean): { text: string; reactionEmoji?: string } => {
-    const trimmed = text.trim();
-
-    if (isVoice) {
-      const voiceReplies = [
-        { text: 'Just listened to your voice memo through my studio monitors — the spatial room tone and acoustic presence are incredible! 🎙️✨', reactionEmoji: '🔥' },
-        { text: 'Such a great update! Love hearing your voice in real time without compression loss. Totally agree with you.', reactionEmoji: '❤️' },
-        { text: 'Acoustics sound crystal clear on visionOS. I am taking notes on what you mentioned and sketching ideas now!', reactionEmoji: '✨' },
-      ];
-      return voiceReplies[Math.floor(Math.random() * voiceReplies.length)];
-    }
-
-    if (isMedia) {
-      if (trimmed) {
-        return {
-          text: `"${trimmed}" — Absolutely love this visual! The composition, lighting, and textures are stunning. Thank you for sharing! 📸✨`,
-          reactionEmoji: '❤️',
-        };
-      }
-      const mediaReplies = [
-        { text: 'The tonal range and natural light diffusion here are sublime! Did you capture this with medium format? 📸', reactionEmoji: '❤️' },
-        { text: 'Incredible visual composition. The atmosphere feels so serene and authentic without synthetic filters.', reactionEmoji: '✨' },
-        { text: 'Love this perspective! Reminds me of our Kyoto light studies. Saving this to my private inspiration board.', reactionEmoji: '🔥' },
-      ];
-      return mediaReplies[Math.floor(Math.random() * mediaReplies.length)];
-    }
-
-    // Pure emoji detection
-    const emojiOnlyRegex = /^(\p{Emoji}|\s)+$/u;
-    if (emojiOnlyRegex.test(trimmed) && trimmed.length <= 8) {
-      if (trimmed.includes('👏')) {
-        return { text: `Appreciate the applause and support, ${senderName}! Let's keep building this sacred creative space. 🤝✨`, reactionEmoji: '👏' };
-      }
-      if (trimmed.includes('❤️')) {
-        return { text: 'Much love! Always grateful to have you in this close circle. Hope your day is flowing beautifully. 💫', reactionEmoji: '❤️' };
-      }
-      if (trimmed.includes('🔥')) {
-        return { text: 'Match that energy! We are really pushing boundaries with this direct network architecture. ⚡', reactionEmoji: '🔥' };
-      }
-      return { text: 'Loving the vibe! Sending good energy back from the northern studio. 🌿✨', reactionEmoji: '✨' };
-    }
-
-    // Contextual text-based organic responses
-    const lower = trimmed.toLowerCase();
-    if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) {
-      return { text: `Hey ${senderName}! Great to see you online. I am working on the new analogue light study right now. How is everything flowing on your end?`, reactionEmoji: '✨' };
-    }
-    if (lower.includes('photo') || lower.includes('gallery') || lower.includes('art') || lower.includes('camera')) {
-      return { text: 'Photography without algorithmic interference feels so liberating. You can actually breathe and appreciate the craft again.', reactionEmoji: '❤️' };
-    }
-    if (lower.includes('privity') || lower.includes('privacy') || lower.includes('encrypt') || lower.includes('security')) {
-      return { text: 'The zero-knowledge cryptographic signature gives so much peace of mind. Knowing no surveillance bots are scanning our conversation is priceless. 🔒', reactionEmoji: '🔒' };
-    }
-
-    const organicPool = [
-      { text: 'Totally agree. When technology stays out of the way and serves real humans, the connection feels completely genuine.', reactionEmoji: '❤️' },
-      { text: 'That resonates deeply. I was just discussing this exact thought in the studio earlier. Let us make sure we preserve this vision.', reactionEmoji: '✨' },
-      { text: 'Spot on! Privity feels like the early days of authentic creative community, but with next-generation spatial elegance.', reactionEmoji: '🔥' },
-      { text: `Thanks for sharing that thought, ${senderName}! Always look forward to your dispatches in this circle.`, reactionEmoji: '👏' },
-    ];
-    return organicPool[Math.floor(Math.random() * organicPool.length)];
-  };
-
   // Real-Time Emoji Reaction Toggle (1 reaction per emoji per user, clicking again deletes it)
   const handleReactToMessage = (recipientHandle: string, messageId: string, emoji: string) => {
     const cleanRecipient = recipientHandle.replace(/^@/, '');
@@ -4216,35 +4244,16 @@ export function App() {
         return updated;
       });
 
+      broadcastSyncEvent({
+        action: 'SEND_DM',
+        recipientHandle: cleanRecipient,
+        senderHandle: cleanMyHandle,
+        message: newMsg,
+      });
+
       setIsRecordingVoice(false);
       setRecordingSeconds(0);
       triggerToast('Binaural voice memo dispatched with zero-knowledge encryption');
-
-      setIsRecipientTyping(true);
-      setTimeout(() => {
-        const organicReply = getOrganicContactReply(myProfile.name || 'Friend', '', false, true);
-        const replyMsg: DirectChatMessage = {
-          id: `msg-reply-${Date.now()}`,
-          senderHandle: cleanRecipient,
-          recipientHandle: cleanMyHandle,
-          text: organicReply.text,
-          timeAgo: 'Just now',
-          timestamp: Date.now(),
-          reactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: 1 } : { '🔥': 1 },
-          userReactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: [cleanRecipient] } : { '🔥': [cleanRecipient] },
-        };
-        setDirectMessages((prev) => {
-          const thread = prev[cleanRecipient] || [];
-          const updated = {
-            ...prev,
-            [cleanRecipient]: [...thread, replyMsg],
-          };
-          safeSaveStorage('privity_direct_messages_v5', updated);
-          return updated;
-        });
-        setIsRecipientTyping(false);
-        triggerToast(`New encrypted reply from @${cleanRecipient}`);
-      }, 1500);
     };
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -4318,39 +4327,6 @@ export function App() {
     setChatDraftText('');
     setChatMediaAttachment(null);
     setChatMediaType('photo');
-
-    // Trigger organic, conversational response from recipient in real time
-    setIsRecipientTyping(true);
-    setTimeout(() => {
-      const organicReply = getOrganicContactReply(activeChatUser.name, textToSend, isMedia, false);
-      const replyMsg: DirectChatMessage = {
-        id: `msg-reply-${Date.now()}`,
-        senderHandle: recipientHandle,
-        recipientHandle: cleanMyHandle,
-        text: organicReply.text,
-        timeAgo: 'Just now',
-        timestamp: Date.now(),
-        reactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: 1 } : { '❤️': 1 },
-        userReactions: organicReply.reactionEmoji ? { [organicReply.reactionEmoji]: [recipientHandle] } : { '❤️': [recipientHandle] },
-      };
-      setDirectMessages((prev) => {
-        const existingThread = prev[recipientHandle] || [];
-        const updated = {
-          ...prev,
-          [recipientHandle]: [...existingThread, replyMsg],
-        };
-        safeSaveStorage('privity_direct_messages_v5', updated);
-        return updated;
-      });
-      broadcastSyncEvent({
-        action: 'SEND_DM',
-        recipientHandle: cleanMyHandle,
-        senderHandle: recipientHandle,
-        message: replyMsg,
-      });
-      setIsRecipientTyping(false);
-      triggerToast(`New encrypted message from @${recipientHandle}`);
-    }, 1300);
   };
 
   // Story reaction or reply forwarded directly into Direct Messages
@@ -6480,7 +6456,10 @@ export function App() {
                   <button
                     type="button"
                     className="dm-header-icon-btn"
-                    onClick={() => setIsCreateGroupOpen(true)}
+                    onClick={() => {
+                      setMessageModalMode('group');
+                      setIsCreateGroupOpen(true);
+                    }}
                     title="Create New Group"
                     aria-label="Create New Group"
                   >
@@ -6723,7 +6702,10 @@ export function App() {
                         fontSize: '13px',
                         fontWeight: 700,
                       }}
-                      onClick={() => setIsCreateGroupOpen(true)}
+                      onClick={() => {
+                        setMessageModalMode('dm');
+                        setIsCreateGroupOpen(true);
+                      }}
                     >
                       + Start Conversation
                     </button>
@@ -7423,14 +7405,23 @@ export function App() {
                 );
               })()}
 
-              {/* Apple-style Group Creation Modal */}
+              {/* Apple-style Direct Message & Group Creation Modal */}
               {isCreateGroupOpen && (
                 <div className="group-create-backdrop" onClick={() => setIsCreateGroupOpen(false)}>
                   <div className="group-create-modal" onClick={(e) => e.stopPropagation()}>
                     <div className="group-create-header">
                       <div className="group-create-title">
-                        <IconUsersPlus size={20} color="var(--brand-cyan)" />
-                        <span>Create New Group</span>
+                        {messageModalMode === 'dm' ? (
+                          <>
+                            <span style={{ fontSize: '18px' }}>💬</span>
+                            <span>Direct Conversation</span>
+                          </>
+                        ) : (
+                          <>
+                            <IconUsersPlus size={20} color="var(--brand-cyan)" />
+                            <span>Create New Group</span>
+                          </>
+                        )}
                       </div>
                       <button
                         type="button"
@@ -7442,62 +7433,173 @@ export function App() {
                     </div>
 
                     <div className="group-create-body">
-                      <div className="group-name-input-wrap">
-                        <label className="group-name-label">Group Name</label>
-                        <input
-                          type="text"
-                          className="group-name-input"
-                          placeholder="e.g. Design Circle, Studio Core..."
-                          value={newGroupName}
-                          autoFocus
-                          onChange={(e) => setNewGroupName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleCreateGroup();
-                          }}
-                        />
+                      {/* Modal Mode Selector Tabs */}
+                      <div className="message-modal-tabs">
+                        <button
+                          type="button"
+                          className={`message-modal-tab ${messageModalMode === 'dm' ? 'active' : ''}`}
+                          onClick={() => setMessageModalMode('dm')}
+                        >
+                          💬 Direct Message
+                        </button>
+                        <button
+                          type="button"
+                          className={`message-modal-tab ${messageModalMode === 'group' ? 'active' : ''}`}
+                          onClick={() => setMessageModalMode('group')}
+                        >
+                          👥 New Group
+                        </button>
                       </div>
 
-                      <div className="group-name-input-wrap">
-                        <label className="group-name-label">
-                          Select Members ({newGroupSelectedMembers.length} selected)
-                        </label>
-                        <div className="group-members-list">
-                          {Object.keys(followingMap).filter((h) => followingMap[h] && h !== myProfile.handle).length === 0 ? (
-                            <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
-                              Follow creators to add them to direct message circles.
+                      {messageModalMode === 'dm' ? (
+                        <>
+                          <div className="group-name-input-wrap">
+                            <label className="group-name-label">Search Users</label>
+                            <input
+                              type="text"
+                              className="group-name-input"
+                              placeholder="Search by name or @handle..."
+                              value={messageSearchQuery}
+                              autoFocus
+                              onChange={(e) => setMessageSearchQuery(e.target.value)}
+                            />
+                          </div>
+
+                          <div className="group-name-input-wrap">
+                            <label className="group-name-label">
+                              Select User to Message
+                            </label>
+                            <div className="group-members-list" style={{ maxHeight: '280px' }}>
+                              {(() => {
+                                const cleanSelf = (myProfile.handle || '').toLowerCase().replace(/^@/, '');
+                                const candidates = Object.values(profiles).filter((u) => {
+                                  if (!u || !u.handle) return false;
+                                  const h = u.handle.toLowerCase().replace(/^@/, '');
+                                  if (h === cleanSelf) return false;
+                                  if (!messageSearchQuery.trim()) return true;
+                                  const q = messageSearchQuery.toLowerCase().replace(/^@/, '').trim();
+                                  return (
+                                    h.includes(q) ||
+                                    (u.name || '').toLowerCase().includes(q) ||
+                                    (u.bio || '').toLowerCase().includes(q)
+                                  );
+                                });
+
+                                if (candidates.length === 0) {
+                                  return (
+                                    <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
+                                      {messageSearchQuery.trim() ? `No users matching "${messageSearchQuery}"` : 'No other users found.'}
+                                    </div>
+                                  );
+                                }
+
+                                return candidates.map((u) => {
+                                  const cleanH = u.handle.replace(/^@/, '');
+                                  return (
+                                    <div
+                                      key={cleanH}
+                                      className="dm-user-pick-item"
+                                      onClick={() => {
+                                        setActiveChatUser(u);
+                                        setDirectMessages((prev) => {
+                                          if (prev[cleanH]) return prev;
+                                          return { ...prev, [cleanH]: [] };
+                                        });
+                                        setIsCreateGroupOpen(false);
+                                        setMessageSearchQuery('');
+                                      }}
+                                    >
+                                      <div className="group-member-info">
+                                        <img src={u.avatar} alt={u.name} className="group-member-avatar" />
+                                        <div>
+                                          <div className="group-member-name" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            <span>{u.name}</span>
+                                            {u.isVerified && <span style={{ color: 'var(--brand-cyan)', fontSize: '12px' }}>✓</span>}
+                                          </div>
+                                          <div className="group-member-handle">@{cleanH}</div>
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="dm-user-pick-btn"
+                                      >
+                                        Message
+                                      </button>
+                                    </div>
+                                  );
+                                });
+                              })()}
                             </div>
-                          ) : (
-                            Object.keys(followingMap)
-                              .filter((h) => followingMap[h] && h !== myProfile.handle)
-                              .map((handle) => {
-                                const u = getUserProfile(handle);
-                                const isSelected = newGroupSelectedMembers.includes(handle);
-                                return (
-                                  <div
-                                    key={handle}
-                                    className={`group-member-item ${isSelected ? 'selected' : ''}`}
-                                    onClick={() => {
-                                      setNewGroupSelectedMembers((prev) =>
-                                        prev.includes(handle) ? prev.filter((h) => h !== handle) : [...prev, handle]
-                                      );
-                                    }}
-                                  >
-                                    <div className="group-member-info">
-                                      <img src={u.avatar} alt={u.name} className="group-member-avatar" />
-                                      <div>
-                                        <div className="group-member-name">{u.name}</div>
-                                        <div className="group-member-handle">@{u.handle}</div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="group-name-input-wrap">
+                            <label className="group-name-label">Group Name</label>
+                            <input
+                              type="text"
+                              className="group-name-input"
+                              placeholder="e.g. Design Circle, Studio Core..."
+                              value={newGroupName}
+                              autoFocus
+                              onChange={(e) => setNewGroupName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleCreateGroup();
+                              }}
+                            />
+                          </div>
+
+                          <div className="group-name-input-wrap">
+                            <label className="group-name-label">
+                              Select Members ({newGroupSelectedMembers.length} selected)
+                            </label>
+                            <div className="group-members-list">
+                              {(() => {
+                                const cleanSelf = (myProfile.handle || '').toLowerCase().replace(/^@/, '');
+                                const availableUsers = Object.values(profiles).filter((u) => {
+                                  if (!u || !u.handle) return false;
+                                  return u.handle.toLowerCase().replace(/^@/, '') !== cleanSelf;
+                                });
+
+                                if (availableUsers.length === 0) {
+                                  return (
+                                    <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
+                                      No other members available yet.
+                                    </div>
+                                  );
+                                }
+
+                                return availableUsers.map((u) => {
+                                  const handle = u.handle.replace(/^@/, '');
+                                  const isSelected = newGroupSelectedMembers.includes(handle);
+                                  return (
+                                    <div
+                                      key={handle}
+                                      className={`group-member-item ${isSelected ? 'selected' : ''}`}
+                                      onClick={() => {
+                                        setNewGroupSelectedMembers((prev) =>
+                                          prev.includes(handle) ? prev.filter((h) => h !== handle) : [...prev, handle]
+                                        );
+                                      }}
+                                    >
+                                      <div className="group-member-info">
+                                        <img src={u.avatar} alt={u.name} className="group-member-avatar" />
+                                        <div>
+                                          <div className="group-member-name">{u.name}</div>
+                                          <div className="group-member-handle">@{handle}</div>
+                                        </div>
+                                      </div>
+                                      <div className="group-member-checkbox">
+                                        {isSelected && <IconCheck size={13} color="#fff" />}
                                       </div>
                                     </div>
-                                    <div className="group-member-checkbox">
-                                      {isSelected && <IconCheck size={13} color="#fff" />}
-                                    </div>
-                                  </div>
-                                );
-                              })
-                          )}
-                        </div>
-                      </div>
+                                  );
+                                });
+                              })()}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <div className="group-create-footer">
@@ -7508,14 +7610,16 @@ export function App() {
                       >
                         Cancel
                       </button>
-                      <button
-                        type="button"
-                        className="group-create-submit-btn"
-                        disabled={!newGroupName.trim()}
-                        onClick={handleCreateGroup}
-                      >
-                        Create Group ({newGroupSelectedMembers.length})
-                      </button>
+                      {messageModalMode === 'group' && (
+                        <button
+                          type="button"
+                          className="group-create-submit-btn"
+                          disabled={!newGroupName.trim()}
+                          onClick={handleCreateGroup}
+                        >
+                          Create Group ({newGroupSelectedMembers.length})
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

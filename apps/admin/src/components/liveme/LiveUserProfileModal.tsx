@@ -20,6 +20,7 @@ export interface LiveUserProfileModalProps {
   onSendChatMessage?: (text: string) => void;
   showToast: (msg: string) => void;
   currentUserHandle?: string;
+  onNavigateToProfile?: (handle: string) => void;
 }
 
 export const LiveUserProfileModal: React.FC<LiveUserProfileModalProps> = ({
@@ -39,6 +40,7 @@ export const LiveUserProfileModal: React.FC<LiveUserProfileModalProps> = ({
   onSendChatMessage,
   showToast,
   currentUserHandle,
+  onNavigateToProfile,
 }) => {
   const [followingState, setFollowingState] = useState(isFollowing);
 
@@ -173,6 +175,25 @@ export const LiveUserProfileModal: React.FC<LiveUserProfileModalProps> = ({
               </span>
               <span className="live-profile-stat-lbl">Likes</span>
             </div>
+          </div>
+
+          {/* View Full Profile Action Button */}
+          <div className="live-profile-navigation-row">
+            <button
+              type="button"
+              className="live-profile-full-profile-btn"
+              onClick={() => {
+                if (onNavigateToProfile) {
+                  onNavigateToProfile(user.handle);
+                } else {
+                  onClose();
+                }
+              }}
+              title={`View @${user.handle}'s full profile`}
+            >
+              <span>View Full Profile</span>
+              <span className="live-profile-external-arrow">↗</span>
+            </button>
           </div>
 
           {/* Live Stream Contribution Badge */}

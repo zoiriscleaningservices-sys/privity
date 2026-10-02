@@ -88,26 +88,63 @@ export function getUserLiveProfile(
   const cleanHandle = (handle || 'user').toLowerCase().replace(/^@/, '').trim();
   const hash = hashString(cleanHandle);
 
-  // 1. Check active auth session or stored real profiles in localStorage
-  let storedProf: any = null;
+  // 1. Resolve current authenticated user handle
+  let myCleanHandle = '';
+  let authUser: any = null;
   try {
     const rawAuth = localStorage.getItem('privity_auth_session_v1');
     if (rawAuth) {
-      const parsedAuth = JSON.parse(rawAuth);
-      const authHandle = (parsedAuth.handle || '').toLowerCase().replace(/^@/, '').trim();
-      if (authHandle === cleanHandle) {
-        storedProf = parsedAuth;
+      authUser = JSON.parse(rawAuth);
+      myCleanHandle = (authUser.handle || '').toLowerCase().replace(/^@/, '').trim();
+    }
+  } catch {}
+
+  const isSelf = myCleanHandle ? cleanHandle === myCleanHandle : false;
+
+  // 2. Comprehensive Profile Resolution across all stores
+  let storedProf: any = null;
+
+  // A. Check if target is current auth user
+  if (isSelf && authUser) {
+    storedProf = authUser;
+  }
+
+  // B. Check privity_profiles_v5
+  try {
+    const rawProfiles = localStorage.getItem('privity_profiles_v5');
+    if (rawProfiles) {
+      const parsed = JSON.parse(rawProfiles);
+      const found =
+        parsed[cleanHandle] ||
+        Object.values(parsed).find(
+          (p: any) => (p.handle || '').toLowerCase().replace(/^@/, '').trim() === cleanHandle
+        );
+      if (found) {
+        storedProf = storedProf ? { ...found, ...storedProf } : found;
       }
     }
-    if (!storedProf) {
-      const raw = localStorage.getItem('privity_profiles_v5');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        storedProf =
-          parsed[cleanHandle] ||
-          Object.values(parsed).find(
-            (p: any) => (p.handle || '').toLowerCase().replace(/^@/, '') === cleanHandle
-          );
+  } catch {}
+
+  // C. Check privity_accounts_v1
+  try {
+    const rawAccounts = localStorage.getItem('privity_accounts_v1');
+    if (rawAccounts) {
+      const accounts = JSON.parse(rawAccounts);
+      const acc = accounts[cleanHandle];
+      if (acc) {
+        storedProf = storedProf ? { ...acc, ...storedProf } : acc;
+      }
+    }
+  } catch {}
+
+  // D. Check live host registry if this user is / was broadcasting
+  try {
+    const rawHost = localStorage.getItem('privity_current_live_host');
+    if (rawHost) {
+      const liveHost = JSON.parse(rawHost);
+      const hostHandle = (liveHost.creatorHandle || liveHost.handle || '').toLowerCase().replace(/^@/, '').trim();
+      if (hostHandle === cleanHandle) {
+        storedProf = storedProf ? { ...liveHost, ...storedProf } : liveHost;
       }
     }
   } catch {}
@@ -115,63 +152,80 @@ export function getUserLiveProfile(
   const baseProf = BASE_PRIVITY_PROFILES[cleanHandle];
   const prof = storedProf || baseProf;
 
-  // 2. Check real-time following status in localStorage (privity_following_v5)
+  // 3. Check real-time following status in localStorage (privity_following_v5)
   let followingMap: Record<string, boolean> = {};
   try {
     const rawFollowing = localStorage.getItem('privity_following_v5');
     if (rawFollowing) {
       const parsed = JSON.parse(rawFollowing);
       if (Array.isArray(parsed)) {
-        parsed.forEach((h: string) => { followingMap[h.replace(/^@/, '').toLowerCase()] = true; });
+        parsed.forEach((h: string) => {
+          followingMap[h.replace(/^@/, '').toLowerCase().trim()] = true;
+        });
       } else if (typeof parsed === 'object') {
         Object.keys(parsed).forEach((k) => {
-          if (parsed[k]) followingMap[k.replace(/^@/, '').toLowerCase()] = true;
+          if (parsed[k]) {
+            followingMap[k.replace(/^@/, '').toLowerCase().trim()] = true;
+          }
         });
       }
     }
   } catch {}
 
-  // 3. Level synchronization (default 0)
-  const level = partial?.level ?? prof?.level ?? 0;
+  // 4. Level calculation
+  const level = partial?.level ?? prof?.level ?? getDeterministicLevel(cleanHandle);
   const levelTitle = getLevelTitle(level);
 
-  // 4. Accurate Real Followers Count (Strictly 100% accurate, defaults to 0)
+  // 5. Accurate Real Followers Count (Strictly 100% accurate, Agreed Numbers)
   let followers = 0;
   if (partial?.followers !== undefined) {
     followers = partial.followers;
-  } else if (prof?.followersList && Array.isArray(prof.followersList)) {
-    const isFollowingThisUser = !!(followingMap[cleanHandle] || followingMap[handle]);
-    const baseFollowers = prof.followersList.length;
-    followers = baseFollowers + (isFollowingThisUser && !prof.followersList.includes(cleanHandle) ? 1 : 0);
-  } else if (prof?.followers !== undefined && typeof prof.followers === 'number') {
-    followers = prof.followers;
-  } else if (prof?.followersCount !== undefined && typeof prof.followersCount === 'number') {
-    followers = prof.followersCount;
+  } else if (isSelf) {
+    if (Array.isArray(prof?.followersList)) {
+      followers = prof.followersList.length;
+    } else if (typeof prof?.followers === 'number') {
+      followers = prof.followers;
+    } else if (typeof prof?.followersCount === 'number') {
+      followers = prof.followersCount;
+    } else {
+      followers = 0;
+    }
   } else {
-    followers = 0;
+    const isFollowedByMe = !!(followingMap[cleanHandle] || followingMap[handle]);
+    const followersList = Array.isArray(prof?.followersList) ? prof.followersList : [];
+    const filteredList = followersList.filter((h: string) => (h || '').toLowerCase().replace(/^@/, '').trim() !== myCleanHandle);
+    followers = filteredList.length + (isFollowedByMe ? 1 : 0);
+
+    if (typeof prof?.followersCount === 'number' && prof.followersCount > followers) {
+      followers = prof.followersCount;
+    } else if (typeof prof?.followers === 'number' && prof.followers > followers) {
+      followers = prof.followers;
+    }
   }
 
-  // 5. Accurate Real Following Count (Strictly 100% accurate, defaults to 0)
+  // 6. Accurate Real Following Count (Strictly 100% accurate)
   let following = 0;
   if (partial?.following !== undefined) {
     following = partial.following;
-  } else if (prof?.followingList && Array.isArray(prof.followingList)) {
+  } else if (isSelf) {
+    const activeFollowings = Object.keys(followingMap).filter(
+      (k) => followingMap[k] && !k.startsWith('sc-') && k.toLowerCase() !== myCleanHandle
+    );
+    following = activeFollowings.length;
+  } else if (Array.isArray(prof?.followingList)) {
     following = prof.followingList.length;
-  } else if (prof?.following !== undefined && typeof prof.following === 'number') {
+  } else if (typeof prof?.following === 'number') {
     following = prof.following;
-  } else if (prof?.followingCount !== undefined && typeof prof.followingCount === 'number') {
+  } else if (typeof prof?.followingCount === 'number') {
     following = prof.followingCount;
   } else {
-    const activeFollowings = Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-'));
-    following = activeFollowings.length;
+    following = 0;
   }
 
-  // 6. Accurate Real Likes Count (Calculated only from real user posts & media, defaults to 0)
+  // 7. Accurate Real Likes Count (Aggregated from user posts, media items, and live reception)
   let likes = 0;
   if (partial?.likes !== undefined) {
     likes = partial.likes;
-  } else if (prof?.likes !== undefined && typeof prof.likes === 'number') {
-    likes = prof.likes;
   } else {
     let postLikes = 0;
     try {
@@ -180,7 +234,7 @@ export function getUserLiveProfile(
         const posts = JSON.parse(rawPosts);
         if (Array.isArray(posts)) {
           posts.forEach((p: any) => {
-            const author = (p.authorHandle || '').replace(/^@/, '').toLowerCase();
+            const author = (p.authorHandle || '').replace(/^@/, '').toLowerCase().trim();
             if (author === cleanHandle || p.authorId === `usr-${cleanHandle}`) {
               postLikes += (p.likesCount || (Array.isArray(p.likersList) ? p.likersList.length : 0) || 0);
             }
@@ -197,34 +251,44 @@ export function getUserLiveProfile(
     }
 
     likes = postLikes + mediaLikes;
-    if (likes === 0 && prof?.likesCount !== undefined) {
+    if (typeof prof?.likesCount === 'number' && prof.likesCount > likes) {
       likes = prof.likesCount;
+    } else if (typeof prof?.likes === 'number' && prof.likes > likes) {
+      likes = prof.likes;
     }
   }
 
-  // 7. Accurate Banner
+  // 8. Accurate Banner
   const banner =
     partial?.banner ||
     prof?.coverUrl ||
+    prof?.cover_url ||
+    prof?.previewUrl ||
+    prof?.posterUrl ||
     prof?.banner ||
     DEFAULT_BANNERS[hash % DEFAULT_BANNERS.length];
 
-  // 8. Accurate Bio
-  const defaultBio = prof?.bio || '';
+  // 9. Accurate Bio
+  const defaultBio =
+    prof?.bio ||
+    prof?.description ||
+    'Privity creator sharing private-first moments and authentic updates.';
+  const bio = partial?.bio || defaultBio;
 
-  // 9. Accurate Avatar (uses user profile avatar or generated avatar with user initials)
+  // 10. Accurate Avatar
   const defaultAvatar = `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanHandle}`;
-  const avatar = partial?.avatar || prof?.avatar || defaultAvatar;
+  const avatar = partial?.avatar || prof?.avatar || prof?.creatorAvatar || defaultAvatar;
 
-  // 10. Accurate Name
+  // 11. Accurate Name
   const name =
     partial?.name ||
     prof?.name ||
+    prof?.creatorName ||
     cleanHandle.charAt(0).toUpperCase() + cleanHandle.slice(1);
 
   return {
     id: partial?.id || prof?.id || `user_${cleanHandle}`,
-    name,
+    name: name.replace(' (LIVE NOW 🔴)', ''),
     handle: cleanHandle,
     avatar,
     banner,
@@ -233,7 +297,7 @@ export function getUserLiveProfile(
     followers,
     following,
     likes,
-    bio: partial?.bio || defaultBio,
+    bio,
     badge: partial?.badge || (level >= 40 ? 'VIP Gifter 💎' : level >= 20 ? 'Active Fan ⭐' : ''),
     isVerified: partial?.isVerified ?? (prof?.isVerified || false),
   };

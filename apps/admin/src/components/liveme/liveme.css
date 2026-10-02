@@ -3610,24 +3610,9 @@
    ORGANIC 3-MODE STREAM SWITCHER BAR (SWIPE LEFT = CHAT READER, SWIPE RIGHT = TIME & HUD)
    ========================================================================== */
 .liveme-mode-switcher-bar {
-  position: absolute;
-  top: 52px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 28;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 5px;
-  background: rgba(15, 23, 42, 0.68);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 9999px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  pointer-events: auto;
-  user-select: none;
-  animation: modeBarFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 @keyframes modeBarFadeIn {
