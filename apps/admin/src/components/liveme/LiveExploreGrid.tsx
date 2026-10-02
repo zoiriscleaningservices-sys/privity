@@ -52,6 +52,8 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
 
   // Cross-tab active live host detection fallback - only active if actually broadcasting
   const [activeHost, setActiveHost] = useState<any>(() => {
+    const syncHost = liveStreamSync.getHostSession();
+    if (syncHost && syncHost.isLive !== false) return syncHost;
     try {
       const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
       const saved = localStorage.getItem('privity_current_live_host');
@@ -127,29 +129,54 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   const userHandle = (currentUser?.handle || 'luciano').toLowerCase().replace('@', '').trim();
   const isUserBroadcasting =
     liveStreamSync.isLocalHost() ||
-    localStorage.getItem('privity_is_host_broadcasting') === 'true';
+    !!liveStreamSync.getHostSession() ||
+    localStorage.getItem('privity_is_host_broadcasting') === 'true' ||
+    (activeHost && activeHost.isLive !== false);
+
+  const currentHost =
+    liveStreamSync.getHostSession() ||
+    activeHost ||
+    (isUserBroadcasting
+      ? (() => {
+          try {
+            const s = localStorage.getItem('privity_current_live_host');
+            return s ? JSON.parse(s) : null;
+          } catch {
+            return null;
+          }
+        })()
+      : null);
 
   const streamersByHandle = new Map<string, LiveMeStreamer>();
 
-  // 1. Host card: ONLY show if host is ACTUALLY broadcasting right now!
-  if (activeHost && isUserBroadcasting) {
-    const hostHandle = (activeHost.handle || userHandle).toLowerCase().replace('@', '').trim();
+  // 1. Host card: ALWAYS show if host is ACTUALLY broadcasting right now!
+  if (isUserBroadcasting && currentHost) {
+    const rawHandle = currentHost.creatorHandle || currentHost.handle || userHandle;
+    const hostHandle = rawHandle.toLowerCase().replace('@', '').trim();
+    const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Luciano';
+    const cleanName = rawName.replace(' (LIVE NOW 🔴)', '');
+    const avatar =
+      currentHost.creatorAvatar ||
+      currentHost.avatar ||
+      currentUser?.avatar ||
+      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500';
+
     streamersByHandle.set(hostHandle, {
-      id: activeHost.id || `live-user-${hostHandle}`,
-      handle: activeHost.handle || currentUser?.handle || 'luciano',
-      name: `${activeHost.name || currentUser?.name || 'Luciano'} (LIVE NOW 🔴)`,
-      avatar: activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500',
+      id: currentHost.id || `live-user-${hostHandle}`,
+      handle: rawHandle,
+      name: `${cleanName} (LIVE NOW 🔴)`,
+      avatar,
       isVerified: true,
-      category: 'Featured',
-      title: activeHost.title || 'My Live Broadcast · Privity Exclusive',
-      description: 'Live host studio broadcast',
-      viewersCount: Math.max(1, activeHost.viewersCount || 1),
-      totalViews: `${Math.max(1, activeHost.viewersCount || 1)}`,
+      category: currentHost.category || 'Featured',
+      title: currentHost.title || 'My Live Broadcast · Privity Exclusive',
+      description: currentHost.description || 'Live host studio broadcast',
+      viewersCount: Math.max(1, currentHost.viewersCount || 1),
+      totalViews: `${Math.max(1, currentHost.viewersCount || 1)}`,
       popularity: '999+',
       diamonds: 50000,
-      likesCount: 1200,
-      videoStreamUrl: activeHost.videoStreamUrl,
-      posterUrl: activeHost.posterUrl || activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=900',
+      likesCount: currentHost.likesCount || 1200,
+      videoStreamUrl: currentHost.videoStreamUrl,
+      posterUrl: currentHost.posterUrl || currentHost.previewUrl || avatar,
       tags: ['Host', 'LiveNow', 'Privity'],
       tagBadge: 'LIVE NOW',
       isHost: true,
@@ -158,13 +185,10 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     });
   }
 
-  // 2. Active network streamers (filter out the host if already ended or closed)
+  // 2. Active network streamers (include all active network broadcasts, never drop host!)
   for (const s of networkStreamers) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
     if (!normHandle) continue;
-    if (normHandle === userHandle && !isUserBroadcasting) {
-      continue;
-    }
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
@@ -252,7 +276,13 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       return true; // 'recommend' or default
     })
     .sort((a, b) => {
-      // Real live broadcasts ALWAYS rank #1 before any mock/offline streamers!
+      // 1. Current user host broadcast ALWAYS #1
+      const aIsMyHost = a.isHost || (isUserBroadcasting && (a.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
+      const bIsMyHost = b.isHost || (isUserBroadcasting && (b.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
+      if (aIsMyHost && !bIsMyHost) return -1;
+      if (!aIsMyHost && bIsMyHost) return 1;
+
+      // 2. Real live broadcasts ALWAYS rank before any mock/offline streamers!
       const aLive =
         a.tagBadge === 'LIVE NOW' ||
         a.isCameraStream ||

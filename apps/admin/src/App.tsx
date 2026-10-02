@@ -5142,9 +5142,10 @@ export function App() {
   }) => {
     setHostLiveCameraStream(cameraStream || null);
     setIsHostBroadcasting(true);
+    const cleanHandle = (myProfile.handle || 'luciano').toLowerCase().replace('@', '').trim();
     const userStream: LiveStreamSession = {
-      id: `live-user-${myProfile.handle}`,
-      creatorHandle: myProfile.handle,
+      id: `live-user-${cleanHandle}`,
+      creatorHandle: cleanHandle,
       creatorName: myProfile.name,
       creatorAvatar: myProfile.avatar,
       isVerified: myProfile.isVerified,
@@ -5176,11 +5177,38 @@ export function App() {
     setActiveLiveStream(userStream);
     setIsCameraOpen(false);
 
+    const hostMeta = {
+      id: userStream.id,
+      creatorHandle: cleanHandle,
+      creatorName: myProfile.name,
+      creatorAvatar: myProfile.avatar,
+      handle: cleanHandle,
+      name: myProfile.name,
+      avatar: myProfile.avatar,
+      isVerified: myProfile.isVerified,
+      category: userStream.category,
+      title: userStream.title,
+      description: userStream.description,
+      startedAt: Date.now(),
+      viewersCount: 0,
+      likesCount: 0,
+      previewUrl: userStream.previewUrl,
+      isLive: true,
+    };
+
+    try {
+      localStorage.setItem('privity_current_live_host', JSON.stringify(hostMeta));
+      localStorage.setItem('privity_is_host_broadcasting', 'true');
+      localStorage.setItem('privity_active_live_session', JSON.stringify(userStream));
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage({ type: 'LIVE_HOST_STARTED', host: hostMeta });
+    } catch {}
+
     // Announce and broadcast P2P live stream across all network devices
     liveStreamSync.startHostBroadcast(
       {
         id: userStream.id,
-        creatorHandle: myProfile.handle,
+        creatorHandle: cleanHandle,
         creatorName: myProfile.name,
         creatorAvatar: myProfile.avatar,
         isVerified: myProfile.isVerified,
@@ -5198,23 +5226,13 @@ export function App() {
         localStorage.setItem(
           'privity_current_live_host',
           JSON.stringify({
-            id: userStream.id,
+            ...hostMeta,
             peerId,
-            handle: myProfile.handle,
-            name: myProfile.name,
-            avatar: myProfile.avatar,
-            title: userStream.title,
-            startedAt: Date.now(),
-            viewersCount: userStream.viewersCount,
           })
         );
       } catch {}
     }).catch(() => {});
 
-    try {
-      localStorage.setItem('privity_is_host_broadcasting', 'true');
-      localStorage.setItem('privity_active_live_session', JSON.stringify(userStream));
-    } catch {}
     triggerToast(`Broadcast started: ${userStream.title}`);
   };
 

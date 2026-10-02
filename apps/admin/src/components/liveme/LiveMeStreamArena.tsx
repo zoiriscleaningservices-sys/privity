@@ -849,18 +849,25 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     const roomId = getRoomIdFromHandle(currentUser.handle);
     const hostMeta = {
       id: `live-user-${roomId}`,
+      creatorHandle: currentUser.handle,
+      creatorName: currentUser.name,
+      creatorAvatar: currentUser.avatar,
       handle: currentUser.handle,
       name: currentUser.name,
       avatar: currentUser.avatar,
+      isVerified: true,
+      category: currentStreamer?.category || 'Featured',
       title: currentStreamer?.title || '🔴 LIVE: High-Energy Room & PK Battle',
       startedAt: Date.now(),
       viewersCount: 0,
       likesCount: 0,
       diamonds: 0,
+      isLive: true,
     };
 
     try {
       localStorage.setItem('privity_current_live_host', JSON.stringify(hostMeta));
+      localStorage.setItem('privity_is_host_broadcasting', 'true');
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_HOST_STARTED', host: hostMeta });
     } catch {}

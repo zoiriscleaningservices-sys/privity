@@ -39,6 +39,8 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
 
   // Cross-tab active live host detection - only if broadcasting
   const [activeHost, setActiveHost] = useState<any>(() => {
+    const syncHost = liveStreamSync.getHostSession();
+    if (syncHost && syncHost.isLive !== false) return syncHost;
     try {
       const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
       const saved = localStorage.getItem('privity_current_live_host');
@@ -97,28 +99,53 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   const userHandle = (currentUser?.handle || 'luciano').toLowerCase().replace('@', '').trim();
   const isUserBroadcasting =
     liveStreamSync.isLocalHost() ||
-    localStorage.getItem('privity_is_host_broadcasting') === 'true';
+    !!liveStreamSync.getHostSession() ||
+    localStorage.getItem('privity_is_host_broadcasting') === 'true' ||
+    (activeHost && activeHost.isLive !== false);
+
+  const currentHost =
+    liveStreamSync.getHostSession() ||
+    activeHost ||
+    (isUserBroadcasting
+      ? (() => {
+          try {
+            const s = localStorage.getItem('privity_current_live_host');
+            return s ? JSON.parse(s) : null;
+          } catch {
+            return null;
+          }
+        })()
+      : null);
 
   const streamersByHandle = new Map<string, LiveMeStreamer>();
 
-  if (activeHost && isUserBroadcasting) {
-    const hostHandle = (activeHost.handle || userHandle).toLowerCase().replace('@', '').trim();
+  if (isUserBroadcasting && currentHost) {
+    const rawHandle = currentHost.creatorHandle || currentHost.handle || userHandle;
+    const hostHandle = rawHandle.toLowerCase().replace('@', '').trim();
+    const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Luciano';
+    const cleanName = rawName.replace(' (LIVE NOW 🔴)', '');
+    const avatar =
+      currentHost.creatorAvatar ||
+      currentHost.avatar ||
+      currentUser?.avatar ||
+      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500';
+
     streamersByHandle.set(hostHandle, {
-      id: activeHost.id || `live-user-${hostHandle}`,
-      handle: activeHost.handle || currentUser?.handle || 'luciano',
-      name: `${activeHost.name || currentUser?.name || 'Luciano'} (LIVE NOW 🔴)`,
-      avatar: activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500',
+      id: currentHost.id || `live-user-${hostHandle}`,
+      handle: rawHandle,
+      name: `${cleanName} (LIVE NOW 🔴)`,
+      avatar,
       isVerified: true,
-      category: 'Featured',
-      title: activeHost.title || 'My Live Broadcast · Privity Exclusive',
-      description: 'Live host studio broadcast',
-      viewersCount: Math.max(1, activeHost.viewersCount || 1),
-      totalViews: `${Math.max(1, activeHost.viewersCount || 1)}`,
+      category: currentHost.category || 'Featured',
+      title: currentHost.title || 'My Live Broadcast · Privity Exclusive',
+      description: currentHost.description || 'Live host studio broadcast',
+      viewersCount: Math.max(1, currentHost.viewersCount || 1),
+      totalViews: `${Math.max(1, currentHost.viewersCount || 1)}`,
       popularity: '999+',
       diamonds: 50000,
-      likesCount: 1200,
-      videoStreamUrl: activeHost.videoStreamUrl,
-      posterUrl: activeHost.posterUrl || activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=900',
+      likesCount: currentHost.likesCount || 1200,
+      videoStreamUrl: currentHost.videoStreamUrl,
+      posterUrl: currentHost.posterUrl || currentHost.previewUrl || avatar,
       tags: ['Host', 'LiveNow', 'Privity'],
       tagBadge: 'LIVE NOW',
       isHost: true,
@@ -130,7 +157,6 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   for (const s of networkStreamers) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
     if (!normHandle) continue;
-    if (normHandle === userHandle && !isUserBroadcasting) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
@@ -143,7 +169,19 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
     }
   }
 
-  const allStreamers = Array.from(streamersByHandle.values());
+  const allStreamers = Array.from(streamersByHandle.values()).sort((a, b) => {
+    const aIsMyHost = a.isHost || (isUserBroadcasting && (a.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
+    const bIsMyHost = b.isHost || (isUserBroadcasting && (b.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
+    if (aIsMyHost && !bIsMyHost) return -1;
+    if (!aIsMyHost && bIsMyHost) return 1;
+
+    const aLive = a.tagBadge === 'LIVE NOW' || a.isCameraStream || a.isHost || networkStreamers.some((ns) => ns.id === a.id);
+    const bLive = b.tagBadge === 'LIVE NOW' || b.isCameraStream || b.isHost || networkStreamers.some((ns) => ns.id === b.id);
+    if (aLive && !bLive) return -1;
+    if (!aLive && bLive) return 1;
+
+    return (b.viewersCount || 0) - (a.viewersCount || 0);
+  });
 
   const heroStreamer = allStreamers[0] || LIVEME_STREAMERS[0];
 
@@ -376,76 +414,60 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
           </div>
 
           <div className="liveme-cards-grid">
-            {/* Active Host Live Broadcast Card if Host is Live */}
-            {activeHost && (
-              <div
-                key={activeHost.id || 'active-live-host'}
-                className="liveme-stream-grid-card"
-                onClick={() => onOpenStream(activeHost.id || `live-user-${activeHost.handle}`)}
-                style={{
-                  border: '2px solid #ef4444',
-                  boxShadow: '0 0 24px rgba(239, 68, 68, 0.6)',
-                }}
-              >
-                <img
-                  src={activeHost.avatar}
-                  alt={activeHost.name}
-                  className="liveme-card-cover-media"
-                  style={{ filter: 'brightness(0.9)' }}
-                />
-                <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ background: '#ef4444', color: '#fff', fontSize: 11, fontWeight: 900, padding: '3px 8px', borderRadius: 9999, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span className="liveme-pulse-dot" style={{ width: 6, height: 6 }} />
-                    LIVE NOW
-                  </span>
-                </div>
-                <div className="liveme-card-overlay-gradient" />
-                <div className="liveme-card-bottom-info">
-                  <img
-                    src={activeHost.avatar}
-                    alt={activeHost.name}
-                    className="liveme-card-avatar"
-                    style={{ border: '2px solid #ef4444' }}
-                  />
-                  <div className="liveme-card-text-block">
-                    <span className="liveme-card-streamer-name">{activeHost.name} 🔴</span>
-                    <div className="liveme-card-stats">
-                      <span>👁️ {activeHost.viewersCount || 185}</span>
-                      <span>🔥 3.2K</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+            {filteredStreamers.map((streamer) => {
+              const isLive = streamer.isHost || streamer.tagBadge === 'LIVE NOW';
 
-            {filteredStreamers.map((streamer) => (
-              <div
-                key={streamer.id}
-                className="liveme-stream-grid-card"
-                onClick={() => onOpenStream(streamer.id)}
-              >
-                <img
-                  src={streamer.posterUrl}
-                  alt={streamer.name}
-                  className="liveme-card-cover-media"
-                />
-                <div className="liveme-card-overlay-gradient" />
-                <div className="liveme-card-bottom-info">
+              return (
+                <div
+                  key={streamer.id}
+                  className="liveme-stream-grid-card"
+                  onClick={() => onOpenStream(streamer.id)}
+                  style={
+                    isLive
+                      ? {
+                          border: '2px solid #ef4444',
+                          boxShadow: '0 0 24px rgba(239, 68, 68, 0.6)',
+                        }
+                      : undefined
+                  }
+                >
                   <img
-                    src={streamer.avatar}
+                    src={streamer.posterUrl || streamer.avatar}
                     alt={streamer.name}
-                    className="liveme-card-avatar"
+                    className="liveme-card-cover-media"
+                    style={isLive ? { filter: 'brightness(0.9)' } : undefined}
                   />
-                  <div className="liveme-card-text-block">
-                    <span className="liveme-card-streamer-name">{streamer.name}</span>
-                    <div className="liveme-card-stats">
-                      <span>👁️ {streamer.viewersCount}</span>
-                      <span>🔥 {streamer.popularity}</span>
+
+                  {isLive && (
+                    <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ background: '#ef4444', color: '#fff', fontSize: 11, fontWeight: 900, padding: '3px 8px', borderRadius: 9999, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span className="liveme-pulse-dot" style={{ width: 6, height: 6 }} />
+                        LIVE NOW
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="liveme-card-overlay-gradient" />
+                  <div className="liveme-card-bottom-info">
+                    <img
+                      src={streamer.avatar}
+                      alt={streamer.name}
+                      className="liveme-card-avatar"
+                      style={isLive ? { border: '2px solid #ef4444' } : undefined}
+                    />
+                    <div className="liveme-card-text-block">
+                      <span className="liveme-card-streamer-name">
+                        {isLive && !streamer.name.includes('🔴') ? `${streamer.name} 🔴` : streamer.name}
+                      </span>
+                      <div className="liveme-card-stats">
+                        <span>👁️ {streamer.viewersCount}</span>
+                        <span>🔥 {streamer.popularity}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </main>
       </div>

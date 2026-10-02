@@ -87,15 +87,29 @@ class LiveStreamSyncService {
   private setupLifecycleListeners() {
     if (typeof window === 'undefined') return;
     try {
+      window.addEventListener('storage', (e) => {
+        if (
+          e.key === 'privity_remote_active_streams' ||
+          e.key === 'privity_current_live_host' ||
+          e.key === 'privity_is_host_broadcasting'
+        ) {
+          this.loadCachedStreams();
+          this.notifySubscribers();
+        }
+      });
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           this.ensureConnected();
           this.queryNetworkStreams();
+          this.loadCachedStreams();
+          this.notifySubscribers();
         }
       });
       window.addEventListener('focus', () => {
         this.ensureConnected();
         this.queryNetworkStreams();
+        this.loadCachedStreams();
+        this.notifySubscribers();
       });
       window.addEventListener('online', () => {
         this.ensureConnected();
@@ -106,12 +120,44 @@ class LiveStreamSyncService {
 
   private loadCachedStreams() {
     try {
+      const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
+      const savedHost = localStorage.getItem('privity_current_live_host');
+      if (isBroadcasting && savedHost) {
+        try {
+          const parsed = JSON.parse(savedHost);
+          if (parsed && parsed.id) {
+            const h: RemoteLiveStreamPayload = {
+              id: parsed.id,
+              creatorHandle: parsed.creatorHandle || parsed.handle || 'host',
+              creatorName: parsed.creatorName || parsed.name || 'Host',
+              creatorAvatar: parsed.creatorAvatar || parsed.avatar || '',
+              category: parsed.category || 'Featured',
+              title: parsed.title || 'Live Broadcast',
+              description: parsed.description || 'Decentralized Live Broadcast',
+              viewersCount: parsed.viewersCount || 1,
+              likesCount: parsed.likesCount || 0,
+              previewUrl: parsed.previewUrl || parsed.avatar || '',
+              startedAt: parsed.startedAt || Date.now(),
+              isLive: true,
+              lastHeartbeat: Date.now(),
+            };
+            this.activeStreams.set(h.id, h);
+          }
+        } catch {}
+      }
+
       const saved = localStorage.getItem('privity_remote_active_streams');
       if (saved) {
         const list: RemoteLiveStreamPayload[] = JSON.parse(saved);
         const now = Date.now();
         list.forEach((s) => {
           if (now - (s.lastHeartbeat || s.startedAt) < 30000) {
+            const creatorHandle = s.creatorHandle || (s as any).handle || '';
+            const creatorName = s.creatorName || (s as any).name || 'Host';
+            const creatorAvatar = s.creatorAvatar || (s as any).avatar || '';
+            s.creatorHandle = creatorHandle;
+            s.creatorName = creatorName;
+            s.creatorAvatar = creatorAvatar;
             this.activeStreams.set(s.id, s);
           }
         });
@@ -227,17 +273,25 @@ class LiveStreamSyncService {
     }
   }
 
-  private handleIncomingStream(stream: RemoteLiveStreamPayload) {
+  private handleIncomingStream(stream: any) {
     if (!stream || !stream.id) return;
     if (stream.isLive === false) {
       this.handleStreamEnded(stream.id);
       return;
     }
-    const normHandle = (stream.creatorHandle || '').toLowerCase().replace('@', '').trim();
+    const creatorHandle = stream.creatorHandle || stream.handle || '';
+    const creatorName = stream.creatorName || stream.name || 'Host';
+    const creatorAvatar = stream.creatorAvatar || stream.avatar || '';
+    stream.creatorHandle = creatorHandle;
+    stream.creatorName = creatorName;
+    stream.creatorAvatar = creatorAvatar;
+    stream.isLive = true;
+
+    const normHandle = creatorHandle.toLowerCase().replace('@', '').trim();
     // Remove any older session IDs for the same creator handle to prevent duplicates
     if (normHandle) {
       for (const [id, s] of Array.from(this.activeStreams.entries())) {
-        if (id !== stream.id && (s.creatorHandle || '').toLowerCase().replace('@', '').trim() === normHandle) {
+        if (id !== stream.id && (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim() === normHandle) {
           this.activeStreams.delete(id);
         }
       }
@@ -310,11 +364,48 @@ class LiveStreamSyncService {
     const handleMap = new Map<string, RemoteLiveStreamPayload>();
     const now = Date.now();
 
+    // 1. If this device has an active currentHostSession, ALWAYS include it
+    if (this.currentHostSession && this.currentHostSession.isLive !== false) {
+      const normHandle = (this.currentHostSession.creatorHandle || '').toLowerCase().replace('@', '').trim();
+      if (normHandle) {
+        handleMap.set(normHandle, this.currentHostSession);
+      }
+    }
+
+    // 2. Check localStorage host broadcast session as well
+    try {
+      const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
+      const savedHost = localStorage.getItem('privity_current_live_host');
+      if (isBroadcasting && savedHost) {
+        const parsedHost = JSON.parse(savedHost);
+        const normHandle = (parsedHost.creatorHandle || parsedHost.handle || '').toLowerCase().replace('@', '').trim();
+        if (normHandle && !handleMap.has(normHandle)) {
+          handleMap.set(normHandle, {
+            id: parsedHost.id || `live-user-${normHandle}`,
+            creatorHandle: parsedHost.creatorHandle || parsedHost.handle,
+            creatorName: parsedHost.creatorName || parsedHost.name || 'Host',
+            creatorAvatar: parsedHost.creatorAvatar || parsedHost.avatar || '',
+            category: parsedHost.category || 'Featured',
+            title: parsedHost.title || 'Live Broadcast',
+            description: parsedHost.description || 'Live Stream',
+            viewersCount: Math.max(1, parsedHost.viewersCount || 1),
+            likesCount: parsedHost.likesCount || 0,
+            previewUrl: parsedHost.previewUrl || parsedHost.avatar || '',
+            startedAt: parsedHost.startedAt || Date.now(),
+            isLive: true,
+            lastHeartbeat: Date.now(),
+          });
+        }
+      }
+    } catch {}
+
+    // 3. Active network streams
     for (const s of this.activeStreams.values()) {
       if (now - (s.lastHeartbeat || s.startedAt) > 12000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
         continue;
       }
-      const normHandle = (s.creatorHandle || '').toLowerCase().replace('@', '').trim();
+      const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
+      if (!normHandle) continue;
       const existing = handleMap.get(normHandle);
       if (!existing || (s.lastHeartbeat || s.startedAt) > (existing.lastHeartbeat || existing.startedAt)) {
         handleMap.set(normHandle, s);
@@ -323,25 +414,31 @@ class LiveStreamSyncService {
 
     const list: LiveMeStreamer[] = [];
     for (const s of handleMap.values()) {
+      const handle = s.creatorHandle || (s as any).handle || 'host';
+      const rawName = s.creatorName || (s as any).name || 'Host';
+      const cleanName = rawName.replace(' (LIVE NOW 🔴)', '');
+      const avatar = s.creatorAvatar || (s as any).avatar || '';
+      const isHost = this.currentHostSession?.id === s.id || this.isLocalHost(s.id);
+
       list.push({
         id: s.id,
-        handle: s.creatorHandle,
-        name: `${s.creatorName} (LIVE NOW 🔴)`,
-        avatar: s.creatorAvatar,
+        handle: handle,
+        name: `${cleanName} (LIVE NOW 🔴)`,
+        avatar: avatar,
         isVerified: !!s.isVerified,
         category: s.category || 'Featured',
         title: s.title || 'Live Broadcast · Sovereign Stream',
         description: s.description || 'Live streaming sovereign node',
-        viewersCount: s.viewersCount ?? 0,
-        totalViews: `${s.viewersCount ?? 0}`,
+        viewersCount: Math.max(1, s.viewersCount ?? 1),
+        totalViews: `${Math.max(1, s.viewersCount ?? 1)}`,
         popularity: `${s.likesCount ?? 0}`,
         diamonds: (s as any).diamonds ?? 0,
         likesCount: s.likesCount ?? 0,
         videoStreamUrl: s.videoStreamUrl,
-        posterUrl: s.posterUrl || s.previewUrl || s.creatorAvatar,
+        posterUrl: s.posterUrl || s.previewUrl || avatar,
         tags: s.tags && s.tags.length > 0 ? s.tags : ['LiveNow', 'Host', 'Privity'],
         tagBadge: 'LIVE NOW',
-        isHost: this.currentHostSession?.id === s.id,
+        isHost: isHost,
         isCameraStream: true,
         peerId: s.peerId,
         topContributors: [],
@@ -364,9 +461,21 @@ class LiveStreamSyncService {
   }
 
   public isLocalHost(streamId?: string): boolean {
-    if (!this.currentHostSession) return false;
-    if (!streamId) return true;
-    return this.currentHostSession.id === streamId;
+    if (this.currentHostSession) {
+      if (!streamId) return true;
+      return this.currentHostSession.id === streamId;
+    }
+    try {
+      const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
+      if (!isBroadcasting) return false;
+      if (!streamId) return true;
+      const savedHost = localStorage.getItem('privity_current_live_host');
+      if (savedHost) {
+        const parsed = JSON.parse(savedHost);
+        return parsed.id === streamId;
+      }
+    } catch {}
+    return false;
   }
 
   public getHostSession(): RemoteLiveStreamPayload | null {
