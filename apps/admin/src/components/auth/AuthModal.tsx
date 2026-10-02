@@ -112,30 +112,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
 
     try {
+      if (authService.isSupabaseReady()) {
+        await authService.loginWithGoogleOAuth();
+        return;
+      }
+
       const clientId = getGoogleClientId();
       if (clientId && (window as any).google?.accounts?.id) {
         (window as any).google.accounts.id.prompt();
         return;
       }
 
-      if (authService.isSupabaseReady()) {
-        await authService.loginWithGoogleOAuth();
-        return;
-      }
-
       setIsGoogleModalOpen(true);
     } catch (err: any) {
       console.error('Google OAuth error:', err);
-      const msg = err.message || '';
-      if (
-        msg.includes('provider is not enabled') ||
-        msg.includes('Unsupported provider') ||
-        msg.includes('validation_failed')
-      ) {
-        setErrorMsg('To use real Google Sign-In, please enable the Google Provider in your Supabase Dashboard (Authentication > Providers > Google).');
-      } else {
-        setErrorMsg(msg || 'Google sign-in error');
-      }
+      setErrorMsg(err.message || 'Google sign-in error');
     } finally {
       setIsLoading(false);
     }

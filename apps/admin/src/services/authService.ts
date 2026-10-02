@@ -432,13 +432,16 @@ class AuthService {
   public async loginWithGoogleOAuth(): Promise<void> {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin,
+          redirectTo: window.location.origin + window.location.pathname,
         },
       });
       if (error) throw new Error(error.message);
+      if (data?.url) {
+        window.location.href = data.url;
+      }
     }
   }
 
