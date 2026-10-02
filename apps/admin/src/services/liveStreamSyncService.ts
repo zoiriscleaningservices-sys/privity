@@ -229,6 +229,19 @@ class LiveStreamSyncService {
 
   private handleIncomingStream(stream: RemoteLiveStreamPayload) {
     if (!stream || !stream.id) return;
+    if (stream.isLive === false) {
+      this.handleStreamEnded(stream.id);
+      return;
+    }
+    const normHandle = (stream.creatorHandle || '').toLowerCase().replace('@', '').trim();
+    // Remove any older session IDs for the same creator handle to prevent duplicates
+    if (normHandle) {
+      for (const [id, s] of Array.from(this.activeStreams.entries())) {
+        if (id !== stream.id && (s.creatorHandle || '').toLowerCase().replace('@', '').trim() === normHandle) {
+          this.activeStreams.delete(id);
+        }
+      }
+    }
     stream.lastHeartbeat = Date.now();
     this.activeStreams.set(stream.id, stream);
     this.saveCachedStreams();
@@ -236,11 +249,21 @@ class LiveStreamSyncService {
   }
 
   private handleStreamEnded(streamId: string) {
-    if (this.activeStreams.has(streamId)) {
+    let deletedHandle = '';
+    const target = this.activeStreams.get(streamId);
+    if (target) {
+      deletedHandle = (target.creatorHandle || '').toLowerCase().replace('@', '').trim();
       this.activeStreams.delete(streamId);
-      this.saveCachedStreams();
-      this.notifySubscribers();
     }
+    if (deletedHandle) {
+      for (const [id, s] of Array.from(this.activeStreams.entries())) {
+        if ((s.creatorHandle || '').toLowerCase().replace('@', '').trim() === deletedHandle) {
+          this.activeStreams.delete(id);
+        }
+      }
+    }
+    this.saveCachedStreams();
+    this.notifySubscribers();
   }
 
   private startPruneLoop() {
@@ -248,13 +271,13 @@ class LiveStreamSyncService {
     this.pruneInterval = setInterval(() => {
       const now = Date.now();
       let changed = false;
-      for (const [id, stream] of this.activeStreams.entries()) {
+      for (const [id, stream] of Array.from(this.activeStreams.entries())) {
         // If this is our own host session, keep it alive as long as currentHostSession is set
         if (this.currentHostSession && this.currentHostSession.id === id) {
           continue;
         }
-        // Remote streams without a heartbeat for 18 seconds are considered ended
-        if (now - (stream.lastHeartbeat || stream.startedAt) > 18000) {
+        // Remote streams without a heartbeat for 12 seconds are considered ended
+        if (now - (stream.lastHeartbeat || stream.startedAt) > 12000) {
           this.activeStreams.delete(id);
           changed = true;
         }
@@ -263,7 +286,7 @@ class LiveStreamSyncService {
         this.saveCachedStreams();
         this.notifySubscribers();
       }
-    }, 3000);
+    }, 2500);
   }
 
   private startQueryLoop() {
@@ -284,13 +307,22 @@ class LiveStreamSyncService {
   }
 
   public getStreamersList(): LiveMeStreamer[] {
-    const list: LiveMeStreamer[] = [];
+    const handleMap = new Map<string, RemoteLiveStreamPayload>();
     const now = Date.now();
 
     for (const s of this.activeStreams.values()) {
-      if (now - (s.lastHeartbeat || s.startedAt) > 20000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
+      if (now - (s.lastHeartbeat || s.startedAt) > 12000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
         continue;
       }
+      const normHandle = (s.creatorHandle || '').toLowerCase().replace('@', '').trim();
+      const existing = handleMap.get(normHandle);
+      if (!existing || (s.lastHeartbeat || s.startedAt) > (existing.lastHeartbeat || existing.startedAt)) {
+        handleMap.set(normHandle, s);
+      }
+    }
+
+    const list: LiveMeStreamer[] = [];
+    for (const s of handleMap.values()) {
       list.push({
         id: s.id,
         handle: s.creatorHandle,
@@ -568,6 +600,7 @@ class LiveStreamSyncService {
 
     if (this.currentHostSession) {
       const streamId = this.currentHostSession.id;
+      const handle = (this.currentHostSession.creatorHandle || '').toLowerCase().replace('@', '').trim();
 
       if (this.mqttClient && this.mqttClient.connected) {
         try {
@@ -578,7 +611,8 @@ class LiveStreamSyncService {
           });
           this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, endPayload, { qos: 0 });
           const streamTopic = `${TOPIC_STREAM_PREFIX}${streamId}`;
-          this.mqttClient.publish(streamTopic, endPayload, { retain: true, qos: 1 });
+          // Empty payload with retain: true deletes the retained topic permanently on MQTT brokers!
+          this.mqttClient.publish(streamTopic, '', { retain: true, qos: 1 });
         } catch {}
       }
 
@@ -586,11 +620,22 @@ class LiveStreamSyncService {
         this.broadcastBus?.postMessage({
           type: 'LIVE_HOST_ENDED',
           streamId,
+          handle,
         });
       } catch {}
 
-      this.activeStreams.delete(streamId);
+      for (const [id, s] of Array.from(this.activeStreams.entries())) {
+        if (id === streamId || (s.creatorHandle || '').toLowerCase().replace('@', '').trim() === handle) {
+          this.activeStreams.delete(id);
+        }
+      }
       this.currentHostSession = null;
+      try {
+        localStorage.removeItem('privity_current_live_host');
+        localStorage.removeItem('privity_is_host_broadcasting');
+        localStorage.removeItem('privity_active_live_session');
+        localStorage.removeItem('privity_remote_active_streams');
+      } catch {}
       this.saveCachedStreams();
       this.notifySubscribers();
     }

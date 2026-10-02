@@ -50,38 +50,92 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     });
   }, []);
 
-  // Cross-tab active live host detection fallback
+  // Cross-tab active live host detection fallback - only active if actually broadcasting
   const [activeHost, setActiveHost] = useState<any>(() => {
     try {
+      const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
       const saved = localStorage.getItem('privity_current_live_host');
-      return saved ? JSON.parse(saved) : null;
+      if (isBroadcasting && saved) {
+        return JSON.parse(saved);
+      }
+      return null;
     } catch {
       return null;
     }
   });
 
+  // Real-time live video frames map (view live feeds right from explore grid)
+  const [liveFramesMap, setLiveFramesMap] = useState<Record<string, string>>({});
+
   useEffect(() => {
-    let bus: BroadcastChannel | null = null;
+    let frameBus: BroadcastChannel | null = null;
+    let syncBus: BroadcastChannel | null = null;
+
     try {
-      bus = new BroadcastChannel('privity_sync_bus');
-      bus.onmessage = (e) => {
+      frameBus = new BroadcastChannel('privity_live_frames');
+      frameBus.onmessage = (e) => {
+        if (e.data?.type === 'FRAME' && e.data.handle && e.data.frame) {
+          const normHandle = e.data.handle.toLowerCase().replace('@', '').trim();
+          setLiveFramesMap((prev) => ({
+            ...prev,
+            [normHandle]: e.data.frame,
+          }));
+        }
+      };
+    } catch {}
+
+    try {
+      syncBus = new BroadcastChannel('privity_sync_bus');
+      syncBus.onmessage = (e) => {
         if (e.data?.type === 'LIVE_HOST_STARTED') {
           setActiveHost(e.data.host);
         } else if (e.data?.type === 'LIVE_HOST_ENDED') {
           setActiveHost(null);
+          const handle = (e.data.handle || '').toLowerCase().replace('@', '').trim();
+          if (handle) {
+            setLiveFramesMap((prev) => {
+              const next = { ...prev };
+              delete next[handle];
+              return next;
+            });
+          }
         }
       };
     } catch {}
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'privity_is_host_broadcasting' || e.key === 'privity_current_live_host') {
+        const isB = localStorage.getItem('privity_is_host_broadcasting') === 'true';
+        const saved = localStorage.getItem('privity_current_live_host');
+        if (isB && saved) {
+          try { setActiveHost(JSON.parse(saved)); } catch { setActiveHost(null); }
+        } else {
+          setActiveHost(null);
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
     return () => {
-      if (bus) bus.close();
+      if (frameBus) frameBus.close();
+      if (syncBus) syncBus.close();
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
 
-  // Filter streamers - Active broadcast is ALWAYS at the very top (#1) of the explore arena
-  const allStreamers: LiveMeStreamer[] = [
-    ...networkStreamers,
-    ...(activeHost && !networkStreamers.some((s) => s.id === activeHost.id || s.handle === activeHost.handle) ? [{
-      id: activeHost.id || 'liveme-host-myself',
+  // Filter streamers - STRICT HANDLE DEDUPLICATION (zero repeating cards)
+  const userHandle = (currentUser?.handle || 'luciano').toLowerCase().replace('@', '').trim();
+  const isUserBroadcasting =
+    liveStreamSync.isLocalHost() ||
+    localStorage.getItem('privity_is_host_broadcasting') === 'true';
+
+  const streamersByHandle = new Map<string, LiveMeStreamer>();
+
+  // 1. Host card: ONLY show if host is ACTUALLY broadcasting right now!
+  if (activeHost && isUserBroadcasting) {
+    const hostHandle = (activeHost.handle || userHandle).toLowerCase().replace('@', '').trim();
+    streamersByHandle.set(hostHandle, {
+      id: activeHost.id || `live-user-${hostHandle}`,
       handle: activeHost.handle || currentUser?.handle || 'luciano',
       name: `${activeHost.name || currentUser?.name || 'Luciano'} (LIVE NOW 🔴)`,
       avatar: activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500',
@@ -101,9 +155,30 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       isHost: true,
       isCameraStream: true,
       topContributors: [],
-    }] : []),
-    ...LIVEME_STREAMERS.filter((s) => !networkStreamers.some((ns) => ns.id === s.id)),
-  ];
+    });
+  }
+
+  // 2. Active network streamers (filter out the host if already ended or closed)
+  for (const s of networkStreamers) {
+    const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
+    if (!normHandle) continue;
+    if (normHandle === userHandle && !isUserBroadcasting) {
+      continue;
+    }
+    if (!streamersByHandle.has(normHandle)) {
+      streamersByHandle.set(normHandle, s);
+    }
+  }
+
+  // 3. Fallback catalog streamers: add only if creator not already active
+  for (const s of LIVEME_STREAMERS) {
+    const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
+    if (!streamersByHandle.has(normHandle)) {
+      streamersByHandle.set(normHandle, s);
+    }
+  }
+
+  const allStreamers: LiveMeStreamer[] = Array.from(streamersByHandle.values());
 
   const filteredStreamers = allStreamers
     .filter((s) => {
@@ -456,18 +531,16 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
                     onMouseEnter={() => handleCardMouseEnter(streamer.id)}
                     onMouseLeave={handleCardMouseLeave}
                   >
-                    {/* Visual Canvas: Cover Image (Chosen Pre-Live) OR Active Video Stream */}
+                    {/* Visual Canvas: Real-Time Live Feed or Cover Image */}
                     <div className="live-card-media-viewport">
-                      {/* Photo selected by the streamer before starting broadcast */}
-                      <img
-                        src={streamer.posterUrl || streamer.avatar}
-                        alt={streamer.name}
-                        className="live-card-poster-image"
-                        loading="lazy"
-                      />
-
-                      {/* Active playing video stream when hovered or scrolled to */}
-                      {isPreviewActive && streamer.videoStreamUrl && (
+                      {liveFramesMap[(streamer.handle || '').toLowerCase().replace('@', '').trim()] ? (
+                        <img
+                          src={liveFramesMap[(streamer.handle || '').toLowerCase().replace('@', '').trim()]}
+                          alt={streamer.name}
+                          className="live-card-active-video live-camera-stream-preview"
+                          style={{ objectFit: 'cover', width: '100%', height: '100%' }}
+                        />
+                      ) : (isPreviewActive || isLiveNow) && streamer.videoStreamUrl ? (
                         <video
                           src={streamer.videoStreamUrl}
                           autoPlay
@@ -475,6 +548,13 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
                           muted
                           playsInline
                           className="live-card-active-video"
+                        />
+                      ) : (
+                        <img
+                          src={streamer.posterUrl || streamer.avatar}
+                          alt={streamer.name}
+                          className="live-card-poster-image"
+                          loading="lazy"
                         />
                       )}
 

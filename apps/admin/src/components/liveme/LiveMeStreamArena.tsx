@@ -29,7 +29,7 @@ export interface LiveBroadcastSummaryData {
 }
 
 export interface LiveMeStreamArenaProps {
-  onClose: () => void;
+  onClose: (opts?: { wasEnded?: boolean; isHost?: boolean }) => void;
   initialStreamerId?: string;
   currentUser?: {
     name: string;
@@ -1250,7 +1250,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             if (remaining <= 0) {
               clearInterval(interval);
               setIsLiveEndedOverlayOpen(false);
-              onClose();
+              onClose({ wasEnded: true, isHost: false });
             }
           }, 1000);
         }
@@ -1279,7 +1279,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (currentUser.handle.toLowerCase() === evt.handle.toLowerCase()) {
           showToastRef.current('👢 You were removed from this live broadcast by the host.');
           setTimeout(() => {
-            onClose();
+            onClose({ wasEnded: true, isHost: false });
           }, 1500);
         }
         setLiveViewersCount((prev) => Math.max(0, prev - 1));
@@ -1287,7 +1287,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (currentUser.handle.toLowerCase() === evt.handle.toLowerCase()) {
           showToastRef.current('🚫 You have been blocked from this live broadcast.');
           setTimeout(() => {
-            onClose();
+            onClose({ wasEnded: true, isHost: false });
           }, 1200);
         }
         setLiveViewersCount((prev) => Math.max(0, prev - 1));
@@ -2328,12 +2328,26 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               <span>{liveViewersCount.toLocaleString()}</span>
             </div>
 
+            {/* Optional Minimize to PiP Button for Viewers */}
+            {!isHost && (
+              <button
+                type="button"
+                className="liveme-close-btn liveme-min-pip-btn"
+                onClick={() => onClose({ wasEnded: false, isHost: false })}
+                title="Minimize to Picture-in-Picture"
+                aria-label="Minimize to Picture-in-Picture"
+                style={{ marginRight: '6px', fontSize: '15px' }}
+              >
+                ⤓
+              </button>
+            )}
+
             {/* Close / End Live Button (Prominent X button at very top right) */}
             <button
               type="button"
               id="liveme-end-broadcast-btn"
               className="liveme-close-btn"
-              onClick={isHost ? () => setIsConfirmEndOpen(true) : onClose}
+              onClick={isHost ? () => setIsConfirmEndOpen(true) : () => onClose({ wasEnded: false, isHost: false })}
               title={isHost ? 'End Broadcast' : 'Close Stream'}
               aria-label={isHost ? 'End Broadcast' : 'Close Stream'}
             >
@@ -2909,7 +2923,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                     followersGained: Math.floor(liveViewersCount * 0.12),
                   });
                 }
-                onClose();
+                onClose({ wasEnded: true, isHost: true });
               }}
             >
               Done & Return to Feed
@@ -3002,7 +3016,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             <button
               type="button"
               className="liveme-ended-close-now-btn"
-              onClick={onClose}
+              onClick={() => onClose({ wasEnded: true, isHost: false })}
             >
               Exit Now
             </button>

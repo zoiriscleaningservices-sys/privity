@@ -37,11 +37,15 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
   const [isCoinGamesOpen, setIsCoinGamesOpen] = useState(false);
 
-  // Cross-tab active live host detection
+  // Cross-tab active live host detection - only if broadcasting
   const [activeHost, setActiveHost] = useState<any>(() => {
     try {
+      const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
       const saved = localStorage.getItem('privity_current_live_host');
-      return saved ? JSON.parse(saved) : null;
+      if (isBroadcasting && saved) {
+        return JSON.parse(saved);
+      }
+      return null;
     } catch {
       return null;
     }
@@ -59,8 +63,23 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
         }
       };
     } catch {}
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'privity_is_host_broadcasting' || e.key === 'privity_current_live_host') {
+        const isB = localStorage.getItem('privity_is_host_broadcasting') === 'true';
+        const saved = localStorage.getItem('privity_current_live_host');
+        if (isB && saved) {
+          try { setActiveHost(JSON.parse(saved)); } catch { setActiveHost(null); }
+        } else {
+          setActiveHost(null);
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
     return () => {
       if (bus) bus.close();
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
 
@@ -74,10 +93,57 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
     });
   }, []);
 
-  const allStreamers = [
-    ...networkStreamers,
-    ...LIVEME_STREAMERS.filter((s) => !networkStreamers.some((ns) => ns.id === s.id)),
-  ];
+  // Strict handle deduplication
+  const userHandle = (currentUser?.handle || 'luciano').toLowerCase().replace('@', '').trim();
+  const isUserBroadcasting =
+    liveStreamSync.isLocalHost() ||
+    localStorage.getItem('privity_is_host_broadcasting') === 'true';
+
+  const streamersByHandle = new Map<string, LiveMeStreamer>();
+
+  if (activeHost && isUserBroadcasting) {
+    const hostHandle = (activeHost.handle || userHandle).toLowerCase().replace('@', '').trim();
+    streamersByHandle.set(hostHandle, {
+      id: activeHost.id || `live-user-${hostHandle}`,
+      handle: activeHost.handle || currentUser?.handle || 'luciano',
+      name: `${activeHost.name || currentUser?.name || 'Luciano'} (LIVE NOW 🔴)`,
+      avatar: activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500',
+      isVerified: true,
+      category: 'Featured',
+      title: activeHost.title || 'My Live Broadcast · Privity Exclusive',
+      description: 'Live host studio broadcast',
+      viewersCount: Math.max(1, activeHost.viewersCount || 1),
+      totalViews: `${Math.max(1, activeHost.viewersCount || 1)}`,
+      popularity: '999+',
+      diamonds: 50000,
+      likesCount: 1200,
+      videoStreamUrl: activeHost.videoStreamUrl,
+      posterUrl: activeHost.posterUrl || activeHost.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=900',
+      tags: ['Host', 'LiveNow', 'Privity'],
+      tagBadge: 'LIVE NOW',
+      isHost: true,
+      isCameraStream: true,
+      topContributors: [],
+    });
+  }
+
+  for (const s of networkStreamers) {
+    const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
+    if (!normHandle) continue;
+    if (normHandle === userHandle && !isUserBroadcasting) continue;
+    if (!streamersByHandle.has(normHandle)) {
+      streamersByHandle.set(normHandle, s);
+    }
+  }
+
+  for (const s of LIVEME_STREAMERS) {
+    const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
+    if (!streamersByHandle.has(normHandle)) {
+      streamersByHandle.set(normHandle, s);
+    }
+  }
+
+  const allStreamers = Array.from(streamersByHandle.values());
 
   const heroStreamer = allStreamers[0] || LIVEME_STREAMERS[0];
 

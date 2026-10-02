@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import './livePipPlayer.css';
 import { LiveMeStreamer } from './types';
 import { IconX } from '../Icons';
+import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSyncService';
 
 export interface LivePipPlayerProps {
   streamer: LiveMeStreamer;
@@ -14,6 +15,40 @@ export const LivePipPlayer: React.FC<LivePipPlayerProps> = ({
   onMaximize,
   onClose,
 }) => {
+  const [liveFrame, setLiveFrame] = useState<string | null>(null);
+
+  useEffect(() => {
+    const roomId = streamer.id || getRoomIdFromHandle(streamer.handle);
+    let frameBus: BroadcastChannel | null = null;
+
+    try {
+      frameBus = new BroadcastChannel('privity_live_frames');
+      frameBus.onmessage = (e) => {
+        if (e.data?.type === 'FRAME' && e.data.handle && e.data.frame) {
+          const normA = e.data.handle.toLowerCase().replace('@', '').trim();
+          const normB = (streamer.handle || '').toLowerCase().replace('@', '').trim();
+          if (normA === normB) {
+            setLiveFrame(e.data.frame);
+          }
+        }
+      };
+    } catch {}
+
+    const unsubRoom = liveStreamSync.subscribeToRoomEvents(roomId, (evt) => {
+      if (evt.type === 'LIVE_FRAME' && evt.frame) {
+        setLiveFrame(evt.frame);
+      } else if (evt.type === 'LIVE_ENDED') {
+        // Stream ended while in PiP - terminate PiP immediately!
+        onClose();
+      }
+    });
+
+    return () => {
+      if (frameBus) frameBus.close();
+      unsubRoom();
+    };
+  }, [streamer.id, streamer.handle, onClose]);
+
   return (
     <div
       className="live-pip-container"
@@ -29,7 +64,14 @@ export const LivePipPlayer: React.FC<LivePipPlayerProps> = ({
     >
       {/* Live Video Media Canvas */}
       <div className="live-pip-media-frame">
-        {streamer.videoStreamUrl ? (
+        {liveFrame ? (
+          <img
+            src={liveFrame}
+            alt={streamer.name}
+            className="live-pip-video live-camera-active"
+            style={{ objectFit: 'cover', width: '100%', height: '100%' }}
+          />
+        ) : streamer.videoStreamUrl ? (
           <video
             src={streamer.videoStreamUrl}
             poster={streamer.posterUrl || streamer.avatar}
