@@ -180,11 +180,11 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       category: currentHost.category || 'Featured',
       title: currentHost.title || 'My Live Broadcast · Privity Exclusive',
       description: currentHost.description || 'Live host studio broadcast',
-      viewersCount: Math.max(1, currentHost.viewersCount || 1),
-      totalViews: `${Math.max(1, currentHost.viewersCount || 1)}`,
-      popularity: '999+',
-      diamonds: 50000,
-      likesCount: currentHost.likesCount || 1200,
+      viewersCount: currentHost.viewersCount || 0,
+      totalViews: `${currentHost.viewersCount || 0}`,
+      popularity: `${currentHost.popularity || 0}`,
+      diamonds: currentHost.diamonds || 0,
+      likesCount: currentHost.likesCount || 0,
       videoStreamUrl: currentHost.videoStreamUrl,
       posterUrl: currentHost.posterUrl || currentHost.previewUrl || avatar,
       tags: ['Host', 'LiveNow', 'Privity'],
@@ -686,19 +686,50 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
           })}
         </div>
 
-        {/* Empty state if search returns nothing */}
+        {/* Empty state if no live streams or search returns nothing */}
         {filteredStreamers.length === 0 && (
-          <div className="live-explore-empty-state">
-            <div className="empty-icon">📡</div>
-            <div className="empty-title">No broadcasts found</div>
-            <div className="empty-sub">Try searching for another creator or switch categories.</div>
-            <button
-              type="button"
-              className="btn-reset-filter"
-              onClick={() => { setSearchQuery(''); setActiveTab('featured'); setActiveChip('recommend'); }}
-            >
-              Reset Filters
-            </button>
+          <div className="live-explore-empty-state" style={{ padding: '60px 20px', textAlign: 'center' }}>
+            <div className="empty-icon" style={{ fontSize: '48px', marginBottom: '16px' }}>📡</div>
+            <div className="empty-title" style={{ fontSize: '20px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+              {searchQuery ? 'No broadcasts found' : 'No One is Live Right Now'}
+            </div>
+            <div className="empty-sub" style={{ fontSize: '14px', color: 'rgba(255,255,255,0.65)', maxWidth: '400px', margin: '0 auto 24px auto', lineHeight: 1.5 }}>
+              {searchQuery
+                ? 'Try searching for another creator or keyword.'
+                : 'Be the first creator to go live and share your broadcast with the entire community!'}
+            </div>
+            {onGoLive && !searchQuery ? (
+              <button
+                type="button"
+                className="live-empty-golive-btn"
+                onClick={onGoLive}
+                style={{
+                  background: 'linear-gradient(135deg, #ef4444, #f43f5e)',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '12px 28px',
+                  borderRadius: '30px',
+                  fontWeight: 700,
+                  fontSize: '15px',
+                  cursor: 'pointer',
+                  boxShadow: '0 8px 24px rgba(239, 68, 68, 0.4)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <span>🔴</span>
+                <span>Go Live Now</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn-reset-filter"
+                onClick={() => { setSearchQuery(''); setActiveTab('featured'); setActiveChip('recommend'); }}
+              >
+                Reset Search
+              </button>
+            )}
           </div>
         )}
       </main>

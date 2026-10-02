@@ -66,20 +66,29 @@ import { LiveMeStreamer } from './components/liveme/types';
 import { liveStreamSync } from './services/liveStreamSyncService';
 import {
   TikTokSlideFeed,
-  EXCLUSIVE_FORYOU_POSTS,
-  EXCLUSIVE_FOLLOWING_POSTS,
-  EXCLUSIVE_CIRCLES_POSTS,
-  EXCLUSIVE_BIRDIE_POSTS,
   INITIAL_STORIES_V3,
   StoryItem,
 } from './components/feed/TikTokSlideFeed';
+import { authService, UserAccount } from './services/authService';
+import { AuthModal } from './components/auth';
 
-const ALL_TEMPLATE_POSTS: PostItem[] = [
-  ...EXCLUSIVE_FORYOU_POSTS,
-  ...EXCLUSIVE_FOLLOWING_POSTS,
-  ...EXCLUSIVE_CIRCLES_POSTS,
-  ...EXCLUSIVE_BIRDIE_POSTS,
-] as unknown as PostItem[];
+// Guaranteed One-Time Zero Reset: Wipes legacy cached fake/mock data in localStorage
+if (typeof window !== 'undefined' && localStorage.getItem('privity_zero_reset_v4') !== 'done') {
+  try {
+    localStorage.removeItem('privity_posts_v5');
+    localStorage.removeItem('privity_profiles_v5');
+    localStorage.removeItem('privity_following_v5');
+    localStorage.removeItem('privity_close_friends_v5');
+    localStorage.removeItem('privity_stories_v3');
+    localStorage.removeItem('privity_direct_messages_v5');
+    localStorage.removeItem('privity_photo_likes_v5');
+    localStorage.removeItem('privity_live_streams_v2');
+    localStorage.removeItem('privity_ended_streams_v1');
+    localStorage.setItem('privity_zero_reset_v4', 'done');
+  } catch (e) {}
+}
+
+const ALL_TEMPLATE_POSTS: PostItem[] = [];
 
 
 // 24-hour persistent story loader (strictly within stories)
@@ -200,388 +209,9 @@ interface PostItem {
   comments: PostComment[];
 }
 
-const SAMPLE_POSTS: PostItem[] = [
-  {
-    id: 'p-nicole-1',
-    authorId: 'usr-nicole',
-    authorName: 'Nicole🎀🧸',
-    authorHandle: 'nicole_spicy',
-    authorAvatar: './nicole-avatar.jpg',
-    isVerified: true,
-    verifiedCategory: 'Lifestyle & Creator',
-    type: 'video',
-    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-on-video-call-42998-large.mp4',
-    thumbnailUrl: './nicole-spicy.jpg',
-    contentUrl: './nicole-spicy.jpg',
-    soundCover: './mvlan-cover.jpg',
-    caption: '👄 #fyp #viral #miami #video',
-    tags: ['fyp', 'viral', 'miami', 'video'],
-    soundName: 'Brazilian Phonk - Miami Night Racing Pulse',
-    soundArtist: 'PHONK, OCD F42',
-    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/a2/9d/6e/a29d6ee7-34dc-a5d5-aab6-e2eb426dcf4e/mzaf_11998626548754457567.plus.aac.p.m4a',
-    privacy: 'public',
-    likesCount: 140,
-    likersList: ['luciano', 'carlos_m', 'sarita_wave'],
-    commentsCount: 3,
-    sharesCount: 1,
-    savesCount: 6,
-    isLiked: false,
-    isSaved: false,
-    timeAgo: '2h ago',
-    comments: [
-      {
-        id: 'c-n1',
-        authorName: 'Carlos M',
-        authorHandle: 'carlos_m',
-        authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-        isVerified: false,
-        text: 'The Miami vibe is real 🔥 Looking forward to the next stream!',
-        timeAgo: '1h ago',
-        likesCount: 12,
-      },
-      {
-        id: 'c-n2',
-        authorName: 'Sarita',
-        authorHandle: 'sarita_wave',
-        authorAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
-        isVerified: false,
-        text: 'Love the spicy top! Where did you get it? 💖',
-        timeAgo: '45m ago',
-        likesCount: 5,
-      },
-      {
-        id: 'c-n3',
-        authorName: 'Luciano',
-        authorHandle: 'luciano',
-        authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-        isVerified: true,
-        text: 'Welcome to Privity! Keep the great content coming.',
-        timeAgo: '15m ago',
-        likesCount: 8,
-      },
-    ],
-  },
-  {
-    id: 'p-101',
-    authorId: 'usr-elena',
-    authorName: 'Elena Rodriguez',
-    authorHandle: 'elena_rodriguez',
-    authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-    isVerified: true,
-    verifiedCategory: 'Visual Artist & Photographer',
-    verifiedSince: 'Verified Nov 2025',
-    cryptoProofId: 'priv_ed25519_e891ab73f9',
-    type: 'image',
-    contentUrl: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1200&auto=format&fit=crop&q=85',
-    caption: 'Quiet morning in the northern studio. Painting and shooting without the invisible pressure of an engagement algorithm. Here is a study on natural window diffusion and quiet space.',
-    tags: ['photography', 'mindful', 'studio', 'analogue'],
-    soundName: 'Aesthetic Lofi Study Chill',
-    soundArtist: 'Lofi Fruits Music',
-    soundCover: 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/ef/a0/0b/efa00b65-ea9a-0e9e-56aa-a3ce25ee7a89/194491795057.jpg/100x100bb.jpg',
-    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview125/v4/71/61/8b/71618b76-47eb-fa2e-cb42-2b635677dca7/mzaf_15783307567888741369.plus.aac.p.m4a',
-    privacy: 'close_friends',
-    likesCount: 5,
-    likersList: ['marcus_dev', 'sara_architecture', 'julian_analogue', 'chloe_visuals', 'luciano'],
-    commentsCount: 3,
-    sharesCount: 1,
-    savesCount: 14,
-    isLiked: true,
-    isSaved: true,
-    timeAgo: '14m ago',
-    comments: [
-      {
-        id: 'c-1',
-        authorName: 'Marcus Vance',
-        authorHandle: 'marcus_dev',
-        authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-        isVerified: true,
-        text: 'The warm tones on that cedar frame are breathtaking. Was this natural light from the skylight?',
-        timeAgo: '10m ago',
-        likesCount: 3,
-        replies: [
-          {
-            id: 'r-1',
-            authorName: 'Elena Rodriguez',
-            authorHandle: 'elena_rodriguez',
-            authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
-            isVerified: true,
-            text: 'Yes Marcus! Portra 400 shot at box speed, natural morning exposure.',
-            timeAgo: '6m ago',
-          },
-        ],
-      },
-      {
-        id: 'c-2',
-        authorName: 'Sara Lin',
-        authorHandle: 'sara_architecture',
-        authorAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
-        isVerified: true,
-        text: 'So grateful to be in this circle Elena. This feels like what the web was meant to be.',
-        timeAgo: '4m ago',
-        likesCount: 2,
-      },
-    ],
-  },
-  {
-    id: 'p-102',
-    authorId: 'usr-marcus',
-    authorName: 'Marcus Vance',
-    authorHandle: 'marcus_dev',
-    authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-    isVerified: true,
-    verifiedCategory: 'Systems Architect & Writer',
-    verifiedSince: 'Verified Jan 2026',
-    cryptoProofId: 'priv_ed25519_7c41bf920a',
-    type: 'text',
-    caption: 'The fundamental flaw of 2010s social media was measuring human connection through infinite reach metrics (followers, impressions, virality). When you make distribution algorithmic, creators are forced to perform for the machine.\n\nPrivity restores human agency: explicit audience circles, zero recommendation tampering, and transparent privacy.',
-    tags: ['privacy', 'software', 'social', 'manifesto'],
-    privacy: 'followers',
-    likesCount: 4,
-    likersList: ['luciano', 'elena_rodriguez', 'sara_architecture', 'julian_analogue'],
-    commentsCount: 1,
-    sharesCount: 16,
-    savesCount: 42,
-    isLiked: false,
-    isSaved: false,
-    timeAgo: '1h ago',
-    comments: [
-      {
-        id: 'c-3',
-        authorName: 'Luciano',
-        authorHandle: 'luciano',
-        authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150',
-        isVerified: true,
-        text: 'Spot on Marcus. Privacy by default is how we restore authentic trust.',
-        timeAgo: '42m ago',
-        likesCount: 9,
-      },
-    ],
-  },
-  {
-    id: 'p-103',
-    authorId: 'usr-julian',
-    authorName: 'Julian Thorne',
-    authorHandle: 'julian_analogue',
-    authorAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
-    isVerified: true,
-    verifiedCategory: 'Field Audio Recordist',
-    verifiedSince: 'Verified Mar 2026',
-    cryptoProofId: 'priv_ed25519_88a14b3309',
-    type: 'text',
-    voiceMemoDuration: '0:38',
-    caption: 'Recorded dawn mist reverberations near Big Sur coastal pines. Ambient binaural audio snippet shared with close friends.',
-    tags: ['ambient', 'binaural', 'soundscape', 'california'],
-    privacy: 'close_friends',
-    likesCount: 2,
-    likersList: ['elena_rodriguez', 'marcus_dev'],
-    commentsCount: 0,
-    sharesCount: 0,
-    savesCount: 11,
-    isLiked: false,
-    isSaved: true,
-    timeAgo: '2h ago',
-    comments: [],
-  },
-  {
-    id: 'p-104',
-    authorId: 'usr-chloe',
-    authorName: 'Chloe Kim',
-    authorHandle: 'chloe_visuals',
-    authorAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
-    isVerified: true,
-    verifiedCategory: 'Cinematographer & Director',
-    verifiedSince: 'Verified Feb 2026',
-    cryptoProofId: 'priv_ed25519_119d88bb01',
-    type: 'video',
-    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-sign-1232-large.mp4',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200&auto=format&fit=crop&q=85',
-    soundName: 'Tokyo Rain Neon Pulse',
-    soundArtist: 'The Weeknd ft. Daft Punk',
-    soundCover: 'https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/0c/eb/54/0ceb545d-75e1-8848-8df0-e64e525a7a70/16UMGIM56422.rgb.jpg/100x100bb.jpg',
-    soundUrl: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview115/v4/b8/b5/e0/b8b5e0ee-5878-5a63-7186-b4bc48f3fb8f/mzaf_1170799797003463870.plus.aac.p.m4a',
-    caption: 'Tokyo rain at twilight. 4K 60fps color grade inspired by Wong Kar-wai. Neon reflections on puddles around Shinjuku back alleys.',
-    tags: ['tokyo', 'cinematography', 'video', 'streetphotography'],
-    privacy: 'public',
-    likesCount: 4,
-    likersList: ['elena_rodriguez', 'marcus_dev', 'sara_architecture', 'oliver_wood'],
-    commentsCount: 0,
-    sharesCount: 54,
-    savesCount: 104,
-    isLiked: false,
-    isSaved: false,
-    timeAgo: '4h ago',
-    comments: [],
-  },
-  {
-    id: 'p-105',
-    authorId: 'sc-1',
-    authorName: 'Sara Lin',
-    authorHandle: 'sara_architecture',
-    authorAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400',
-    isVerified: true,
-    verifiedCategory: 'Spatial & Minimal Architecture',
-    verifiedSince: 'Verified Dec 2025',
-    cryptoProofId: 'priv_ed25519_sara_lin',
-    type: 'image',
-    contentUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1200&auto=format&fit=crop&q=85',
-    caption: 'Finished the rammed-earth guest sanctuary pavilion in northern Kyoto. Hand-compacted local river clay, charred cypress eaves, and indirect southern light that breathes through the courtyards.',
-    tags: ['architecture', 'kyoto', 'minimalism', 'naturalmaterials'],
-    privacy: 'followers',
-    likesCount: 3,
-    likersList: ['elena_rodriguez', 'marcus_dev', 'oliver_wood'],
-    commentsCount: 1,
-    sharesCount: 22,
-    savesCount: 51,
-    isLiked: false,
-    isSaved: true,
-    timeAgo: '5h ago',
-    comments: [
-      {
-        id: 'c-501',
-        authorName: 'Elena Rodriguez',
-        authorHandle: 'elena_rodriguez',
-        authorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
-        isVerified: true,
-        text: 'The shadow interplay on the cypress beams is sublime Sara!',
-        timeAgo: '3h ago',
-        likesCount: 5,
-      },
-    ],
-  },
-  {
-    id: 'p-106',
-    authorId: 'sc-3',
-    authorName: 'Oliver Craft',
-    authorHandle: 'oliver_wood',
-    authorAvatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=400',
-    isVerified: false,
-    verifiedCategory: 'Traditional Joinery',
-    type: 'image',
-    contentUrl: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1200&auto=format&fit=crop&q=85',
-    caption: 'Hand-cut through-tenon and wedged mortise joints for a 200-year-old salvaged Oregon white oak dining slab. No fasteners, no metal hardware. Only timber friction and precise hand chiseling.',
-    tags: ['woodworking', 'joinery', 'craftsmanship', 'handtools'],
-    privacy: 'followers',
-    likesCount: 2,
-    likersList: ['sara_architecture', 'sam_arch'],
-    commentsCount: 0,
-    sharesCount: 7,
-    savesCount: 19,
-    isLiked: false,
-    isSaved: false,
-    timeAgo: '7h ago',
-    comments: [],
-  },
-  {
-    id: 'p-107',
-    authorId: 'fr-1',
-    authorName: 'Sam Archer',
-    authorHandle: 'sam_arch',
-    authorAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400',
-    isVerified: false,
-    verifiedCategory: 'Wilderness Guide',
-    type: 'image',
-    contentUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1200&auto=format&fit=crop&q=85',
-    caption: 'First light crossing Fisher Chimneys on Mount Shuksan. High alpine ice conditions were crystalline and still. Privileged to share this exclusively with close circle friends.',
-    tags: ['alpinism', 'cascades', 'mountaineering', 'sunrise'],
-    privacy: 'close_friends',
-    likesCount: 2,
-    likersList: ['oliver_wood', 'marcus_dev'],
-    commentsCount: 0,
-    sharesCount: 0,
-    savesCount: 14,
-    isLiked: false,
-    isSaved: false,
-    timeAgo: '12h ago',
-    comments: [],
-  },
-  {
-    id: 'p-108',
-    authorId: 'fr-2',
-    authorName: 'Jessica Vance',
-    authorHandle: 'jess_film',
-    authorAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
-    isVerified: true,
-    verifiedCategory: 'Documentary Filmmaker',
-    verifiedSince: 'Verified Jan 2026',
-    cryptoProofId: 'priv_ed25519_jess_film',
-    type: 'image',
-    contentUrl: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200&auto=format&fit=crop&q=85',
-    caption: 'Production still from our master textile weaver documentary in Arashiyama. 35mm motion picture film negative scanned at 4K.',
-    tags: ['cinema', 'documentary', '35mm', 'japan'],
-    privacy: 'followers',
-    likesCount: 4,
-    likersList: ['marcus_dev', 'elena_rodriguez', 'chloe_visuals', 'luciano'],
-    commentsCount: 0,
-    sharesCount: 38,
-    savesCount: 77,
-    isLiked: true,
-    isSaved: false,
-    timeAgo: '1d ago',
-    comments: [],
-  },
-  {
-    id: 'p-109',
-    authorId: 'usr-luciano',
-    authorName: 'Luciano',
-    authorHandle: 'luciano',
-    authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
-    isVerified: true,
-    verifiedCategory: 'Platform Founder',
-    verifiedSince: 'Verified 2026',
-    cryptoProofId: 'priv_ed25519_luciano_founder',
-    type: 'text',
-    caption: 'Welcome to Privity. We built this network on a non-negotiable premise: your relationships belong to you, not an algorithmic auctioneer. No algorithmic feed sorting, no follower gamification, and absolute privacy sovereignty over who sees what you create.',
-    tags: ['privity', 'privacyfirst', 'manifesto', 'futureofsocial'],
-    privacy: 'public',
-    likesCount: 5,
-    likersList: ['elena_rodriguez', 'marcus_dev', 'julian_analogue', 'sara_architecture', 'luciano'],
-    commentsCount: 1,
-    sharesCount: 65,
-    savesCount: 92,
-    isLiked: true,
-    isSaved: true,
-    timeAgo: '2d ago',
-    comments: [
-      {
-        id: 'c-founder-1',
-        authorName: 'Marcus Vance',
-        authorHandle: 'marcus_dev',
-        authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-        isVerified: true,
-        text: 'This is the exact paradigm shift the internet has needed for 15 years.',
-        timeAgo: '1d ago',
-        likesCount: 14,
-      },
-    ],
-  },
-];
+export const SAMPLE_POSTS: PostItem[] = [];
 
-const SUGGESTED_CREATORS = [
-  {
-    id: 'sara_architecture',
-    name: 'Sara Lin',
-    handle: 'sara_architecture',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150',
-    category: 'Spatial & Minimal Architecture',
-    isVerified: true,
-  },
-  {
-    id: 'julian_analogue',
-    name: 'Julian Thorne',
-    handle: 'julian_analogue',
-    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
-    category: 'Field Audio & Synthesis',
-    isVerified: true,
-  },
-  {
-    id: 'oliver_wood',
-    name: 'Oliver Craft',
-    handle: 'oliver_wood',
-    avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150',
-    category: 'Traditional Joinery',
-    isVerified: false,
-  },
-];
+const SUGGESTED_CREATORS: any[] = [];
 
 interface UserMediaItem {
   id: string;
@@ -615,236 +245,7 @@ interface UserProfile {
   trustCirclesList: string[];
 }
 
-const INITIAL_PROFILES_REGISTRY: Record<string, UserProfile> = {
-  elena_rodriguez: {
-    id: 'usr-elena',
-    name: 'Elena Rodriguez',
-    handle: 'elena_rodriguez',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=85',
-    coverUrl: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600&auto=format&fit=crop&q=85',
-    isVerified: true,
-    verifiedCategory: 'Visual Artist & Photographer',
-    verifiedSince: 'Verified Nov 2025',
-    cryptoProofId: 'priv_ed25519_e891ab73f9',
-    bio: 'Exploring northern studio light, natural window diffusion, and mindful moments without algorithmic pressure. 120 medium format analogue film & oil painting.',
-    category: 'Visual Artist & Photographer',
-    location: 'Stockholm, Sweden',
-    joinedDate: 'November 2025',
-    website: 'elenarodriguez.art',
-    circleStatus: 'Close Friend',
-    isPrivate: false,
-    followersList: ['marcus_dev', 'sara_architecture', 'julian_analogue', 'luciano', 'chloe_visuals', 'jess_film'],
-    followingList: ['marcus_dev', 'sara_architecture', 'julian_analogue', 'luciano'],
-    trustCirclesList: ['marcus_dev', 'sara_architecture', 'luciano'],
-    mediaItems: [
-      { id: 'm-elena-1', url: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 28, comments: 3 },
-      { id: 'm-elena-2', url: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 45, comments: 6 },
-      { id: 'm-elena-3', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 82, comments: 9 },
-      { id: 'm-elena-4', url: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 67, comments: 4 },
-      { id: 'm-elena-5', url: 'https://images.unsplash.com/photo-1499781350541-7783f6c6a0c8?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 110, comments: 12 },
-      { id: 'm-elena-6', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 53, comments: 7 },
-    ],
-  },
-  marcus_dev: {
-    id: 'usr-marcus',
-    name: 'Marcus Vance',
-    handle: 'marcus_dev',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=85',
-    coverUrl: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1600&auto=format&fit=crop&q=85',
-    isVerified: true,
-    verifiedCategory: 'Systems Architect & Writer',
-    verifiedSince: 'Verified Jan 2026',
-    cryptoProofId: 'priv_ed25519_7c41bf920a',
-    bio: 'Designing decentralised trust and local-first cryptographic architectures. Author of "Agency Over Algorithms". Advocate for transparent visibility circles.',
-    category: 'Systems Architect & Writer',
-    location: 'Seattle, WA',
-    joinedDate: 'January 2026',
-    website: 'marcusvance.io',
-    circleStatus: 'Mutual Follower',
-    isPrivate: false,
-    followersList: ['elena_rodriguez', 'luciano', 'sara_architecture', 'sam_arch', 'oliver_wood', 'chloe_visuals'],
-    followingList: ['elena_rodriguez', 'luciano', 'sara_architecture'],
-    trustCirclesList: ['elena_rodriguez', 'luciano'],
-    mediaItems: [
-      { id: 'm-marcus-1', url: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 76, comments: 8 },
-      { id: 'm-marcus-2', url: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 124, comments: 15 },
-      { id: 'm-marcus-3', url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 89, comments: 11 },
-    ],
-  },
-  julian_analogue: {
-    id: 'usr-julian',
-    name: 'Julian Thorne',
-    handle: 'julian_analogue',
-    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&auto=format&fit=crop&q=85',
-    coverUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1600&auto=format&fit=crop&q=85',
-    isVerified: true,
-    verifiedCategory: 'Field Audio Recordist',
-    verifiedSince: 'Verified Mar 2026',
-    cryptoProofId: 'priv_ed25519_88a14b3309',
-    bio: 'Capturing dawn reverberations, coastal mist, and modular synthesis in high fidelity binaural sound. Sharing raw audio snippets with close circle friends.',
-    category: 'Field Audio & Synthesis',
-    location: 'Big Sur, California',
-    joinedDate: 'March 2026',
-    website: 'juliansound.com',
-    circleStatus: 'Close Friend',
-    isPrivate: false,
-    followersList: ['elena_rodriguez', 'marcus_dev', 'luciano', 'jess_film'],
-    followingList: ['elena_rodriguez', 'marcus_dev', 'luciano'],
-    trustCirclesList: ['elena_rodriguez', 'marcus_dev'],
-    mediaItems: [
-      { id: 'm-julian-1', url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 31, comments: 2 },
-      { id: 'm-julian-2', url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 58, comments: 5 },
-      { id: 'm-julian-3', url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 92, comments: 14 },
-    ],
-  },
-  chloe_visuals: {
-    id: 'usr-chloe',
-    name: 'Chloe Kim',
-    handle: 'chloe_visuals',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&auto=format&fit=crop&q=85',
-    coverUrl: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1600&auto=format&fit=crop&q=85',
-    isVerified: true,
-    verifiedCategory: 'Cinematographer & Director',
-    verifiedSince: 'Verified Feb 2026',
-    cryptoProofId: 'priv_ed25519_119d88bb01',
-    bio: 'Nocturnal visual narratives, anamorphic glass, and quiet city reflections. Directing short-form cinema across Tokyo and Seoul.',
-    category: 'Cinematographer & Director',
-    location: 'Tokyo / Seoul',
-    joinedDate: 'February 2026',
-    website: 'chloekim.film',
-    circleStatus: 'Public Connection',
-    isPrivate: false,
-    followersList: ['elena_rodriguez', 'marcus_dev', 'sara_architecture', 'luciano', 'oliver_wood'],
-    followingList: ['elena_rodriguez', 'marcus_dev'],
-    trustCirclesList: ['elena_rodriguez', 'luciano'],
-    mediaItems: [
-      { id: 'm-chloe-1', url: 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 312, comments: 19 },
-      { id: 'm-chloe-2', url: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 215, comments: 14 },
-      { id: 'm-chloe-3', url: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 184, comments: 9 },
-      { id: 'm-chloe-4', url: 'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 240, comments: 17 },
-    ],
-  },
-  sara_architecture: {
-    id: 'sara_architecture',
-    name: 'Sara Lin',
-    handle: 'sara_architecture',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&auto=format&fit=crop&q=85',
-    coverUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=1600&auto=format&fit=crop&q=85',
-    isVerified: true,
-    verifiedCategory: 'Spatial & Minimal Architecture',
-    verifiedSince: 'Verified Dec 2025',
-    cryptoProofId: 'priv_ed25519_sara_lin',
-    bio: 'Designing spaces that honor natural shadow, timber joints, and breathing room. Sustainable rammed-earth residences between Kyoto and Copenhagen.',
-    category: 'Spatial & Minimal Architecture',
-    location: 'Kyoto / Copenhagen',
-    joinedDate: 'December 2025',
-    website: 'saralin.space',
-    circleStatus: 'Close Friend',
-    isPrivate: false,
-    followersList: ['elena_rodriguez', 'marcus_dev', 'oliver_wood', 'luciano'],
-    followingList: ['elena_rodriguez', 'oliver_wood', 'luciano'],
-    trustCirclesList: ['elena_rodriguez', 'oliver_wood'],
-    mediaItems: [
-      { id: 'm-sara-1', url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 94, comments: 8 },
-      { id: 'm-sara-2', url: 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 140, comments: 12 },
-      { id: 'm-sara-3', url: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 78, comments: 6 },
-    ],
-  },
-  oliver_wood: {
-    id: 'oliver_wood',
-    name: 'Oliver Craft',
-    handle: 'oliver_wood',
-    avatar: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=400&auto=format&fit=crop&q=85',
-    coverUrl: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1600&auto=format&fit=crop&q=85',
-    isVerified: false,
-    verifiedCategory: 'Traditional Joinery',
-    bio: 'Hand-cut mortise and tenon joinery. Zero screws, zero nails, generational hardwood furniture built to outlive us all.',
-    category: 'Traditional Joinery',
-    location: 'Portland, OR',
-    joinedDate: 'February 2026',
-    website: 'olivercraftwood.com',
-    circleStatus: 'Public Connection',
-    isPrivate: false,
-    followersList: ['sara_architecture', 'marcus_dev', 'sam_arch', 'luciano'],
-    followingList: ['sara_architecture', 'sam_arch'],
-    trustCirclesList: ['sara_architecture'],
-    mediaItems: [
-      { id: 'm-oliver-1', url: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 42, comments: 3 },
-      { id: 'm-oliver-2', url: 'https://images.unsplash.com/photo-1538688525198-9b88f6f53126?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 65, comments: 7 },
-    ],
-  },
-  sam_arch: {
-    id: 'sam_arch',
-    name: 'Sam Archer',
-    handle: 'sam_arch',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400&auto=format&fit=crop&q=85',
-    coverUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1600&auto=format&fit=crop&q=85',
-    isVerified: false,
-    verifiedCategory: 'Wilderness Guide',
-    bio: 'Alpine routes, backcountry skiing, and high altitude photography in the North Cascades. Private circle only.',
-    category: 'Wilderness Guide',
-    location: 'Cascades, WA',
-    joinedDate: 'April 2026',
-    website: 'samarcher.guide',
-    circleStatus: 'Public Connection',
-    isPrivate: true, // DEMONSTRATING REAL PRIVATE ACCOUNT CONTROLS
-    followersList: ['oliver_wood', 'marcus_dev', 'luciano'],
-    followingList: ['oliver_wood', 'marcus_dev'],
-    trustCirclesList: ['oliver_wood'],
-    mediaItems: [
-      { id: 'm-sam-1', url: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 38, comments: 2 },
-    ],
-  },
-  jess_film: {
-    id: 'jess_film',
-    name: 'Jessica Vance',
-    handle: 'jess_film',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400',
-    coverUrl: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1600&auto=format&fit=crop&q=85',
-    isVerified: true,
-    verifiedCategory: 'Documentary Filmmaker',
-    verifiedSince: 'Verified Jan 2026',
-    cryptoProofId: 'priv_ed25519_jess_film',
-    bio: 'Independent cinema documenting artisan traditions and human resilience across 18 countries.',
-    category: 'Documentary Filmmaker',
-    location: 'Brooklyn, NY',
-    joinedDate: 'January 2026',
-    website: 'jessicavance.com',
-    circleStatus: 'Mutual Follower',
-    isPrivate: false,
-    followersList: ['marcus_dev', 'elena_rodriguez', 'luciano', 'chloe_visuals'],
-    followingList: ['marcus_dev', 'elena_rodriguez', 'luciano'],
-    trustCirclesList: ['marcus_dev', 'elena_rodriguez'],
-    mediaItems: [
-      { id: 'm-jess-1', url: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 180, comments: 16 },
-    ],
-  },
-  luciano: {
-    id: 'usr-luciano',
-    name: 'Luciano',
-    handle: 'luciano',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
-    coverUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&auto=format&fit=crop&q=85',
-    isVerified: true,
-    verifiedCategory: 'Platform Founder',
-    verifiedSince: 'Verified 2026',
-    cryptoProofId: 'priv_ed25519_luciano_founder',
-    bio: 'Architecting Privity: private-first sharing, real circles, no algorithmic games. Building the next generation of authentic human connection.',
-    category: 'Platform Founder',
-    location: 'San Francisco, CA',
-    joinedDate: 'Founder · 2026',
-    website: 'privity.app',
-    circleStatus: 'You',
-    isPrivate: false,
-    followersList: ['elena_rodriguez', 'marcus_dev', 'julian_analogue', 'sara_architecture', 'chloe_visuals', 'jess_film', 'sam_arch', 'oliver_wood'],
-    followingList: ['elena_rodriguez', 'marcus_dev', 'julian_analogue', 'sara_architecture'],
-    trustCirclesList: ['elena_rodriguez', 'marcus_dev', 'sara_architecture'],
-    mediaItems: [
-      { id: 'm-luciano-1', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 54, comments: 6 },
-      { id: 'm-luciano-2', url: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=800&auto=format&fit=crop&q=85', type: 'image', likes: 40, comments: 3 },
-    ],
-  },
-};
+const INITIAL_PROFILES_REGISTRY: Record<string, UserProfile> = {};
 
 // ==================== LIVE ENCRYPTED STREAMS MODEL ====================
 export type FeedFilterTab = 'live' | 'feed' | 'all' | 'close_friends' | 'followers' | 'birdie';
@@ -908,159 +309,13 @@ export interface LiveStreamSession {
   dailyRank: string;
   previewUrl: string;
   videoStreamUrl?: string;
-  battleInfo: LiveBattleInfo;
+  battleInfo?: LiveBattleInfo;
   multiGuests: LiveGuestSlot[];
   participants: Array<{ name: string; avatar: string; role: string }>;
   tags: string[];
 }
 
-export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [
-  {
-    id: 'live-chloe-4',
-    creatorHandle: 'chloe_visuals',
-    creatorName: 'Chloe Vance',
-    creatorAvatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150',
-    isVerified: false,
-    category: 'Sound Artist',
-    title: 'Modular Synthesizer & Ambient Sound Lab Live',
-    description: 'Generative patches on Eurorack, exploring spatial audio fields and analog warmth.',
-    viewersCount: 520,
-    likesCount: 4891,
-    dailyRank: '🎵 Music Spotlight',
-    previewUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900',
-    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-talking-on-a-video-call-with-her-laptop-42998-large.mp4',
-    battleInfo: {
-      opponentName: 'Julian Thorne',
-      opponentHandle: 'julian_analogue',
-      opponentAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
-      opponentVideoUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
-      opponentStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4',
-      hostScore: 2150,
-      opponentScore: 2407,
-      timeLeft: '02:09',
-      isMatchActive: true,
-      matchTitle: 'Sound vs Light Duel',
-    },
-    multiGuests: [],
-    participants: [],
-    tags: ['Ambient', 'Modular', 'SoundDesign'],
-  },
-  {
-    id: 'live-elena-1',
-    creatorHandle: 'elena_rodriguez',
-    creatorName: 'Elena Rodriguez',
-    creatorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    isVerified: true,
-    category: 'System Architect',
-    title: 'Live Battle Match · Arena Championship',
-    description: 'Real-time interactive live battle! Cheer with gifts and help Elena win the round.',
-    viewersCount: 1840,
-    likesCount: 14820,
-    dailyRank: '🔥 Daily Ranking #2',
-    previewUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
-    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-fashion-model-in-neon-lighting-39878-large.mp4',
-    battleInfo: {
-      opponentName: 'Marcus Vance',
-      opponentHandle: 'marcus_dev',
-      opponentAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-      opponentVideoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
-      opponentStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-dj-mixing-music-in-a-club-41712-large.mp4',
-      coHostName: 'Julian Thorne',
-      coHostVideoUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
-      hostScore: 3840,
-      opponentScore: 3260,
-      timeLeft: '02:45',
-      isMatchActive: true,
-      matchTitle: 'LIVE PK Battle · Speed Round',
-    },
-    multiGuests: [
-      { id: 'g1', name: 'Elena R.', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', viewers: 'Host', isSpeaking: true, role: 'Host', flag: '👑' },
-      { id: 'g2', name: 'Marcus', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', viewers: '2.71K', isSpeaking: false, flag: '💎' },
-      { id: 'g3', name: 'Julian', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', viewers: '840', isSpeaking: false, flag: '⭐' },
-      { id: 'g4', name: 'Chloe V.', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', viewers: '445', isSpeaking: true, flag: '✨' },
-      { id: 'g5', name: 'Sara Lin', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150', viewers: '310', isSpeaking: false, flag: '🔥' },
-      { id: 'g6', name: 'Alex M.', avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150', viewers: '190', isSpeaking: false, flag: '🚀' },
-      { id: 'g7', name: 'Linda K.', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150', viewers: '95', isSpeaking: false, flag: '🌸' },
-      { id: 'g8', name: 'Daniel B.', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150', viewers: '148', isSpeaking: false, flag: '⚡' },
-      { id: 'g9', name: 'Take Seat', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150', viewers: 'Open', isMuted: true, role: 'Join' },
-    ],
-    participants: [
-      { name: 'Marcus Vance', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', role: 'Opponent' },
-      { name: 'Julian Thorne', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', role: 'Co-Host' },
-      { name: 'Sara Lin', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150', role: 'Listener' },
-    ],
-    tags: ['Battle', 'PKMatch', 'P2P', 'WebRTC'],
-  },
-  {
-    id: 'live-marcus-2',
-    creatorHandle: 'marcus_dev',
-    creatorName: 'Marcus Vance',
-    creatorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-    isVerified: true,
-    category: 'Security Lead',
-    title: 'Live Ed25519 Cryptographic Proof Auditing & Key Battles',
-    description: 'Demonstrating how Privity verifies post identity and prevents sybil spam with zero personal data leakage.',
-    viewersCount: 1120,
-    likesCount: 9840,
-    dailyRank: '🔥 Daily Ranking #4',
-    previewUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
-    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-dj-mixing-music-in-a-club-41712-large.mp4',
-    battleInfo: {
-      opponentName: 'Elena Rodriguez',
-      opponentHandle: 'elena_rodriguez',
-      opponentAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-      opponentVideoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
-      opponentStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-fashion-model-in-neon-lighting-39878-large.mp4',
-      hostScore: 2940,
-      opponentScore: 3100,
-      timeLeft: '01:50',
-      isMatchActive: true,
-      matchTitle: 'LIVE PK Battle · Key Challenge',
-    },
-    multiGuests: [
-      { id: 'mg1', name: 'Marcus', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150', viewers: 'Host', isSpeaking: true, role: 'Host', flag: '👑' },
-      { id: 'mg2', name: 'Elena', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', viewers: '1.8K', isSpeaking: false, flag: '💎' },
-      { id: 'mg3', name: 'Sara', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150', viewers: '420', isSpeaking: false, flag: '⭐' },
-      { id: 'mg4', name: 'Julian', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150', viewers: '380', isSpeaking: false, flag: '✨' },
-    ],
-    participants: [
-      { name: 'Elena Rodriguez', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150', role: 'Speaker' },
-    ],
-    tags: ['Cryptography', 'Ed25519', 'Security'],
-  },
-  {
-    id: 'live-julian-3',
-    creatorHandle: 'julian_analogue',
-    creatorName: 'Julian Thorne',
-    creatorAvatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150',
-    isVerified: false,
-    category: 'Film Photographer',
-    title: 'Tokyo Rain & Neon: 35mm Live Photowalk & Darkroom Notes',
-    description: 'Walking through Shinjuku with a Leica M6, sharing live analog grain framing techniques.',
-    viewersCount: 632,
-    likesCount: 6320,
-    dailyRank: '⭐ Spotlight #7',
-    previewUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=900',
-    videoStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4',
-    battleInfo: {
-      opponentName: 'Chloe Vance',
-      opponentHandle: 'chloe_visuals',
-      opponentAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
-      opponentVideoUrl: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=900',
-      opponentStreamUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-talking-on-a-video-call-with-her-laptop-42998-large.mp4',
-      hostScore: 1980,
-      opponentScore: 1850,
-      timeLeft: '03:10',
-      isMatchActive: true,
-      matchTitle: 'Visuals vs Audio Battle',
-    },
-    multiGuests: [],
-    participants: [
-      { name: 'Chloe Vance', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150', role: 'Listener' },
-    ],
-    tags: ['Analog', 'Photography', 'Tokyo'],
-  },
-];
+export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [];
 
 const PRESET_AVATARS = [
   'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
@@ -1267,89 +522,7 @@ export interface DirectChatMessage {
   audioUrl?: string;
 }
 
-const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {
-  elena_rodriguez: [
-    {
-      id: 'm-elena-1',
-      senderHandle: 'elena_rodriguez',
-      recipientHandle: 'luciano',
-      text: 'Hi Luciano! Loving the new Privity update. The analogue medium format gallery feels so authentic without algorithm clutter.',
-      timeAgo: '12m ago',
-      timestamp: Date.now() - 720000,
-      reactions: { '❤️': 1, '✨': 1 },
-      userReactions: { '❤️': ['elena_rodriguez'], '✨': ['elena_rodriguez'] },
-    },
-    {
-      id: 'm-elena-2',
-      senderHandle: 'luciano',
-      recipientHandle: 'elena_rodriguez',
-      text: 'Thanks Elena! We built this network so artists own their audience directly. Thrilled to have you in the close circle.',
-      timeAgo: '8m ago',
-      timestamp: Date.now() - 480000,
-      reactions: { '🔥': 1 },
-      userReactions: { '🔥': ['elena_rodriguez'] },
-    },
-    {
-      id: 'm-elena-3',
-      senderHandle: 'elena_rodriguez',
-      recipientHandle: 'luciano',
-      text: 'Here is a preview of the morning light study from my Kyoto studio:',
-      mediaUrl: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=1000',
-      timeAgo: '3m ago',
-      timestamp: Date.now() - 180000,
-      reactions: { '❤️': 1, '🔒': 1 },
-      userReactions: { '❤️': ['elena_rodriguez'], '🔒': ['elena_rodriguez'] },
-    },
-  ],
-  marcus_dev: [
-    {
-      id: 'm-marcus-1',
-      senderHandle: 'marcus_dev',
-      recipientHandle: 'luciano',
-      text: 'The local-first cryptographic verification proofs are holding strong across all dispatches.',
-      timeAgo: '1h ago',
-      timestamp: Date.now() - 3600000,
-      reactions: { '⚡': 1 },
-      userReactions: { '⚡': ['marcus_dev'] },
-    },
-    {
-      id: 'm-marcus-2',
-      senderHandle: 'marcus_dev',
-      recipientHandle: 'luciano',
-      text: 'Quick audio briefing on the zero-knowledge validation benchmark:',
-      isVoiceMemo: true,
-      voiceDuration: '0:24',
-      timeAgo: '42m ago',
-      timestamp: Date.now() - 2520000,
-      reactions: { '👏': 1 },
-      userReactions: { '👏': ['marcus_dev'] },
-    },
-  ],
-  sara_architecture: [
-    {
-      id: 'm-sara-1',
-      senderHandle: 'sara_architecture',
-      recipientHandle: 'luciano',
-      text: 'The natural daylight study looks fantastic in the new glass lightbox viewer!',
-      timeAgo: '2h ago',
-      timestamp: Date.now() - 7200000,
-      reactions: { '✨': 1 },
-      userReactions: { '✨': ['sara_architecture'] },
-    },
-  ],
-  julian_analogue: [
-    {
-      id: 'm-julian-1',
-      senderHandle: 'julian_analogue',
-      recipientHandle: 'luciano',
-      text: 'Hey Luciano, just uploaded the binaural dawn recording from Big Sur! High dynamic range.',
-      timeAgo: '3h ago',
-      timestamp: Date.now() - 10800000,
-      reactions: { '🔥': 1 },
-      userReactions: { '🔥': ['julian_analogue'] },
-    },
-  ],
-};
+const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {};
 
 // Helper to sanitize stored direct messages so legacy glitch counters (e.g. 25, 24) are cleanly normalized
 const sanitizeStoredDirectMessages = (raw: Record<string, DirectChatMessage[]>): Record<string, DirectChatMessage[]> => {
@@ -1444,23 +617,24 @@ export function App() {
   const [activeLiveIndex, setActiveLiveIndex] = useState(0);
   const [liveLayoutMode, setLiveLayoutMode] = useState<'battle' | '4way'>('battle');
   const [isGiftTrayOpen, setIsGiftTrayOpen] = useState(false);
-  const [userSparksBalance, setUserSparksBalance] = useState(2450);
-  const [battleScoreHost, setBattleScoreHost] = useState(2150);
-  const [battleScoreOpponent, setBattleScoreOpponent] = useState(2407);
-  const [battleTimeSeconds, setBattleTimeSeconds] = useState(129);
-  const [isBattleMatchActive, setIsBattleMatchActive] = useState(true);
-  const [followedCreators, setFollowedCreators] = useState<Record<string, boolean>>({
-    chloe_visuals: false,
-    julian_analogue: false,
-    elena_rodriguez: false,
-    marcus_dev: true,
-  });
-  const [hostLiveLikes, setHostLiveLikes] = useState<Record<string, number>>({
-    'live-chloe-4': 4891,
-    'live-elena-1': 14820,
-    'live-marcus-2': 9840,
-    'live-julian-3': 6320,
-  });
+  const [currentAuthUser, setCurrentAuthUser] = useState<UserAccount | null>(() => authService.getCurrentUser());
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [userSparksBalance, setUserSparksBalance] = useState(() => authService.getCurrentUser()?.sparks ?? 0);
+  const [battleScoreHost, setBattleScoreHost] = useState(0);
+  const [battleScoreOpponent, setBattleScoreOpponent] = useState(0);
+  const [battleTimeSeconds, setBattleTimeSeconds] = useState(0);
+  const [isBattleMatchActive, setIsBattleMatchActive] = useState(false);
+  const [followedCreators, setFollowedCreators] = useState<Record<string, boolean>>({});
+  const [hostLiveLikes, setHostLiveLikes] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    return authService.subscribe((user) => {
+      setCurrentAuthUser(user);
+      if (user) {
+        setUserSparksBalance(user.sparks ?? 0);
+      }
+    });
+  }, []);
 
   // AI Vision & Interactive Video Features
   const [aiLensMode, setAiLensMode] = useState<'cyber' | 'elemental' | 'anime' | 'studio'>('cyber');
@@ -1472,25 +646,13 @@ export function App() {
   const [activeLiveStream, setActiveLiveStream] = useState<LiveStreamSession | null>(null);
   const [minimizedLiveStream, setMinimizedLiveStream] = useState<any | null>(null);
   const [liveChatInput, setLiveChatInput] = useState('');
-  const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; badge?: string; level?: number; isHost?: boolean; isJoin?: boolean; giftName?: string; giftIcon?: string }>>([
-    { id: '1', user: 'Carlos', text: 'became the No. 19 fan in the Fan Club ⭐', isJoin: true },
-    { id: '2', user: 'TRIPLE', text: 'pretty clean audio compression 🔥', badge: 'VIP', level: 26 },
-    { id: '3', user: 'ELIKS', text: 'Oho where is old Elena?', badge: 'Top', level: 10 },
-    { id: '4', user: 'mlChAEL', text: 'joined the live', isJoin: true, level: 4 },
-    { id: '5', user: 'marcus_dev', text: 'Keep throwing roses for the speed boost! 🥊', isHost: false, level: 29 },
-  ]);
+  const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; badge?: string; level?: number; isHost?: boolean; isJoin?: boolean; giftName?: string; giftIcon?: string }>>([]);
   const [floatingHearts, setFloatingHearts] = useState<Array<{ id: number; x: number; y: number; color: string; size: number; rot: number }>>([]);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
 
   // Top Likers & Contributors Leaderboard Modal State
   const [isLikesLeaderboardOpen, setIsLikesLeaderboardOpen] = useState(false);
-  const [likersLeaderboard, setLikersLeaderboard] = useState<Array<{ id: string; name: string; handle: string; avatar: string; likes: number; badge: string; level: number }>>([
-    { id: '1', name: 'Luciano', handle: 'luciano', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120', likes: 5840, badge: '🥇 Top Contributor', level: 29 },
-    { id: '2', name: 'Carlos', handle: 'carlos_m', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', likes: 3210, badge: '🥈 Fan Club #19', level: 19 },
-    { id: '3', name: 'TRIPLE', handle: 'triple_beat', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120', likes: 2450, badge: '🥉 VIP Supporter', level: 26 },
-    { id: '4', name: 'ELIKS', handle: 'eliks_fan', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120', likes: 1980, badge: 'Loyal Fan', level: 10 },
-    { id: '5', name: 'mlChAEL', handle: 'michael_wave', avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=120', likes: 1340, badge: 'Supporter', level: 4 },
-  ]);
+  const [likersLeaderboard, setLikersLeaderboard] = useState<Array<{ id: string; name: string; handle: string; avatar: string; likes: number; badge: string; level: number }>>([]);
 
   // Live Viewers Roster Modal State (opened by clicking viewers pill)
   const [isViewersModalOpen, setIsViewersModalOpen] = useState(false);
@@ -1504,20 +666,7 @@ export function App() {
     role: string;
     level: number;
     badge: string;
-  }>>([
-    { id: 'v1', name: 'Carlos Mendez', handle: 'carlos_m', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', role: 'Fan Club #19 · Top Gifter', level: 19, badge: '⭐ Fan #19' },
-    { id: 'v2', name: 'TRIPLE Beat', handle: 'triple_beat', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120', role: 'Sound Producer · Audio Critic', level: 26, badge: '🔥 VIP' },
-    { id: 'v3', name: 'Elena Rodriguez', handle: 'elena_rodriguez', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120', isVerified: true, role: 'Verified Creator · Systems Architect', level: 32, badge: '👑 Legend' },
-    { id: 'v4', name: 'Marcus Vance', handle: 'marcus_dev', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120', isVerified: true, role: 'Rival Host · Security Lead', level: 29, badge: '🥊 Rival' },
-    { id: 'v5', name: 'Julian Thorne', handle: 'julian_analogue', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=120', isVerified: false, role: 'Co-Host · Film Photographer', level: 24, badge: '📸 Co-Host' },
-    { id: 'v6', name: 'ELIKS', handle: 'eliks_fan', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120', role: 'Loyal Fan · Rose Spammer', level: 10, badge: '🌹 Gifter' },
-    { id: 'v7', name: 'Sara Lin', handle: 'sara_lin', avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=120', isVerified: true, role: 'Visual Designer · Tokyo', level: 18, badge: '✨ Close Friend' },
-    { id: 'v8', name: 'mlChAEL', handle: 'michael_wave', avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=120', role: 'Audiophile · Modular Explorer', level: 4, badge: '👋 Listener' },
-    { id: 'v9', name: 'Alex Miller', handle: 'alex_m', avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=120', role: 'Falcon Rocket Booster', level: 22, badge: '🚀 Booster' },
-    { id: 'v10', name: 'Linda Kim', handle: 'linda_k', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=120', role: 'Film & Synth Enthusiast', level: 15, badge: '🌸 Supporter' },
-    { id: 'v11', name: 'Daniel Brooks', handle: 'daniel_b', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120', role: 'Spatial Audio Researcher', level: 12, badge: '⚡ Regular' },
-    { id: 'v12', name: 'Luciano', handle: 'luciano', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120', role: 'Sovereign Pass Genesis · You', level: 30, badge: '🥇 Top #1' },
-  ]);
+  }>>([]);
 
   const filteredLiveViewers = useMemo(() => {
     if (!liveViewersSearch.trim()) return liveViewersList;
@@ -1536,24 +685,36 @@ export function App() {
   const liveTouchStartY = useRef<number>(0);
 
   const handleNextLiveStream = useCallback(() => {
+    if (liveStreamsList.length === 0) return;
     setLiveSlideDirection('down');
     setActiveLiveIndex((prev) => {
       const nextIdx = (prev + 1) % liveStreamsList.length;
       const nextStream = liveStreamsList[nextIdx];
-      setBattleScoreHost(nextStream.battleInfo.hostScore);
-      setBattleScoreOpponent(nextStream.battleInfo.opponentScore);
+      if (nextStream?.battleInfo) {
+        setBattleScoreHost(nextStream.battleInfo.hostScore);
+        setBattleScoreOpponent(nextStream.battleInfo.opponentScore);
+      } else {
+        setBattleScoreHost(0);
+        setBattleScoreOpponent(0);
+      }
       return nextIdx;
     });
     setTimeout(() => setLiveSlideDirection(null), 420);
   }, [liveStreamsList]);
 
   const handlePrevLiveStream = useCallback(() => {
+    if (liveStreamsList.length === 0) return;
     setLiveSlideDirection('up');
     setActiveLiveIndex((prev) => {
       const prevIdx = (prev - 1 + liveStreamsList.length) % liveStreamsList.length;
       const prevStream = liveStreamsList[prevIdx];
-      setBattleScoreHost(prevStream.battleInfo.hostScore);
-      setBattleScoreOpponent(prevStream.battleInfo.opponentScore);
+      if (prevStream?.battleInfo) {
+        setBattleScoreHost(prevStream.battleInfo.hostScore);
+        setBattleScoreOpponent(prevStream.battleInfo.opponentScore);
+      } else {
+        setBattleScoreHost(0);
+        setBattleScoreOpponent(0);
+      }
       return prevIdx;
     });
     setTimeout(() => setLiveSlideDirection(null), 420);
@@ -1762,49 +923,18 @@ export function App() {
 
   // 2. Persistent Posts State (sanitizes any auto-synthesized p-media- posts from private clicks)
   const [posts, setPosts] = useState<PostItem[]>(() => {
-    const loaded = readStorage<PostItem[]>('privity_posts_v5', SAMPLE_POSTS);
-    const sanitized = Array.isArray(loaded) ? loaded.filter((p) => !p.id.startsWith('p-media-')) : SAMPLE_POSTS;
-    const nicoleIdx = sanitized.findIndex((p) => p.id === 'p-nicole-1');
-    if (nicoleIdx === -1) {
-      return [SAMPLE_POSTS[0], ...sanitized];
-    }
-    const updated = [...sanitized];
-    updated[nicoleIdx] = {
-      ...SAMPLE_POSTS[0],
-      ...updated[nicoleIdx],
-      authorAvatar: SAMPLE_POSTS[0].authorAvatar,
-      contentUrl: SAMPLE_POSTS[0].contentUrl,
-      thumbnailUrl: SAMPLE_POSTS[0].thumbnailUrl,
-      soundCover: SAMPLE_POSTS[0].soundCover,
-      soundName: SAMPLE_POSTS[0].soundName,
-      soundArtist: SAMPLE_POSTS[0].soundArtist,
-      soundUrl: SAMPLE_POSTS[0].soundUrl,
-      caption: SAMPLE_POSTS[0].caption,
-    };
-    return updated;
+    const loaded = readStorage<PostItem[]>('privity_posts_v5', []);
+    return Array.isArray(loaded) ? loaded.filter((p) => p && !p.id?.startsWith('p-media-')) : [];
   });
 
   // 3. Persistent Following Map
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>(() =>
-    readStorage('privity_following_v5', {
-      'elena_rodriguez': true,
-      'marcus_dev': true,
-      'julian_analogue': true,
-      'sara_architecture': true,
-      'chloe_visuals': false,
-      'oliver_wood': false,
-      'sam_arch': false,
-      'jess_film': false,
-    })
+    readStorage('privity_following_v5', {})
   );
 
   // 4. Persistent Close Friends List
   const [closeFriendsList, setCloseFriendsList] = useState<string[]>(() =>
-    readStorage('privity_close_friends_v5', [
-      'elena_rodriguez',
-      'marcus_dev',
-      'sara_architecture',
-    ])
+    readStorage('privity_close_friends_v5', [])
   );
 
   // 5. Persistent Private Account Setting
@@ -1857,11 +987,30 @@ export function App() {
     if (profiles[clean]) {
       return profiles[clean];
     }
+    if (currentAuthUser && currentAuthUser.handle.toLowerCase() === clean.toLowerCase()) {
+      return {
+        id: currentAuthUser.id,
+        name: currentAuthUser.name,
+        handle: currentAuthUser.handle,
+        avatar: currentAuthUser.avatar,
+        coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+        isVerified: currentAuthUser.isVerified || false,
+        bio: currentAuthUser.bio || 'Privity creator sharing private-first moments and authentic updates.',
+        location: 'Global',
+        joinedDate: 'Joined 2026',
+        circleStatus: 'You',
+        isPrivate: false,
+        followersList: [],
+        followingList: [],
+        trustCirclesList: [],
+        mediaItems: [],
+      };
+    }
     return {
       id: `usr-${clean}`,
       name: defaultName || clean.charAt(0).toUpperCase() + clean.slice(1),
       handle: clean,
-      avatar: defaultAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
+      avatar: defaultAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${clean}`,
       coverUrl: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
       isVerified: false,
       bio: 'Privity creator sharing private-first moments and authentic updates.',
@@ -1869,14 +1018,39 @@ export function App() {
       joinedDate: 'Joined 2026',
       circleStatus: 'Public Connection',
       isPrivate: false,
-      followersList: ['luciano', 'marcus_dev', 'elena_rodriguez'],
-      followingList: ['luciano'],
-      trustCirclesList: ['luciano'],
+      followersList: [],
+      followingList: [],
+      trustCirclesList: [],
       mediaItems: [],
     };
   };
 
-  const myProfile = getUserProfile('luciano');
+  const activeAuthHandle = (currentAuthUser?.handle || 'luciano').toLowerCase();
+  const myProfile = useMemo((): UserProfile => {
+    if (profiles[activeAuthHandle]) {
+      return profiles[activeAuthHandle];
+    }
+    if (currentAuthUser) {
+      return {
+        id: currentAuthUser.id,
+        name: currentAuthUser.name,
+        handle: currentAuthUser.handle,
+        avatar: currentAuthUser.avatar,
+        coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+        isVerified: currentAuthUser.isVerified || false,
+        bio: currentAuthUser.bio || 'Privity creator sharing private-first moments and authentic updates.',
+        location: 'Global',
+        joinedDate: 'Joined 2026',
+        circleStatus: 'You',
+        isPrivate: false,
+        followersList: [],
+        followingList: [],
+        trustCirclesList: [],
+        mediaItems: [],
+      };
+    }
+    return getUserProfile('luciano');
+  }, [profiles, activeAuthHandle, currentAuthUser]);
 
   // ========================================================
   // REAL-TIME MULTI-DEVICE SYNCHRONIZATION ENGINE
@@ -2236,7 +1410,7 @@ export function App() {
           if (!recipientHandle || !message || !message.id) return;
           const targetKey =
             recipientHandle === cleanMyHandle
-              ? (senderHandle || message.senderHandle || 'marcus_dev').replace(/^@/, '')
+              ? (senderHandle || message.senderHandle || 'unknown').replace(/^@/, '')
               : recipientHandle.replace(/^@/, '');
           setDirectMessages((prev) => {
             const thread = prev[targetKey] || [];
@@ -3319,17 +2493,7 @@ export function App() {
       likesCount: 0,
       dailyRank: '🔥 Genesis Host',
       previewUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900',
-      battleInfo: {
-        opponentName: 'Marcus Vance',
-        opponentHandle: 'marcus_dev',
-        opponentAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-        opponentVideoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
-        hostScore: 100,
-        opponentScore: 50,
-        timeLeft: '03:00',
-        isMatchActive: true,
-        matchTitle: 'Genesis PK Match',
-      },
+      battleInfo: undefined,
       multiGuests: [],
       participants: [{ name: myProfile.name, avatar: myProfile.avatar, role: 'Host' }],
       tags: ['Live', 'P2P', 'Privity'],
@@ -3720,9 +2884,7 @@ export function App() {
     }
     const groupId = `group_${Date.now()}`;
     const gName = newGroupName.trim();
-    const members = newGroupSelectedMembers.length > 0
-      ? newGroupSelectedMembers
-      : ['elena_rodriguez', 'marcus_dev'];
+    const members = newGroupSelectedMembers;
 
     const groupAvatar = 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=400';
 
@@ -5192,17 +4354,7 @@ export function App() {
       likesCount: 0,
       dailyRank: '🔥 Genesis Host',
       previewUrl: myProfile.coverUrl || myProfile.avatar,
-      battleInfo: {
-        opponentName: 'Marcus Vance',
-        opponentHandle: 'marcus_dev',
-        opponentAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-        opponentVideoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900',
-        hostScore: 100,
-        opponentScore: 50,
-        timeLeft: '03:00',
-        isMatchActive: true,
-        matchTitle: 'Genesis PK Match',
-      },
+      battleInfo: undefined,
       multiGuests: [],
       participants: [{ name: myProfile.name, avatar: myProfile.avatar, role: 'Host' }],
       tags: ['Live', 'P2P', 'Privity'],
@@ -5434,9 +4586,45 @@ export function App() {
           <span>New Dispatch</span>
         </button>
 
+        <div style={{ padding: '0 8px', marginBottom: '8px' }}>
+          <button
+            type="button"
+            className="btn-auth-trigger"
+            onClick={() => setIsAuthModalOpen(true)}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              padding: '8px 12px',
+              borderRadius: '12px',
+              background: currentAuthUser ? 'rgba(255,255,255,0.06)' : 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.2))',
+              border: currentAuthUser ? '1px solid var(--glass-border)' : '1px solid rgba(168,85,247,0.4)',
+              color: 'var(--text-main)',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {currentAuthUser?.provider === 'google' ? (
+              <svg width="14" height="14" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+            ) : (
+              <IconKey size={14} color="var(--brand)" />
+            )}
+            <span>{currentAuthUser ? `Account (@${myProfile.handle})` : 'Log In / Sign Up'}</span>
+          </button>
+        </div>
+
         <div
           className="user-identity-card"
-          onClick={() => navigateToProfile('luciano')}
+          onClick={() => navigateToProfile(myProfile.handle)}
           title="Click to view profile"
           style={{ cursor: 'pointer' }}
         >
@@ -5733,49 +4921,61 @@ export function App() {
                 </div>
               ))}
 
-              <div className="circle-unit" onClick={() => navigateToProfile('elena_rodriguez')} title="View Elena's Profile">
-                <div className="circle-halo-ring cf">
+              {/* Your Own Story / Circle Unit */}
+              <div className="circle-unit" onClick={() => setIsCameraOpen(true)} title="Add to your Story">
+                <div className="circle-halo-ring" style={{ position: 'relative' }}>
                   <img
-                    src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
-                    alt="Elena"
+                    src={myProfile.avatar}
+                    alt={myProfile.name}
                     className="circle-user-img"
                   />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '-2px',
+                      right: '-2px',
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      background: 'var(--brand)',
+                      color: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '14px',
+                      fontWeight: 700,
+                      border: '2px solid var(--bg-card)',
+                    }}
+                  >
+                    +
+                  </div>
                 </div>
-                <span className="circle-tag-name">Elena R.</span>
+                <span className="circle-tag-name">Your Story</span>
               </div>
 
-              <div className="circle-unit" onClick={() => navigateToProfile('marcus_dev')} title="View Marcus's Profile">
-                <div className="circle-halo-ring followers">
-                  <img
-                    src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150"
-                    alt="Marcus"
-                    className="circle-user-img"
-                  />
-                </div>
-                <span className="circle-tag-name">Marcus</span>
-              </div>
-
-              <div className="circle-unit" onClick={() => navigateToProfile('julian_analogue')} title="View Julian's Profile">
-                <div className="circle-halo-ring cf">
-                  <img
-                    src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150"
-                    alt="Julian"
-                    className="circle-user-img"
-                  />
-                </div>
-                <span className="circle-tag-name">Julian</span>
-              </div>
-
-              <div className="circle-unit" onClick={() => navigateToProfile('chloe_visuals')} title="View Chloe's Profile">
-                <div className="circle-halo-ring public">
-                  <img
-                    src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150"
-                    alt="Chloe"
-                    className="circle-user-img"
-                  />
-                </div>
-                <span className="circle-tag-name">Chloe</span>
-              </div>
+              {/* Dynamic Followed Creators Circles */}
+              {Object.keys(followingMap)
+                .filter((h) => followingMap[h] && h !== myProfile.handle && !h.startsWith('sc-'))
+                .map((handle) => {
+                  const prof = getUserProfile(handle);
+                  return (
+                    <div
+                      key={handle}
+                      className="circle-unit"
+                      onClick={() => navigateToProfile(handle)}
+                      title={`View ${prof.name}'s Profile`}
+                    >
+                      <div className="circle-halo-ring cf">
+                        <img
+                          src={prof.avatar}
+                          alt={prof.name}
+                          className="circle-user-img"
+                        />
+                      </div>
+                      <span className="circle-tag-name">{prof.name.split(' ')[0]}</span>
+                    </div>
+                  );
+                })}
 
               <div className="circle-unit" onClick={() => setIsCameraOpen(true)}>
                 <div className="circle-halo-ring add-circle">
@@ -6576,12 +5776,8 @@ export function App() {
           const allPartnerHandles = Array.from(
             new Set([
               ...Object.keys(directMessages),
-              'elena_rodriguez',
-              'marcus_dev',
-              'sara_architecture',
-              'julian_analogue',
             ])
-          );
+          ).filter((h) => h !== myProfile.handle && !h.startsWith('sc-'));
 
           // 2. Filter channels based on search and active channel filter
           const filteredChannels = allPartnerHandles.filter((handle) => {
@@ -6607,11 +5803,11 @@ export function App() {
           });
 
           // Active chat partner resolution
-          const currentRecipient = activeChatUser || getUserProfile(filteredChannels[0] || 'elena_rodriguez');
-          const cleanRecipientHandle = currentRecipient.handle.replace(/^@/, '');
-          const currentThread = directMessages[cleanRecipientHandle] || [];
+          const currentRecipient = activeChatUser || (filteredChannels.length > 0 ? getUserProfile(filteredChannels[0]) : null);
+          const cleanRecipientHandle = currentRecipient ? currentRecipient.handle.replace(/^@/, '') : '';
+          const currentThread = cleanRecipientHandle ? (directMessages[cleanRecipientHandle] || []) : [];
           const cleanMyHandle = (myProfile.handle || 'luciano').replace(/^@/, '');
-          const isPartnerInCloseFriends = closeFriendsList.includes(cleanRecipientHandle);
+          const isPartnerInCloseFriends = cleanRecipientHandle ? closeFriendsList.includes(cleanRecipientHandle) : false;
 
           return (
             <div className={`spatial-messages-container ${activeChatUser ? 'has-active-chat' : 'no-active-chat'}`}>
@@ -6847,6 +6043,31 @@ export function App() {
                   }
                 }}
               >
+                {!currentRecipient ? (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                    <div style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.5 }}>💬</div>
+                    <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-main)', marginBottom: '8px' }}>Your Direct Messages</div>
+                    <div style={{ fontSize: '13px', maxWidth: '340px', lineHeight: 1.5, marginBottom: '20px' }}>
+                      Choose a conversation from the left or connect with creators to send encrypted dispatches, photos, and binaural audio memos.
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-glass-back"
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(168,85,247,0.25))',
+                        borderColor: 'rgba(168,85,247,0.4)',
+                        color: '#fff',
+                        padding: '10px 22px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                      }}
+                      onClick={() => setIsCreateGroupOpen(true)}
+                    >
+                      + Start Conversation
+                    </button>
+                  </div>
+                ) : (
+                  <>
                 {/* Thread Workspace Header */}
                 <div className="messages-thread-header">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
@@ -7371,6 +6592,8 @@ export function App() {
                     </div>
                   )}
                 </form>
+                </>
+              )}
               </div>
             
               {/* Fullscreen Story Viewer from DM Rail (Slide Down to Dismiss) */}
@@ -7577,32 +6800,40 @@ export function App() {
                           Select Members ({newGroupSelectedMembers.length} selected)
                         </label>
                         <div className="group-members-list">
-                          {['elena_rodriguez', 'marcus_dev', 'julian_analogue', 'chloe_paris', 'sara_architecture'].map((handle) => {
-                            const u = getUserProfile(handle);
-                            const isSelected = newGroupSelectedMembers.includes(handle);
-                            return (
-                              <div
-                                key={handle}
-                                className={`group-member-item ${isSelected ? 'selected' : ''}`}
-                                onClick={() => {
-                                  setNewGroupSelectedMembers((prev) =>
-                                    prev.includes(handle) ? prev.filter((h) => h !== handle) : [...prev, handle]
-                                  );
-                                }}
-                              >
-                                <div className="group-member-info">
-                                  <img src={u.avatar} alt={u.name} className="group-member-avatar" />
-                                  <div>
-                                    <div className="group-member-name">{u.name}</div>
-                                    <div className="group-member-handle">@{u.handle}</div>
+                          {Object.keys(followingMap).filter((h) => followingMap[h] && h !== myProfile.handle).length === 0 ? (
+                            <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
+                              Follow creators to add them to direct message circles.
+                            </div>
+                          ) : (
+                            Object.keys(followingMap)
+                              .filter((h) => followingMap[h] && h !== myProfile.handle)
+                              .map((handle) => {
+                                const u = getUserProfile(handle);
+                                const isSelected = newGroupSelectedMembers.includes(handle);
+                                return (
+                                  <div
+                                    key={handle}
+                                    className={`group-member-item ${isSelected ? 'selected' : ''}`}
+                                    onClick={() => {
+                                      setNewGroupSelectedMembers((prev) =>
+                                        prev.includes(handle) ? prev.filter((h) => h !== handle) : [...prev, handle]
+                                      );
+                                    }}
+                                  >
+                                    <div className="group-member-info">
+                                      <img src={u.avatar} alt={u.name} className="group-member-avatar" />
+                                      <div>
+                                        <div className="group-member-name">{u.name}</div>
+                                        <div className="group-member-handle">@{u.handle}</div>
+                                      </div>
+                                    </div>
+                                    <div className="group-member-checkbox">
+                                      {isSelected && <IconCheck size={13} color="#fff" />}
+                                    </div>
                                   </div>
-                                </div>
-                                <div className="group-member-checkbox">
-                                  {isSelected && <IconCheck size={13} color="#fff" />}
-                                </div>
-                              </div>
-                            );
-                          })}
+                                );
+                              })
+                          )}
                         </div>
                       </div>
                     </div>
@@ -7714,32 +6945,13 @@ export function App() {
 
             <div className="glass-panel-card">
               <div className="panel-title-text">Recent Interactions</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ display: 'flex', gap: '14px', alignItems: 'center', fontSize: '14px' }}>
-                  <IconHeart size={20} color="var(--heart-rose)" filled />
-                  <div>
-                    <strong
-                      style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                      onClick={() => navigateToProfile('elena_rodriguez')}
-                    >
-                      Elena Rodriguez
-                    </strong>{' '}
-                    liked your post in your <strong>Close Friends</strong> circle.
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>24m ago</div>
-                  </div>
+              <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
+                <div style={{ fontSize: '32px', marginBottom: '10px', opacity: 0.5 }}>🔔</div>
+                <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>
+                  No interactions yet
                 </div>
-                <div style={{ display: 'flex', gap: '14px', alignItems: 'center', fontSize: '14px' }}>
-                  <IconChat size={20} color="var(--brand)" />
-                  <div>
-                    <strong
-                      style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                      onClick={() => navigateToProfile('marcus_dev')}
-                    >
-                      Marcus Vance
-                    </strong>{' '}
-                    replied to your discussion on privacy architecture.
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>1h ago</div>
-                  </div>
+                <div style={{ fontSize: '13px', maxWidth: '340px', margin: '0 auto', lineHeight: 1.4 }}>
+                  When creators interact with your dispatches, stories, or live broadcasts, updates will appear here in real time.
                 </div>
               </div>
             </div>
@@ -9444,23 +8656,27 @@ export function App() {
             </div>
 
             {/* Quick Conversation Switcher Chips */}
-            <div className="direct-chat-users-bar">
-              {['elena_rodriguez', 'marcus_dev', 'sara_architecture', 'julian_analogue'].map((handle) => {
-                const user = getUserProfile(handle);
-                const isActive = activeChatUser.handle.replace(/^@/, '') === handle;
-                return (
-                  <button
-                    key={handle}
-                    type="button"
-                    className={`direct-chat-user-chip ${isActive ? 'active' : ''}`}
-                    onClick={() => setActiveChatUser(user)}
-                  >
-                    <img src={user.avatar} alt={user.name} className="direct-chat-chip-avatar" />
-                    <span>{user.name.split(' ')[0]}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {Object.keys(directMessages).filter((h) => directMessages[h]?.length > 0).length > 0 && (
+              <div className="direct-chat-users-bar">
+                {Object.keys(directMessages)
+                  .filter((h) => directMessages[h]?.length > 0)
+                  .map((handle) => {
+                    const user = getUserProfile(handle);
+                    const isActive = activeChatUser?.handle?.replace(/^@/, '') === handle;
+                    return (
+                      <button
+                        key={handle}
+                        type="button"
+                        className={`direct-chat-user-chip ${isActive ? 'active' : ''}`}
+                        onClick={() => setActiveChatUser(user)}
+                      >
+                        <img src={user.avatar} alt={user.name} className="direct-chat-chip-avatar" />
+                        <span>{user.name.split(' ')[0]}</span>
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
 
             {/* Messages Body */}
             <div className="direct-chat-body">
@@ -10610,6 +9826,88 @@ export function App() {
                     </button>
                   </div>
 
+                  {/* Authentication & Identity Card */}
+                  <div
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid var(--glass-border)',
+                      borderRadius: 'var(--radius-lg)',
+                      padding: '16px 20px',
+                      marginBottom: '20px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <IconKey size={16} color="var(--brand)" />
+                        <span>Authentication & Login Session</span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          padding: '3px 8px',
+                          borderRadius: '8px',
+                          background: currentAuthUser?.provider === 'google' ? 'rgba(66, 133, 244, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                          color: currentAuthUser?.provider === 'google' ? '#60a5fa' : '#a78bfa',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {currentAuthUser ? (currentAuthUser.provider === 'google' ? 'Google Account' : 'Privity Account') : 'Guest Mode'}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '14px', lineHeight: 1.5 }}>
+                      {currentAuthUser ? (
+                        <>Signed in as <strong>{currentAuthUser.name}</strong> ({currentAuthUser.email || `@${currentAuthUser.handle}`}). All statistics strictly start at Level 0 with full real-time zero-knowledge ledger verification.</>
+                      ) : (
+                        <>You are currently using Privity in guest preview mode. Log in with your Google Account or create a Privity account to unlock full profiles, dispatches, and live broadcasts.</>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn-glass-back"
+                        style={{
+                          background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.2))',
+                          borderColor: 'rgba(168,85,247,0.4)',
+                          color: '#ffffff',
+                          padding: '8px 16px',
+                          fontSize: '12.5px',
+                          fontWeight: 700,
+                        }}
+                        onClick={() => {
+                          setIsSettingsOpen(false);
+                          setIsAuthModalOpen(true);
+                        }}
+                      >
+                        {currentAuthUser ? 'Switch / Connect Another Account' : 'Log In / Sign Up with Google'}
+                      </button>
+
+                      {currentAuthUser && (
+                        <button
+                          type="button"
+                          className="btn-glass-back"
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.12)',
+                            borderColor: 'rgba(239, 68, 68, 0.3)',
+                            color: '#f87171',
+                            padding: '8px 16px',
+                            fontSize: '12.5px',
+                            fontWeight: 700,
+                          }}
+                          onClick={() => {
+                            authService.logout();
+                            setCurrentAuthUser(null);
+                            setIsSettingsOpen(false);
+                            triggerToast('Signed out of Privity account');
+                          }}
+                        >
+                          Sign Out
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="settings-card-group">
                     <div className="settings-row-item">
                       <div className="settings-row-label-group">
@@ -11163,22 +10461,33 @@ export function App() {
 
             <button
               type="button"
-              className={`mobile-nav-item ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}
+              className={`mobile-nav-item ${activeTab === 'profile' && viewedUserHandle === myProfile.handle ? 'active' : ''}`}
               onClick={() => {
-                navigateToProfile('luciano');
+                navigateToProfile(myProfile.handle);
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
               title="Your Profile"
             >
-              <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === 'luciano' ? 'active' : ''}`}>
+              <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === myProfile.handle ? 'active' : ''}`}>
                 <img src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" />
               </div>
               <span className="mobile-nav-label">Profile</span>
-              {activeTab === 'profile' && viewedUserHandle === 'luciano' && <span className="mobile-nav-indicator" />}
+              {activeTab === 'profile' && viewedUserHandle === myProfile.handle && <span className="mobile-nav-indicator" />}
             </button>
           </nav>
         );
       })()}
+
+      {/* Universal Authentication Modal (Google Sign-In & Native Account) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthenticated={(user) => {
+          setCurrentAuthUser(user);
+          setIsAuthModalOpen(false);
+          triggerToast(`Welcome, ${user.name}!`);
+        }}
+      />
     </div>
   );
 }
