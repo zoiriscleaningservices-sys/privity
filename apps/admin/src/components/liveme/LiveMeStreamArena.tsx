@@ -571,6 +571,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             }
           }
           bindStreamToVideos(stream);
+          liveStreamSync.updateHostMediaStream(stream);
           showToastRef.current('🔴 Live Camera & Mic Connected!');
         }
       };
@@ -600,7 +601,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       handle: currentUser.handle,
       name: currentUser.name,
       avatar: currentUser.avatar,
-      title: '🔴 LIVE: High-Energy Room & PK Battle',
+      title: currentStreamer?.title || '🔴 LIVE: High-Energy Room & PK Battle',
       startedAt: Date.now(),
       viewersCount: liveViewersCount,
     };
@@ -610,6 +611,25 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_HOST_STARTED', host: hostMeta });
     } catch {}
+
+    // Start network host broadcast across ALL devices worldwide via MQTT & PeerJS
+    liveStreamSync.startHostBroadcast(
+      {
+        id: `live-user-${currentUser.handle}`,
+        creatorHandle: currentUser.handle,
+        creatorName: currentUser.name,
+        creatorAvatar: currentUser.avatar,
+        isVerified: true,
+        title: currentStreamer?.title || '🔴 LIVE: High-Energy Room & PK Battle',
+        category: currentStreamer?.category || 'Featured',
+        description: currentStreamer?.description || 'Live streaming sovereign node',
+        viewersCount: liveViewersCount,
+        likesCount: likesReceived,
+        previewUrl: currentUser.avatar,
+        tags: ['LiveNow', 'Host', 'Privity'],
+      },
+      localStreamRef.current || userMediaStream || null
+    ).catch(() => {});
 
     // Offscreen Canvas to emit live video frames across tabs
     const offscreenCanvas = document.createElement('canvas');
@@ -639,7 +659,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       clearInterval(frameSyncInterval);
       if (frameChannel) frameChannel.close();
     };
-  }, [isHost, currentUser, liveViewersCount, isVideoOff]);
+  }, [isHost, currentUser, liveViewersCount, isVideoOff, currentStreamer?.title, currentStreamer?.category, currentStreamer?.description, userMediaStream, likesReceived]);
 
   // 3. BROADCAST DURATION CLOCK & AUDIENCE SIMULATOR
   useEffect(() => {
@@ -885,6 +905,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
+    liveStreamSync.stopHostBroadcast();
     try {
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_HOST_ENDED', handle: currentUser.handle });

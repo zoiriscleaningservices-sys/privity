@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { LIVEME_STREAMERS } from './liveMeData';
 import { LiveMeRechargeModal } from './LiveMeRechargeModal';
 import { LiveMeCoinGamesModal } from './LiveMeCoinGamesModal';
+import { liveStreamSync } from '../../services/liveStreamSyncService';
+import { LiveMeStreamer } from './types';
 
 interface LiveMeHotCatalogProps {
   onOpenStream: (streamerId: string) => void;
@@ -62,9 +64,24 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
     };
   }, []);
 
-  const heroStreamer = LIVEME_STREAMERS[3] || LIVEME_STREAMERS[0]; // 5KJesss or Jasmine
+  const [networkStreamers, setNetworkStreamers] = useState<LiveMeStreamer[]>(() =>
+    liveStreamSync.getStreamersList()
+  );
 
-  const filteredStreamers = LIVEME_STREAMERS.filter(
+  useEffect(() => {
+    return liveStreamSync.subscribeToActiveStreams((streams) => {
+      setNetworkStreamers(streams);
+    });
+  }, []);
+
+  const allStreamers = [
+    ...networkStreamers,
+    ...LIVEME_STREAMERS.filter((s) => !networkStreamers.some((ns) => ns.id === s.id)),
+  ];
+
+  const heroStreamer = allStreamers[0] || LIVEME_STREAMERS[0];
+
+  const filteredStreamers = allStreamers.filter(
     (s) =>
       s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.handle.toLowerCase().includes(searchQuery.toLowerCase()) ||

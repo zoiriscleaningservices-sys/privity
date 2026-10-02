@@ -12,7 +12,7 @@ const IconFlame: React.FC<{ size?: number; color?: string }> = ({ size = 12, col
 );
 
 export interface LiveExploreGridProps {
-  onOpenStream: (streamerId: string) => void;
+  onOpenStream: (streamerId: string, streamerObj?: LiveMeStreamer) => void;
   onBackToFeed: () => void;
   onGoLive?: () => void;
   currentUser?: {
@@ -118,6 +118,19 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
         );
       }
 
+      // ANY real active live broadcast must ALWAYS be shown across all categories & chips!
+      const isRealActiveStream =
+        s.tagBadge === 'LIVE NOW' ||
+        s.isCameraStream ||
+        s.isHost ||
+        s.id.startsWith('live-user-') ||
+        s.id === 'liveme-host-myself' ||
+        networkStreamers.some((ns) => ns.id === s.id);
+
+      if (isRealActiveStream) {
+        return true;
+      }
+
       // Top Category tab filter
       if (activeTab === 'video_chat') {
         return (
@@ -164,9 +177,25 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       return true; // 'recommend' or default
     })
     .sort((a, b) => {
-      // Host stream always first if active
-      if (a.id === 'liveme-host-myself') return -1;
-      if (b.id === 'liveme-host-myself') return 1;
+      // Real live broadcasts ALWAYS rank #1 before any mock/offline streamers!
+      const aLive =
+        a.tagBadge === 'LIVE NOW' ||
+        a.isCameraStream ||
+        a.isHost ||
+        a.id.startsWith('live-user-') ||
+        a.id === 'liveme-host-myself' ||
+        networkStreamers.some((ns) => ns.id === a.id);
+
+      const bLive =
+        b.tagBadge === 'LIVE NOW' ||
+        b.isCameraStream ||
+        b.isHost ||
+        b.id.startsWith('live-user-') ||
+        b.id === 'liveme-host-myself' ||
+        networkStreamers.some((ns) => ns.id === b.id);
+
+      if (aLive && !bLive) return -1;
+      if (!aLive && bLive) return 1;
 
       if (activeTab === 'rankings') {
         const scoreA = (a.diamonds || 0) * 2 + (a.viewersCount || 0) * 100 + (a.likesCount || 0);
@@ -423,7 +452,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
                   else cardElementsRef.current.delete(streamer.id);
                 }}
                 className={`live-stream-card ${isPreviewActive ? 'preview-active' : ''} ${isLiveNow ? 'is-live-broadcasting' : ''}`}
-                onClick={() => onOpenStream(streamer.id)}
+                onClick={() => onOpenStream(streamer.id, streamer)}
                     onMouseEnter={() => handleCardMouseEnter(streamer.id)}
                     onMouseLeave={handleCardMouseLeave}
                   >

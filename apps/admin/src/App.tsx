@@ -5573,25 +5573,17 @@ export function App() {
             {/* LIVE BROADCASTS 2-COLUMN EXPLORE DISCOVER ARENA */}
             {feedFilter === 'live' ? (
               <LiveExploreGrid
-                onOpenStream={(streamerId) => {
-                  const remoteMatch = networkLiveStreamers.find((s) => s.id === streamerId);
-                  if (remoteMatch) {
-                    const isMyself = !!(remoteMatch.handle === myProfile.handle || remoteMatch.isHost);
-                    setIsHostBroadcasting(isMyself);
-                    setActiveLiveStream(remoteMatch as any);
-                    setMinimizedLiveStream(null);
-                    return;
-                  }
-                  const sessionMatch = liveStreamsList.find((s) => s.id === streamerId);
-                  if (sessionMatch) {
-                    setIsHostBroadcasting(sessionMatch.creatorHandle === myProfile.handle);
-                    setActiveLiveStream(sessionMatch as any);
-                    setMinimizedLiveStream(null);
-                    return;
-                  }
-                  const target = LIVEME_STREAMERS.find((s) => s.id === streamerId) || LIVEME_STREAMERS[0];
-                  setIsHostBroadcasting(false);
-                  setActiveLiveStream(target as any);
+                onOpenStream={(streamerId, streamerObj) => {
+                  const targetStreamer =
+                    streamerObj ||
+                    networkLiveStreamers.find((s) => s.id === streamerId) ||
+                    liveStreamsList.find((s) => s.id === streamerId) ||
+                    LIVEME_STREAMERS.find((s) => s.id === streamerId) ||
+                    LIVEME_STREAMERS[0];
+
+                  const isLocalHost = liveStreamSync.isLocalHost(targetStreamer.id);
+                  setIsHostBroadcasting(isLocalHost);
+                  setActiveLiveStream(targetStreamer as any);
                   setMinimizedLiveStream(null);
                 }}
                 onBackToFeed={() => setFeedFilter('feed')}
@@ -5703,8 +5695,8 @@ export function App() {
                   key={liveStream.id}
                   className="circle-unit live-story-unit"
                   onClick={() => {
-                    const isMyself = !!(liveStream.handle === myProfile.handle || liveStream.isHost);
-                    setIsHostBroadcasting(isMyself);
+                    const isLocalHost = liveStreamSync.isLocalHost(liveStream.id);
+                    setIsHostBroadcasting(isLocalHost);
                     setActiveLiveStream(liveStream as any);
                     setMinimizedLiveStream(null);
                   }}
@@ -5782,8 +5774,8 @@ export function App() {
                 className="live-active-feed-banner"
                 onClick={() => {
                   const firstLive = networkLiveStreamers[0];
-                  const isMyself = !!(firstLive.handle === myProfile.handle || firstLive.isHost);
-                  setIsHostBroadcasting(isMyself);
+                  const isLocalHost = liveStreamSync.isLocalHost(firstLive.id);
+                  setIsHostBroadcasting(isLocalHost);
                   setActiveLiveStream(firstLive as any);
                   setMinimizedLiveStream(null);
                 }}
@@ -8902,7 +8894,6 @@ export function App() {
               (activeLiveStream as any);
             setMinimizedLiveStream(streamer);
             setActiveLiveStream(null);
-            setIsHostBroadcasting(false);
           }}
           onEndBroadcast={() => {
             setActiveLiveStream(null);
@@ -8934,7 +8925,6 @@ export function App() {
               (activeLiveStream as any);
             setMinimizedLiveStream(streamer);
             setActiveLiveStream(null);
-            setIsHostBroadcasting(false);
             navigateToProfile(handle);
           }}
         />
@@ -8949,6 +8939,10 @@ export function App() {
             setMinimizedLiveStream(null);
           }}
           onClose={() => {
+            if (isHostBroadcasting) {
+              setIsHostBroadcasting(false);
+              liveStreamSync.stopHostBroadcast();
+            }
             setMinimizedLiveStream(null);
           }}
         />

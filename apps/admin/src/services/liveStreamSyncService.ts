@@ -24,16 +24,19 @@ export interface RemoteLiveStreamPayload {
   lastHeartbeat: number;
 }
 
-const PRIMARY_BROKER = 'wss://broker.emqx.io:8084/mqtt';
-const FALLBACK_BROKER = 'wss://broker.hivemq.com:8884/mqtt';
+const BROKERS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt',
+];
 
 const TOPIC_ACTIVE_STREAMS = 'privity/v1/active-streams';
 const TOPIC_QUERY = 'privity/v1/query-streams';
+const TOPIC_STREAM_PREFIX = 'privity/v1/stream/';
 const TOPIC_ROOM_PREFIX = 'privity/v1/room/';
 
 class LiveStreamSyncService {
   private mqttClient: MqttClient | null = null;
-  private currentBroker = PRIMARY_BROKER;
+  private brokerIndex = 0;
   private activeStreams: Map<string, RemoteLiveStreamPayload> = new Map();
   private subscribers: Set<(streams: LiveMeStreamer[]) => void> = new Set();
   private roomSubscribers: Map<string, Set<(event: any) => void>> = new Map();
@@ -42,6 +45,7 @@ class LiveStreamSyncService {
   private currentHostSession: RemoteLiveStreamPayload | null = null;
   private heartbeatInterval: any = null;
   private pruneInterval: any = null;
+  private queryInterval: any = null;
   private broadcastBus: BroadcastChannel | null = null;
   private isConnecting = false;
 
@@ -49,7 +53,9 @@ class LiveStreamSyncService {
     this.initBroadcastBus();
     this.initMqtt();
     this.startPruneLoop();
+    this.startQueryLoop();
     this.loadCachedStreams();
+    this.setupLifecycleListeners();
   }
 
   private initBroadcastBus() {
@@ -68,6 +74,26 @@ class LiveStreamSyncService {
     } catch {}
   }
 
+  private setupLifecycleListeners() {
+    if (typeof window === 'undefined') return;
+    try {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          this.ensureConnected();
+          this.queryNetworkStreams();
+        }
+      });
+      window.addEventListener('focus', () => {
+        this.ensureConnected();
+        this.queryNetworkStreams();
+      });
+      window.addEventListener('online', () => {
+        this.ensureConnected();
+        this.queryNetworkStreams();
+      });
+    } catch {}
+  }
+
   private loadCachedStreams() {
     try {
       const saved = localStorage.getItem('privity_remote_active_streams');
@@ -75,7 +101,7 @@ class LiveStreamSyncService {
         const list: RemoteLiveStreamPayload[] = JSON.parse(saved);
         const now = Date.now();
         list.forEach((s) => {
-          if (now - (s.lastHeartbeat || s.startedAt) < 25000) {
+          if (now - (s.lastHeartbeat || s.startedAt) < 30000) {
             this.activeStreams.set(s.id, s);
           }
         });
@@ -95,21 +121,24 @@ class LiveStreamSyncService {
     this.isConnecting = true;
 
     try {
+      const currentBroker = BROKERS[this.brokerIndex % BROKERS.length];
       const clientId = `privity_${Math.random().toString(36).substring(2, 9)}_${Date.now()}`;
-      const client = mqtt.connect(this.currentBroker, {
+      const client = mqtt.connect(currentBroker, {
         clientId,
         clean: true,
         connectTimeout: 5000,
-        reconnectPeriod: 4000,
+        reconnectPeriod: 3000,
+        keepalive: 15,
       });
 
       this.mqttClient = client;
 
       client.on('connect', () => {
         this.isConnecting = false;
-        client.subscribe([TOPIC_ACTIVE_STREAMS, TOPIC_QUERY], { qos: 0 });
+        // Subscribe to broadcasts, query topic, and retained stream prefix
+        client.subscribe([TOPIC_ACTIVE_STREAMS, TOPIC_QUERY, `${TOPIC_STREAM_PREFIX}+`], { qos: 1 });
 
-        // Query active streams across the network
+        // Query active streams immediately across the network
         this.queryNetworkStreams();
 
         // If this device is currently hosting, immediately announce to the newly connected broker
@@ -121,6 +150,7 @@ class LiveStreamSyncService {
       client.on('message', (topic, payload) => {
         try {
           const text = payload.toString();
+          if (!text || text.trim() === '') return;
           const data = JSON.parse(text);
 
           if (topic === TOPIC_ACTIVE_STREAMS) {
@@ -128,6 +158,13 @@ class LiveStreamSyncService {
               this.handleIncomingStream(data.stream);
             } else if (data.type === 'STREAM_ENDED') {
               this.handleStreamEnded(data.streamId);
+            }
+          } else if (topic.startsWith(TOPIC_STREAM_PREFIX)) {
+            const streamId = topic.replace(TOPIC_STREAM_PREFIX, '');
+            if (data.type === 'STREAM_ACTIVE' || data.type === 'STREAM_HEARTBEAT') {
+              this.handleIncomingStream(data.stream);
+            } else if (data.type === 'STREAM_ENDED') {
+              this.handleStreamEnded(data.streamId || streamId);
             }
           } else if (topic === TOPIC_QUERY) {
             if (data.type === 'QUERY_ACTIVE_STREAMS' && this.currentHostSession) {
@@ -141,16 +178,7 @@ class LiveStreamSyncService {
       });
 
       client.on('error', () => {
-        // Fallback to alternate broker if primary fails
-        if (this.currentBroker === PRIMARY_BROKER) {
-          this.currentBroker = FALLBACK_BROKER;
-          try {
-            client.end(true);
-          } catch {}
-          this.mqttClient = null;
-          this.isConnecting = false;
-          setTimeout(() => this.initMqtt(), 1500);
-        }
+        this.handleBrokerFailover();
       });
 
       client.on('close', () => {
@@ -158,6 +186,26 @@ class LiveStreamSyncService {
       });
     } catch {
       this.isConnecting = false;
+    }
+  }
+
+  private handleBrokerFailover() {
+    this.brokerIndex++;
+    if (this.mqttClient) {
+      try {
+        this.mqttClient.end(true);
+      } catch {}
+      this.mqttClient = null;
+    }
+    this.isConnecting = false;
+    setTimeout(() => this.initMqtt(), 1500);
+  }
+
+  public ensureConnected() {
+    if (!this.mqttClient || !this.mqttClient.connected) {
+      if (!this.isConnecting) {
+        this.initMqtt();
+      }
     }
   }
 
@@ -186,6 +234,7 @@ class LiveStreamSyncService {
   }
 
   private startPruneLoop() {
+    if (this.pruneInterval) clearInterval(this.pruneInterval);
     this.pruneInterval = setInterval(() => {
       const now = Date.now();
       let changed = false;
@@ -194,8 +243,8 @@ class LiveStreamSyncService {
         if (this.currentHostSession && this.currentHostSession.id === id) {
           continue;
         }
-        // Remote streams without a heartbeat for 12 seconds are considered ended
-        if (now - (stream.lastHeartbeat || stream.startedAt) > 12000) {
+        // Remote streams without a heartbeat for 18 seconds are considered ended
+        if (now - (stream.lastHeartbeat || stream.startedAt) > 18000) {
           this.activeStreams.delete(id);
           changed = true;
         }
@@ -204,7 +253,15 @@ class LiveStreamSyncService {
         this.saveCachedStreams();
         this.notifySubscribers();
       }
-    }, 4000);
+    }, 3000);
+  }
+
+  private startQueryLoop() {
+    if (this.queryInterval) clearInterval(this.queryInterval);
+    this.queryInterval = setInterval(() => {
+      // Periodically query to refresh active streams across all devices
+      this.queryNetworkStreams();
+    }, 2500);
   }
 
   private notifySubscribers() {
@@ -221,7 +278,7 @@ class LiveStreamSyncService {
     const now = Date.now();
 
     for (const s of this.activeStreams.values()) {
-      if (now - (s.lastHeartbeat || s.startedAt) > 15000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
+      if (now - (s.lastHeartbeat || s.startedAt) > 20000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
         continue;
       }
       list.push({
@@ -231,7 +288,7 @@ class LiveStreamSyncService {
         avatar: s.creatorAvatar,
         isVerified: !!s.isVerified,
         category: s.category || 'Featured',
-        title: s.title || 'Live Broadcast · Privity Exclusive',
+        title: s.title || 'Live Broadcast · Sovereign Stream',
         description: s.description || 'Live streaming sovereign node',
         viewersCount: Math.max(1, s.viewersCount || 1),
         totalViews: `${Math.max(1, s.viewersCount || 1)}`,
@@ -262,6 +319,20 @@ class LiveStreamSyncService {
     return () => {
       this.subscribers.delete(callback);
     };
+  }
+
+  public isLocalHost(streamId?: string): boolean {
+    if (!this.currentHostSession) return false;
+    if (!streamId) return true;
+    return this.currentHostSession.id === streamId;
+  }
+
+  public getHostSession(): RemoteLiveStreamPayload | null {
+    return this.currentHostSession;
+  }
+
+  public updateHostMediaStream(stream: MediaStream | null) {
+    this.hostMediaStream = stream;
   }
 
   // =========================================================================
@@ -311,7 +382,7 @@ class LiveStreamSyncService {
       lastHeartbeat: Date.now(),
     };
 
-    // Add to local state and notify
+    // Add to local state and notify immediately
     this.activeStreams.set(session.id, this.currentHostSession);
     this.saveCachedStreams();
     this.notifySubscribers();
@@ -327,17 +398,17 @@ class LiveStreamSyncService {
     // Initialize PeerJS Host Peer
     this.setupHostPeer(peerId);
 
-    // Announce to MQTT
+    // Announce to MQTT immediately with retain flag
     this.announceStream(this.currentHostSession);
 
-    // Start 3-second heartbeat loop
+    // Start 2.5-second heartbeat loop
     if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
     this.heartbeatInterval = setInterval(() => {
       if (this.currentHostSession) {
         this.currentHostSession.lastHeartbeat = Date.now();
         this.announceStream(this.currentHostSession, 'STREAM_HEARTBEAT');
       }
-    }, 3000);
+    }, 2500);
 
     return peerId;
   }
@@ -361,7 +432,7 @@ class LiveStreamSyncService {
       this.hostPeer = peer;
 
       peer.on('open', () => {
-        // Host peer registered
+        // Host peer registered successfully
       });
 
       peer.on('call', (call) => {
@@ -384,7 +455,6 @@ class LiveStreamSyncService {
       });
 
       peer.on('error', (err) => {
-        // Peer error handled gracefully
         console.warn('Privity Host Peer notice:', err.type);
       });
     } catch (err) {
@@ -395,13 +465,12 @@ class LiveStreamSyncService {
   private announceStream(stream: RemoteLiveStreamPayload, type: 'STREAM_ACTIVE' | 'STREAM_HEARTBEAT' = 'STREAM_ACTIVE') {
     if (this.mqttClient && this.mqttClient.connected) {
       try {
-        this.mqttClient.publish(
-          TOPIC_ACTIVE_STREAMS,
-          JSON.stringify({
-            type,
-            stream,
-          })
-        );
+        const payload = JSON.stringify({ type, stream });
+        // 1. General broadcast topic
+        this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, payload, { qos: 0 });
+        // 2. Retained per-stream topic so newly connected or waking devices get it instantly!
+        const streamTopic = `${TOPIC_STREAM_PREFIX}${stream.id}`;
+        this.mqttClient.publish(streamTopic, payload, { retain: true, qos: 1 });
       } catch {}
     }
   }
@@ -418,14 +487,15 @@ class LiveStreamSyncService {
       // Announce stream ended
       if (this.mqttClient && this.mqttClient.connected) {
         try {
-          this.mqttClient.publish(
-            TOPIC_ACTIVE_STREAMS,
-            JSON.stringify({
-              type: 'STREAM_ENDED',
-              streamId,
-              creatorHandle: this.currentHostSession.creatorHandle,
-            })
-          );
+          const endPayload = JSON.stringify({
+            type: 'STREAM_ENDED',
+            streamId,
+            creatorHandle: this.currentHostSession.creatorHandle,
+          });
+          this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, endPayload, { qos: 0 });
+          // Update retained topic to ended
+          const streamTopic = `${TOPIC_STREAM_PREFIX}${streamId}`;
+          this.mqttClient.publish(streamTopic, endPayload, { retain: true, qos: 1 });
         } catch {}
       }
 
@@ -482,7 +552,7 @@ class LiveStreamSyncService {
       viewerPeer.on('open', () => {
         if (isCleanedUp || !viewerPeer) return;
 
-        // Create a minimal 1x1 dummy canvas stream for answering WebRTC call requirements
+        // Create a minimal 16x16 canvas stream for answering WebRTC call requirements
         const canvas = document.createElement('canvas');
         canvas.width = 16;
         canvas.height = 16;
@@ -596,6 +666,7 @@ class LiveStreamSyncService {
   public destroy() {
     this.stopHostBroadcast();
     if (this.pruneInterval) clearInterval(this.pruneInterval);
+    if (this.queryInterval) clearInterval(this.queryInterval);
     if (this.broadcastBus) this.broadcastBus.close();
     if (this.mqttClient) {
       try {
