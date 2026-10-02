@@ -1562,9 +1562,42 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       };
       try {
         localStorage.setItem('privity_following_v5', JSON.stringify(updated));
+
+        // Update target user's followersList in privity_profiles_v5 in real instant time!
+        const rawProfs = localStorage.getItem('privity_profiles_v5');
+        if (rawProfs) {
+          const profs = JSON.parse(rawProfs);
+          if (profs[handleToToggle]) {
+            const curFollowers: string[] = profs[handleToToggle].followersList || [];
+            const nextFollowers = nextState
+              ? Array.from(new Set([...curFollowers, 'luciano']))
+              : curFollowers.filter((h: string) => h.toLowerCase() !== 'luciano');
+            profs[handleToToggle] = { ...profs[handleToToggle], followersList: nextFollowers };
+            localStorage.setItem('privity_profiles_v5', JSON.stringify(profs));
+          }
+        }
+
+        // Broadcast to whole app across tabs and components in real instant time!
+        const bus = new BroadcastChannel('privity_sync_bus');
+        bus.postMessage({
+          action: 'TOGGLE_FOLLOW',
+          targetHandle: handleToToggle,
+          isFollowing: nextState,
+        });
+        bus.close();
       } catch {}
       return updated;
     });
+
+    // Also update selectedProfileUser in real instant time if currently open in the mini-card!
+    setSelectedProfileUser((prev) => {
+      if (!prev || prev.handle.toLowerCase() !== handleToToggle) return prev;
+      return {
+        ...prev,
+        followers: Math.max(0, prev.followers + (nextState ? 1 : -1)),
+      };
+    });
+
     const streamerObj = streamers.find((s) => s.handle.replace(/^@/, '').toLowerCase() === handleToToggle) || currentStreamer;
     showToast(nextState ? `Followed @${streamerObj.name || handleToToggle}! ✨` : `Unfollowed @${streamerObj.name || handleToToggle}`);
   };
