@@ -1890,10 +1890,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {/* ================================================================ */}
         <div className="liveme-chat-stream-layer">
           <div className="liveme-chat-scroll-box" ref={chatScrollRef}>
-            {/* TikTok LIVE Official Welcome & Match Banners */}
+            {/* Privity LIVE Official Welcome & Match Banners */}
             <div className="liveme-chat-system-banner">
-              <span className="liveme-tiktok-icon">🎵</span>
-              <p>Welcome to TikTok LIVE! Have fun interacting with others in real time. Creators must be 18 or older to go LIVE. Viewers must be 18 or older to recharge and send Gifts. Remember to follow our Community Guidelines.</p>
+              <span className="liveme-tiktok-icon">🔴</span>
+              <p>Welcome to Privity LIVE! Have fun interacting with others in real time. Creators must be 18 or older to go LIVE. Viewers must be 18 or older to recharge and send Gifts. Remember to follow our Community Guidelines.</p>
             </div>
 
             {isPkBattleActive && (
