@@ -13,6 +13,9 @@ import { LiveMeCoinGamesModal } from './LiveMeCoinGamesModal';
 import { LiveMeHotCatalog } from './LiveMeHotCatalog';
 import { LiveMePkMatchModal } from './LiveMePkMatchModal';
 import { LiveMeViewersModal, RoomViewer } from './LiveMeViewersModal';
+import { LiveUserProfileModal } from './LiveUserProfileModal';
+import { LiveModerationModal } from './LiveModerationModal';
+import { getUserLiveProfile, UserLiveProfile, getDeterministicLevel } from './userProfileUtils';
 import { GiftAnimationPlayer, globalGiftQueue, DEFAULT_GIFTS, GiftEvent } from '../../gifts';
 import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSyncService';
 import './liveme.css';
@@ -127,6 +130,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [remoteLiveFrame, setRemoteLiveFrame] = useState<string | null>(null);
   const [p2pConnectionStatus, setP2pConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
   const [roomContributors, setRoomContributors] = useState<LiveMeContributor[]>(() => isRealStream ? [] : (currentStreamer.topContributors || []));
+  const roomContributorsRef = useRef(roomContributors);
+  roomContributorsRef.current = roomContributors;
 
   useEffect(() => {
     if (!isRealStream && currentStreamer.topContributors && currentStreamer.topContributors.length > 0) {
@@ -369,6 +374,15 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [battleWinner, setBattleWinner] = useState<'host' | 'rival' | 'draw' | null>(null);
   const [pkDamageFloating, setPkDamageFloating] = useState<Array<{ id: number; text: string; color: string }>>([]);
 
+  const isPkBattleActiveRef = useRef(isPkBattleActive);
+  isPkBattleActiveRef.current = isPkBattleActive;
+  const hostPkScoreRef = useRef(hostPkScore);
+  hostPkScoreRef.current = hostPkScore;
+  const rivalPkScoreRef = useRef(rivalPkScore);
+  rivalPkScoreRef.current = rivalPkScore;
+  const battleRoundTimerRef = useRef(battleRoundTimer);
+  battleRoundTimerRef.current = battleRoundTimer;
+
   const formatBattleTimer = (sec: number) => {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
@@ -379,6 +393,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [pkRival, setPkRival] = useState<LiveMeStreamer>(() => {
     return LIVEME_STREAMERS.find((s) => s.handle.includes('mel')) || LIVEME_STREAMERS[0];
   });
+  const pkRivalRef = useRef(pkRival);
+  pkRivalRef.current = pkRival;
 
   // Followed creators map
   const [followedMap, setFollowedMap] = useState<Record<string, boolean>>({});
@@ -403,15 +419,49 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   // Dynamic real-time likes map
   const [streamerLikesMap, setStreamerLikesMap] = useState<Record<string, number>>({});
 
-  // Real-time room audience roster
-  const roomViewers = useMemo<RoomViewer[]>(() => {
+  // User Profile Mini-Card ("Little Tab") State
+  const [selectedProfileUser, setSelectedProfileUser] = useState<UserLiveProfile | null>(null);
+  const [selectedProfileContribution, setSelectedProfileContribution] = useState<number>(0);
+  const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
+
+  // Live Stream Moderation Management State
+  const [mutedUsers, setMutedUsers] = useState<UserLiveProfile[]>([]);
+  const [kickedUsers, setKickedUsers] = useState<UserLiveProfile[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<UserLiveProfile[]>([]);
+  const [isModerationModalOpen, setIsModerationModalOpen] = useState(false);
+  const [isUserMuted, setIsUserMuted] = useState(false);
+
+  // Graceful "LIVE Ended" Overlay State (3-second countdown kicking viewers out)
+  const [isLiveEndedOverlayOpen, setIsLiveEndedOverlayOpen] = useState(false);
+  const [liveEndedData, setLiveEndedData] = useState<{
+    hostName: string;
+    hostAvatar: string;
+    totalLikes: number;
+    totalDiamonds: number;
+    peakViewers: number;
+    duration: number;
+  } | null>(null);
+  const [endedCountdown, setEndedCountdown] = useState(3);
+
+  // Microphone Audio VU Meter & Voice Monitoring ("Hear Myself")
+  const [isAudioMonitoring, setIsAudioMonitoring] = useState(false);
+  const [micAudioLevel, setMicAudioLevel] = useState(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const monitorGainRef = useRef<GainNode | null>(null);
+  const vuAnimRef = useRef<number | null>(null);
+
+  // Real-time room audience roster (Accurate, dynamic tracking of viewers)
+  const [activeAudience, setActiveAudience] = useState<RoomViewer[]>(() => {
+    if (isRealStream) return [];
     return [
       {
         id: 'v1',
         name: 'Carlos Mendez',
         handle: 'carlos_m',
         avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120',
-        level: 49,
+        level: getDeterministicLevel('carlos_m'),
         badge: 'Top Fan 🏆',
         isVip: true,
         contribution: 15400,
@@ -422,7 +472,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         name: 'Sarah Williams 🪽',
         handle: 'sarita_w',
         avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
-        level: 40,
+        level: getDeterministicLevel('sarita_w'),
         badge: 'Fan Club ⭐',
         isVip: true,
         contribution: 8200,
@@ -433,7 +483,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         name: 'Max London',
         handle: 'max_ldn',
         avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120',
-        level: 28,
+        level: getDeterministicLevel('max_ldn'),
         badge: 'Knight ⚔️',
         isVip: true,
         contribution: 4500,
@@ -444,7 +494,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         name: 'Elena Rostova',
         handle: 'elena_r',
         avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120',
-        level: 33,
+        level: getDeterministicLevel('elena_r'),
         isVip: false,
         contribution: 1200,
       },
@@ -453,39 +503,151 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         name: 'Kenji Sato',
         handle: 'kenji_tokyo',
         avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=120',
-        level: 21,
+        level: getDeterministicLevel('kenji_tokyo'),
         isVip: false,
         contribution: 650,
       },
-      {
-        id: 'v6',
-        name: 'Chloe Monet',
-        handle: 'chloe_m',
-        avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120',
-        level: 19,
-        isVip: false,
-        contribution: 200,
-      },
-      {
-        id: 'v7',
-        name: 'David Kim',
-        handle: 'david_k',
-        avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=120',
-        level: 15,
-        isVip: false,
-      },
-      {
-        id: 'v8',
-        name: 'Amina Al-Mansoor',
-        handle: 'amina_dxb',
-        avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120',
-        level: 25,
-        badge: 'Supporter 💫',
-        isVip: false,
-        contribution: 800,
-      },
     ];
-  }, []);
+  });
+
+  // Open User Profile Mini-Card ("Little Tab" that does not disrupt the live stream)
+  const handleOpenUserProfile = (
+    handle: string,
+    fallback?: { name?: string; avatar?: string; level?: number; contribution?: number }
+  ) => {
+    const profile = getUserLiveProfile(handle, {
+      name: fallback?.name,
+      avatar: fallback?.avatar,
+      level: fallback?.level,
+    });
+    setSelectedProfileUser(profile);
+    setSelectedProfileContribution(fallback?.contribution || 0);
+    setIsUserProfileModalOpen(true);
+  };
+
+  // Host Moderation Action Handlers
+  const handleMuteUser = (targetUser: UserLiveProfile) => {
+    const handle = targetUser.handle;
+    const isCurrentlyMuted = mutedUsers.some((u) => u.handle.toLowerCase() === handle.toLowerCase());
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    if (isCurrentlyMuted) {
+      setMutedUsers((prev) => prev.filter((u) => u.handle.toLowerCase() !== handle.toLowerCase()));
+      liveStreamSync.sendRoomEvent(roomId, {
+        type: 'LIVE_USER_UNMUTED',
+        handle,
+      });
+      showToast(`🔊 Unmuted @${handle}. They can now chat.`);
+    } else {
+      setMutedUsers((prev) => [...prev, targetUser]);
+      liveStreamSync.sendRoomEvent(roomId, {
+        type: 'LIVE_USER_MUTED',
+        handle,
+      });
+      showToast(`🔇 Muted @${handle} in this live broadcast.`);
+    }
+  };
+
+  const handleKickUser = (targetUser: UserLiveProfile) => {
+    const handle = targetUser.handle;
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    setKickedUsers((prev) => [...prev, targetUser]);
+    setActiveAudience((prev) => prev.filter((v) => v.handle.toLowerCase() !== handle.toLowerCase()));
+    setLiveViewersCount((prev) => Math.max(0, prev - 1));
+    liveStreamSync.sendRoomEvent(roomId, {
+      type: 'LIVE_USER_KICKED',
+      handle,
+    });
+    setIsUserProfileModalOpen(false);
+    showToast(`👢 Kicked @${handle} from this live broadcast.`);
+  };
+
+  const handleBlockUser = (targetUser: UserLiveProfile) => {
+    const handle = targetUser.handle;
+    const isCurrentlyBlocked = blockedUsers.some((u) => u.handle.toLowerCase() === handle.toLowerCase());
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    if (isCurrentlyBlocked) {
+      setBlockedUsers((prev) => prev.filter((u) => u.handle.toLowerCase() !== handle.toLowerCase()));
+      showToast(`🔓 Unblocked @${handle}.`);
+    } else {
+      setBlockedUsers((prev) => [...prev, targetUser]);
+      setActiveAudience((prev) => prev.filter((v) => v.handle.toLowerCase() !== handle.toLowerCase()));
+      setLiveViewersCount((prev) => Math.max(0, prev - 1));
+      liveStreamSync.sendRoomEvent(roomId, {
+        type: 'LIVE_USER_BLOCKED',
+        handle,
+      });
+      setIsUserProfileModalOpen(false);
+      showToast(`🚫 Blocked @${handle} from live broadcast.`);
+    }
+  };
+
+  // Microphone Audio Setup & Analyser for VU Meter
+  useEffect(() => {
+    if (!isHost) return;
+    const stream = localStreamRef.current;
+    if (!stream || stream.getAudioTracks().length === 0) return;
+
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      audioCtxRef.current = ctx;
+
+      const source = ctx.createMediaStreamSource(stream);
+      micSourceRef.current = source;
+
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      analyserRef.current = analyser;
+      source.connect(analyser);
+
+      const gain = ctx.createGain();
+      gain.gain.value = 0.8;
+      monitorGainRef.current = gain;
+
+      const buffer = new Uint8Array(analyser.frequencyBinCount);
+      const updateVu = () => {
+        analyser.getByteFrequencyData(buffer);
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i++) {
+          sum += buffer[i];
+        }
+        const avg = sum / buffer.length;
+        setMicAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        vuAnimRef.current = requestAnimationFrame(updateVu);
+      };
+      vuAnimRef.current = requestAnimationFrame(updateVu);
+
+      return () => {
+        if (vuAnimRef.current) cancelAnimationFrame(vuAnimRef.current);
+        try {
+          ctx.close();
+        } catch {}
+      };
+    } catch (e) {
+      console.warn('Audio monitor init error:', e);
+    }
+  }, [isHost]);
+
+  // Voice Monitoring toggle ("Hear Myself" in headphones)
+  useEffect(() => {
+    if (!audioCtxRef.current || !micSourceRef.current || !monitorGainRef.current) return;
+    try {
+      if (isAudioMonitoring) {
+        if (audioCtxRef.current.state === 'suspended') {
+          audioCtxRef.current.resume();
+        }
+        micSourceRef.current.connect(monitorGainRef.current);
+        monitorGainRef.current.connect(audioCtxRef.current.destination);
+      } else {
+        try {
+          monitorGainRef.current.disconnect();
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('Voice monitor toggle error:', e);
+    }
+  }, [isAudioMonitoring]);
 
   // Gift tray state
   const [activeGiftCategory, setActiveGiftCategory] = useState<'popular' | 'special' | 'pranks' | 'nvip' | 'celebrity'>('popular');
@@ -642,6 +804,23 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               setIsMirrored(actual === 'user');
             }
           }
+
+          // Guarantee microphone audio track is attached for high-quality audio
+          if (stream.getAudioTracks().length === 0) {
+            try {
+              const audioStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  echoCancellation: true,
+                  noiseSuppression: true,
+                  autoGainControl: true,
+                },
+              });
+              audioStream.getAudioTracks().forEach((at) => stream!.addTrack(at));
+            } catch (aErr) {
+              console.warn('Microphone fallback acquisition error:', aErr);
+            }
+          }
+
           bindStreamToVideos(stream);
           liveStreamSync.updateHostMediaStream(stream);
           showToastRef.current('🔴 Live Camera & Mic Connected!');
@@ -943,19 +1122,39 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           return [...prev.slice(-35), evt.message];
         });
       } else if (evt.type === 'LIVE_JOIN' && evt.user) {
+        const userHandle = evt.user.handle || evt.user.name;
+        const userLevel = evt.user.level || getDeterministicLevel(userHandle);
+
         const joinMsg: LiveMeChatMessage = {
           id: `join-${Date.now()}-${Math.random()}`,
           user: evt.user.name,
-          handle: evt.user.handle,
+          handle: userHandle,
           avatar: evt.user.avatar,
-          level: 1,
-          badge: 'FAN',
+          level: userLevel,
+          badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
           text: 'joined the live room 👋',
           isSystem: true,
           isJoin: true,
           timestamp: Date.now(),
         };
         setChatMessages((prev) => [...prev.slice(-35), joinMsg]);
+
+        // Add to active audience list
+        setActiveAudience((prev) => {
+          if (prev.some((v) => v.handle === userHandle)) return prev;
+          const newViewer: RoomViewer = {
+            id: evt.user.id || `v_${Date.now()}`,
+            name: evt.user.name,
+            handle: userHandle,
+            avatar: evt.user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
+            level: userLevel,
+            badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
+            isVip: userLevel >= 40,
+            contribution: 0,
+            isFollowing: false,
+          };
+          return [newViewer, ...prev];
+        });
 
         setLiveViewersCount((prev) => {
           const nextCount = prev + 1;
@@ -967,11 +1166,20 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               count: nextCount,
               likes: likesReceivedRef.current,
               diamonds: diamondsEarnedRef.current,
+              isPkBattleActive: isPkBattleActiveRef.current,
+              pkRival: pkRivalRef.current,
+              hostPkScore: hostPkScoreRef.current,
+              rivalPkScore: rivalPkScoreRef.current,
+              battleRoundTimer: battleRoundTimerRef.current,
+              topContributors: roomContributorsRef.current,
             });
           }
           return nextCount;
         });
       } else if (evt.type === 'LIVE_LEAVE') {
+        if (evt.user?.handle) {
+          setActiveAudience((prev) => prev.filter((v) => v.handle !== evt.user.handle));
+        }
         setLiveViewersCount((prev) => Math.max(0, prev - 1));
       } else if (evt.type === 'LIVE_VIEWER_COUNT' && typeof evt.count === 'number') {
         setLiveViewersCount(evt.count);
@@ -986,8 +1194,105 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (typeof evt.diamonds === 'number') {
           setDiamondsEarned(evt.diamonds);
         }
+        if (evt.isPkBattleActive) {
+          setIsPkBattleActive(true);
+          isPkBattleActiveRef.current = true;
+          if (evt.pkRival) {
+            setPkRival(evt.pkRival);
+            pkRivalRef.current = evt.pkRival;
+          }
+          if (typeof evt.hostPkScore === 'number') setHostPkScore(evt.hostPkScore);
+          if (typeof evt.rivalPkScore === 'number') setRivalPkScore(evt.rivalPkScore);
+          if (typeof evt.battleRoundTimer === 'number') setBattleRoundTimer(evt.battleRoundTimer);
+        }
+        if (evt.topContributors && Array.isArray(evt.topContributors)) {
+          setRoomContributors(evt.topContributors);
+        }
+      } else if (evt.type === 'PK_BATTLE_START') {
+        setIsPkBattleActive(true);
+        isPkBattleActiveRef.current = true;
+        if (evt.rival) {
+          setPkRival(evt.rival);
+          pkRivalRef.current = evt.rival;
+        }
+        if (typeof evt.hostScore === 'number') setHostPkScore(evt.hostScore);
+        if (typeof evt.rivalScore === 'number') setRivalPkScore(evt.rivalScore);
+        if (typeof evt.roundTimer === 'number') setBattleRoundTimer(evt.roundTimer);
+        setBattleWinner(null);
+        showToastRef.current(`⚔️ LIVE Battle Started! Battling @${evt.rival?.handle || 'Rival'}!`);
+      } else if (evt.type === 'PK_BATTLE_UPDATE') {
+        if (typeof evt.hostScore === 'number') setHostPkScore(evt.hostScore);
+        if (typeof evt.rivalScore === 'number') setRivalPkScore(evt.rivalScore);
+        if (typeof evt.roundTimer === 'number') setBattleRoundTimer(evt.roundTimer);
+        if (evt.hit) triggerPkHit(evt.hit.text, evt.hit.color);
+      } else if (evt.type === 'PK_BATTLE_END') {
+        setBattleWinner(evt.winner || null);
+        setTimeout(() => {
+          setIsPkBattleActive(false);
+          isPkBattleActiveRef.current = false;
+        }, 3500);
+      } else if (evt.type === 'LIVE_ENDED') {
+        if (!isHost) {
+          setLiveEndedData({
+            hostName: evt.hostName || currentStreamer.name,
+            hostAvatar: evt.hostAvatar || currentStreamer.avatar,
+            totalLikes: evt.totalLikes ?? likesReceivedRef.current,
+            totalDiamonds: evt.totalDiamonds ?? diamondsEarnedRef.current,
+            peakViewers: evt.peakViewers ?? Math.max(liveViewersCountRef.current, 1),
+            duration: evt.duration ?? 60,
+          });
+          setIsLiveEndedOverlayOpen(true);
+          setEndedCountdown(3);
+          let remaining = 3;
+          const interval = setInterval(() => {
+            remaining -= 1;
+            setEndedCountdown(remaining);
+            if (remaining <= 0) {
+              clearInterval(interval);
+              setIsLiveEndedOverlayOpen(false);
+              onClose();
+            }
+          }, 1000);
+        }
+      } else if (evt.type === 'LIVE_USER_MUTED' && evt.handle) {
+        if (currentUser.handle.toLowerCase() === evt.handle.toLowerCase()) {
+          setIsUserMuted(true);
+          showToastRef.current('🔇 You have been muted by the host.');
+        }
+        setChatMessages((prev) => [
+          ...prev.slice(-35),
+          {
+            id: `mod-mute-${Date.now()}`,
+            user: 'Privity System',
+            handle: 'system',
+            text: `🔇 @${evt.handle} was silenced by the host.`,
+            isSystem: true,
+            timestamp: Date.now(),
+          },
+        ]);
+      } else if (evt.type === 'LIVE_USER_UNMUTED' && evt.handle) {
+        if (currentUser.handle.toLowerCase() === evt.handle.toLowerCase()) {
+          setIsUserMuted(false);
+          showToastRef.current('🔊 You have been unmuted by the host.');
+        }
+      } else if (evt.type === 'LIVE_USER_KICKED' && evt.handle) {
+        if (currentUser.handle.toLowerCase() === evt.handle.toLowerCase()) {
+          showToastRef.current('👢 You were removed from this live broadcast by the host.');
+          setTimeout(() => {
+            onClose();
+          }, 1500);
+        }
+        setLiveViewersCount((prev) => Math.max(0, prev - 1));
+      } else if (evt.type === 'LIVE_USER_BLOCKED' && evt.handle) {
+        if (currentUser.handle.toLowerCase() === evt.handle.toLowerCase()) {
+          showToastRef.current('🚫 You have been blocked from this live broadcast.');
+          setTimeout(() => {
+            onClose();
+          }, 1200);
+        }
+        setLiveViewersCount((prev) => Math.max(0, prev - 1));
       } else if (evt.type === 'LIVE_GIFT') {
-        // Enqueue animation for host & all viewers
+        // Enqueue animation for host & all viewers (strict deduplication in GiftQueueManager)
         if (evt.giftEvent && evt.animGift) {
           globalGiftQueue.enqueue(evt.giftEvent, evt.animGift);
         }
@@ -1014,16 +1319,55 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         setDiamondsEarned((prev) => prev + diamonds);
 
         // If in PK battle, add score
-        if (isPkBattleActive) {
+        if (isPkBattleActiveRef.current) {
           const dmg = diamonds * 2;
-          setHostPkScore((prev) => prev + dmg);
+          setHostPkScore((prev) => {
+            const next = prev + dmg;
+            hostPkScoreRef.current = next;
+            return next;
+          });
           triggerPkHit(`+${dmg.toLocaleString()} GIFT CRIT! 🔥`, '#ec4899');
+          if (isHost) {
+            liveStreamSync.sendRoomEvent(roomId, {
+              type: 'PK_BATTLE_UPDATE',
+              hostScore: hostPkScoreRef.current + dmg,
+              rivalScore: rivalPkScoreRef.current,
+              roundTimer: battleRoundTimerRef.current,
+              hit: { text: `+${dmg.toLocaleString()} GIFT CRIT! 🔥`, color: '#ec4899' },
+            });
+          }
         }
 
-        // Update top contributors facepile
+        // Update top contributors facepile and dynamic chairs ranking
         if (evt.sender) {
+          const sHandle = evt.sender.handle || evt.sender.name;
+          const sLevel = evt.sender.level || getDeterministicLevel(sHandle);
+
+          // Update active audience contribution
+          setActiveAudience((prev) => {
+            const exists = prev.find((v) => v.handle === sHandle);
+            if (exists) {
+              return prev.map((v) =>
+                v.handle === sHandle ? { ...v, contribution: (v.contribution || 0) + diamonds } : v
+              );
+            }
+            return [
+              {
+                id: evt.sender.id || `v_${Date.now()}`,
+                name: evt.sender.name,
+                handle: sHandle,
+                avatar: evt.sender.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
+                level: sLevel,
+                badge: 'Top Gifter 💎',
+                isVip: true,
+                contribution: diamonds,
+              },
+              ...prev,
+            ];
+          });
+
           setRoomContributors((prev) => {
-            const senderId = evt.sender.handle || evt.sender.id || evt.sender.name;
+            const senderId = sHandle;
             const existing = prev.find((c) => c.id === senderId || c.name === evt.sender.name);
             const updated = existing
               ? prev.map((c) => (c.id === existing.id ? { ...c, contribution: c.contribution + diamonds } : c))
@@ -1038,19 +1382,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   },
                 ];
 
-            return updated
+            const sorted = updated
               .sort((a, b) => b.contribution - a.contribution)
               .map((c, i) => ({
                 ...c,
                 rank: ((i === 0 ? 1 : i === 1 ? 2 : 3) as 1 | 2 | 3),
               }));
+            roomContributorsRef.current = sorted;
+            return sorted;
           });
         }
 
         showToastRef.current(`🎁 ${evt.sender?.name || 'Viewer'} sent ${evt.giftEvent?.giftName || 'Gift'}! (+${diamonds} 💎)`);
       }
     });
-  }, [currentStreamer.id, currentStreamer.handle, isHost, isPkBattleActive]);
+  }, [currentStreamer.id, currentStreamer.handle, isHost]);
 
   // Trigger floating PK Hit Damage text
   const triggerPkHit = (text: string, color = '#fbbf24') => {
@@ -1069,8 +1415,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     } else {
       spawnHeartReaction();
     }
-    setHostPkScore((prev) => prev + 5);
+    const nextScore = hostPkScore + 5;
+    setHostPkScore(nextScore);
+    hostPkScoreRef.current = nextScore;
     triggerPkHit('+5 CHEER! ♥', '#f43f5e');
+
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    try {
+      liveStreamSync.sendRoomEvent(roomId, {
+        type: 'PK_BATTLE_UPDATE',
+        hostScore: nextScore,
+        rivalScore: rivalPkScoreRef.current,
+        roundTimer: battleRoundTimerRef.current,
+        hit: { text: '+5 CHEER! ♥', color: '#f43f5e' },
+      });
+    } catch {}
   };
 
   // Host Controls: Flip Camera
@@ -1114,12 +1473,28 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     showToast(nextState ? '📹 Camera Off' : '📹 Camera Resumed');
   };
 
-  // Host Controls: End Broadcast cleanly
+  // Host Controls: End Broadcast cleanly (Broadcasts LIVE_ENDED so viewers see graceful 3s countdown)
   const handleEndBroadcastClick = () => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
+
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    try {
+      liveStreamSync.sendRoomEvent(roomId, {
+        type: 'LIVE_ENDED',
+        hostName: currentUser.name,
+        hostAvatar: currentUser.avatar,
+        hostHandle: currentUser.handle,
+        title: currentStreamer.title,
+        totalLikes: likesReceived,
+        totalDiamonds: diamondsEarned,
+        peakViewers: Math.max(liveViewersCount, 1),
+        duration: Math.floor((Date.now() - broadcastStartTimestampRef.current) / 1000),
+      });
+    } catch {}
+
     liveStreamSync.stopHostBroadcast();
     try {
       const bus = new BroadcastChannel('privity_sync_bus');
@@ -1142,32 +1517,46 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     showToast(nextState ? `Followed ${currentStreamer.name}! ✨` : `Unfollowed ${currentStreamer.name}`);
   };
 
-  // Send Chat Message
-  const handleSendChat = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-
+  // Send Direct Message from Mini-Profile or Chat
+  const handleSendChatMessage = (text: string) => {
+    if (isUserMuted) {
+      showToast('🔇 You are currently muted by the host in this live.');
+      return;
+    }
+    const myLevel = getDeterministicLevel(currentUser.handle);
     const newMsg: LiveMeChatMessage = {
       id: `msg-${Date.now()}`,
       user: currentUser.name,
       handle: currentUser.handle,
       avatar: currentUser.avatar,
-      level: 30,
-      badge: 'VIP',
-      text: chatInput.trim(),
+      level: myLevel,
+      badge: myLevel >= 40 ? 'VIP' : 'FAN',
+      text,
       timestamp: Date.now(),
     };
 
     setChatMessages((prev) => [...prev, newMsg]);
-    setChatInput('');
     spawnHeartReaction();
 
     try {
-      liveStreamSync.sendRoomEvent(currentStreamer.id, {
+      const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+      liveStreamSync.sendRoomEvent(roomId, {
         type: 'LIVE_CHAT',
         message: newMsg,
       });
     } catch {}
+  };
+
+  // Send Chat Message Form Submit
+  const handleSendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    if (isUserMuted) {
+      showToast('🔇 You are currently muted by the host.');
+      return;
+    }
+    handleSendChatMessage(chatInput.trim());
+    setChatInput('');
   };
 
   // Send Real Project Gift Handler
@@ -1658,6 +2047,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                     muted={isMuted}
                     className="liveme-pk-video-layer"
                   />
+                ) : remoteLiveFrame ? (
+                  <img
+                    src={remoteLiveFrame}
+                    alt="Live Host Camera"
+                    className="liveme-pk-video-layer"
+                    style={{ objectFit: 'cover', width: '100%', height: '100%' }}
+                  />
                 ) : (
                   <video
                     src={currentStreamer.videoStreamUrl}
@@ -1671,7 +2067,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 )}
 
                 {/* Bottom Left Streamer Tag */}
-                <div className="liveme-pk-streamer-tag left">
+                <div
+                  className="liveme-pk-streamer-tag left"
+                  onClick={() => handleOpenUserProfile(currentUser.handle, { name: currentUser.name, avatar: currentUser.avatar })}
+                  style={{ cursor: 'pointer' }}
+                >
                   <span>@{currentUser.handle}</span>
                 </div>
 
@@ -1702,7 +2102,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 />
 
                 {/* Bottom Right Streamer Tag with Follow Pill */}
-                <div className="liveme-pk-streamer-tag right">
+                <div
+                  className="liveme-pk-streamer-tag right"
+                  onClick={() => handleOpenUserProfile(pkRival.handle, { name: pkRival.name, avatar: pkRival.avatar })}
+                  style={{ cursor: 'pointer' }}
+                >
                   <span>@{pkRival.handle}</span>
                   <button
                     type="button"
@@ -1718,27 +2122,88 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               </div>
             </div>
 
-            {/* Contributor Chairs Row directly under the two boxes (Exact TikTok LIVE Spec) */}
+            {/* Contributor Chairs Row directly under the two boxes (Accurate #1, #2, #3 Chairs) */}
             <div className="liveme-pk-dual-chairs-bar">
-              {/* Host Chairs (Left 50%) */}
+              {/* Host Chairs (Left 50%): Rank 3, Rank 2, Rank 1 leading into center clash */}
               <div className="liveme-pk-chairs-half left">
-                <div className="liveme-pk-chair-slot empty" title="Empty chair">🪑</div>
-                <div className="liveme-pk-chair-slot empty" title="Empty chair">🪑</div>
-                <div className="liveme-pk-chair-slot rank-1" title="Top Gifter">
-                  <img src={currentUser.avatar} alt="Top Gifter" />
-                  <span className="liveme-chair-crown">👑1</span>
-                </div>
+                {[2, 1, 0].map((chairIndex) => {
+                  const contrib = roomContributors[chairIndex];
+                  const rank = (chairIndex === 0 ? 1 : chairIndex === 1 ? 2 : 3) as 1 | 2 | 3;
+                  const rankLabel = rank === 1 ? '👑1' : rank === 2 ? '🥈2' : '🥉3';
+                  const title = rank === 1 ? 'Top Gifter (#1)' : `#${rank} Gifter`;
+
+                  if (contrib) {
+                    return (
+                      <div
+                        key={contrib.id || chairIndex}
+                        className={`liveme-pk-chair-slot rank-${rank}`}
+                        title={`${title}: ${contrib.name} (${contrib.contribution.toLocaleString()} 💎)`}
+                        onClick={() =>
+                          handleOpenUserProfile(contrib.name, {
+                            name: contrib.name,
+                            avatar: contrib.avatar,
+                            contribution: contrib.contribution,
+                          })
+                        }
+                      >
+                        <img src={contrib.avatar} alt={contrib.name} />
+                        <span className="liveme-chair-crown">{rankLabel}</span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={`empty-host-${rank}`}
+                      className="liveme-pk-chair-slot empty"
+                      title={`No.${rank} Chair (Empty - Send gifts to claim this chair!)`}
+                    >
+                      <span className="chair-icon">🪑</span>
+                      <span className="chair-empty-number">No.{rank}</span>
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* Rival Chairs (Right 50%) */}
+              {/* Rival Chairs (Right 50%): Rank 1, Rank 2, Rank 3 */}
               <div className="liveme-pk-chairs-half right">
-                {(pkRival.topContributors || []).slice(0, 2).map((c, i) => (
-                  <div key={c.id || i} className={`liveme-pk-chair-slot rank-${i + 1}`} title={`#${i + 1} Gifter`}>
-                    <img src={c.avatar} alt={c.name} />
-                    <span className="liveme-chair-crown">{i === 0 ? '👑1' : '👑2'}</span>
-                  </div>
-                ))}
-                <div className="liveme-pk-chair-slot empty" title="Empty chair">🪑</div>
+                {[0, 1, 2].map((chairIndex) => {
+                  const rivalContribs = pkRival.topContributors || [];
+                  const contrib = rivalContribs[chairIndex];
+                  const rank = (chairIndex === 0 ? 1 : chairIndex === 1 ? 2 : 3) as 1 | 2 | 3;
+                  const rankLabel = rank === 1 ? '👑1' : rank === 2 ? '🥈2' : '🥉3';
+                  const title = rank === 1 ? 'Rival Top Gifter (#1)' : `Rival #${rank} Gifter`;
+
+                  if (contrib) {
+                    return (
+                      <div
+                        key={contrib.id || chairIndex}
+                        className={`liveme-pk-chair-slot rank-${rank}`}
+                        title={`${title}: ${contrib.name}`}
+                        onClick={() =>
+                          handleOpenUserProfile(contrib.name, {
+                            name: contrib.name,
+                            avatar: contrib.avatar,
+                          })
+                        }
+                      >
+                        <img src={contrib.avatar} alt={contrib.name} />
+                        <span className="liveme-chair-crown">{rankLabel}</span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={`empty-rival-${rank}`}
+                      className="liveme-pk-chair-slot empty"
+                      title={`No.${rank} Rival Chair (Empty)`}
+                    >
+                      <span className="chair-icon">🪑</span>
+                      <span className="chair-empty-number">No.{rank}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -1835,6 +2300,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   key={c.id}
                   className="liveme-gifter-avatar-slot"
                   title={`#${c.rank} Gifter: ${c.name} (${c.contribution.toLocaleString()} 🪙)`}
+                  onClick={() =>
+                    handleOpenUserProfile(c.name, {
+                      name: c.name,
+                      avatar: c.avatar,
+                      contribution: c.contribution,
+                    })
+                  }
+                  style={{ cursor: 'pointer' }}
                 >
                   <img src={c.avatar} alt={c.name} className="liveme-gifter-img" />
                   <span className="liveme-gifter-rank-crown">
@@ -1903,9 +2376,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               </div>
             )}
 
-            <div className="liveme-chat-join-row">
+            <div
+              className="liveme-chat-join-row"
+              onClick={() =>
+                handleOpenUserProfile(currentUser.handle, {
+                  name: currentUser.name,
+                  avatar: currentUser.avatar,
+                })
+              }
+              style={{ cursor: 'pointer' }}
+              title="Click to view profile"
+            >
               <span className="liveme-join-hand">👋</span>
-              <span className="liveme-join-gem">💎29</span>
+              <span className="liveme-join-gem">💎{getDeterministicLevel(currentUser.handle)}</span>
               <span className="liveme-join-name">{currentUser.name} 🇨🇺</span>
               <span className="liveme-join-text">joined</span>
             </div>
@@ -1914,6 +2397,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               <div
                 key={msg.id}
                 className={`liveme-chat-row ${msg.isSystem ? 'gift-notice' : ''} ${msg.isJoin ? 'join-notice' : ''}`}
+                onClick={() => {
+                  if (msg.user && !msg.isSystem) {
+                    handleOpenUserProfile(msg.handle || msg.user, {
+                      name: msg.user,
+                      avatar: msg.avatar,
+                      level: msg.level,
+                    });
+                  }
+                }}
+                style={{ cursor: msg.user && !msg.isSystem ? 'pointer' : 'default' }}
+                title={msg.user && !msg.isSystem ? `Click @${msg.user}'s profile` : undefined}
               >
                 {msg.level && (
                   <span
@@ -1937,18 +2431,20 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         <div className="liveme-bottom-bar">
           {/* Chat Input Form (Type... with Smiley) */}
           <form onSubmit={handleSendChat} className="liveme-input-form">
-            <div className="liveme-chat-input-wrap">
+            <div className={`liveme-chat-input-wrap ${isUserMuted ? 'muted' : ''}`}>
               <input
                 type="text"
                 className="liveme-chat-input"
-                placeholder="Type..."
+                placeholder={isUserMuted ? "🔇 You are muted by the host" : "Type..."}
                 value={chatInput}
+                disabled={isUserMuted}
                 onChange={(e) => setChatInput(e.target.value)}
               />
               <button
                 type="button"
                 className="liveme-chat-smiley-btn"
-                onClick={() => setChatInput((prev) => prev + ' 😊')}
+                disabled={isUserMuted}
+                onClick={() => !isUserMuted && setChatInput((prev) => prev + ' 😊')}
               >
                 😊
               </button>
@@ -1959,7 +2455,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           <div className="liveme-toolbar-actions">
             {isHost ? (
               <>
-                {/* 1. PK Battle Matchmaker Trigger (Clean, modern icon button) */}
+                {/* 1. PK Battle Matchmaker Trigger */}
                 <button
                   type="button"
                   className={`liveme-tool-btn liveme-match-trigger ${isPkBattleActive ? 'active' : ''}`}
@@ -1969,7 +2465,37 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   ⚔️
                 </button>
 
-                {/* 2. Flip Camera Front/Back */}
+                {/* 2. Voice Monitor ("Hear Myself" in headphones) */}
+                <button
+                  type="button"
+                  className={`liveme-tool-btn liveme-hear-myself-btn ${isAudioMonitoring ? 'active' : ''}`}
+                  onClick={() => {
+                    setIsAudioMonitoring((prev) => {
+                      const next = !prev;
+                      showToast(next ? '🎧 Voice Monitoring ON: You can now hear yourself in headphones.' : '🎧 Voice Monitoring OFF.');
+                      return next;
+                    });
+                  }}
+                  title={isAudioMonitoring ? "Hear Myself (Voice Monitoring ON 🎧)" : "Hear Myself (Voice Monitor 🎧)"}
+                >
+                  🎧
+                  {micAudioLevel > 10 && <span className="liveme-mic-vu-dot" />}
+                </button>
+
+                {/* 3. Moderation Management Panel */}
+                <button
+                  type="button"
+                  className="liveme-tool-btn liveme-mod-btn"
+                  onClick={() => setIsModerationModalOpen(true)}
+                  title={`Moderation Panel (${mutedUsers.length + kickedUsers.length + blockedUsers.length} restricted)`}
+                >
+                  🛡️
+                  {(mutedUsers.length + kickedUsers.length + blockedUsers.length) > 0 && (
+                    <span className="liveme-mod-badge">{mutedUsers.length + kickedUsers.length + blockedUsers.length}</span>
+                  )}
+                </button>
+
+                {/* 4. Flip Camera Front/Back */}
                 <button
                   type="button"
                   className="liveme-tool-btn"
@@ -1979,7 +2505,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   🔄
                 </button>
 
-                {/* 3. Mirror Angle Reflection */}
+                {/* 5. Mirror Angle Reflection */}
                 <button
                   type="button"
                   className={`liveme-tool-btn ${isMirrored ? 'active' : ''}`}
@@ -1989,17 +2515,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   🪞
                 </button>
 
-                {/* 4. Mute Microphone */}
+                {/* 6. Mute Microphone */}
                 <button
                   type="button"
                   className={`liveme-tool-btn ${isMicMuted ? 'danger' : ''}`}
                   onClick={handleToggleMic}
-                  title={isMicMuted ? "Unmute Mic" : "Mute Mic"}
+                  title={isMicMuted ? "Unmute Mic" : `Mute Mic (Mic Level: ${micAudioLevel}%)`}
                 >
                   {isMicMuted ? '🔇' : '🎙️'}
                 </button>
 
-                {/* 5. Toggle Video Camera */}
+                {/* 7. Toggle Video Camera */}
                 <button
                   type="button"
                   className={`liveme-tool-btn ${isVideoOff ? 'danger' : ''}`}
@@ -2224,19 +2750,41 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         onStartPkBattle={(rival) => {
           setPkRival(rival);
           setIsPkBattleActive(true);
+          isPkBattleActiveRef.current = true;
           setHostPkScore(3);
           setRivalPkScore(4);
           setBattleRoundTimer(121);
           setBattleWinner(null);
+          const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+          liveStreamSync.sendRoomEvent(roomId, {
+            type: 'PK_BATTLE_START',
+            rival,
+            hostScore: 3,
+            rivalScore: 4,
+            roundTimer: 121,
+          });
         }}
         onEndPkBattle={() => {
           setIsPkBattleActive(false);
+          isPkBattleActiveRef.current = false;
+          const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+          liveStreamSync.sendRoomEvent(roomId, {
+            type: 'PK_BATTLE_END',
+          });
         }}
         onRematch={() => {
           setHostPkScore(3);
           setRivalPkScore(4);
           setBattleRoundTimer(121);
           setBattleWinner(null);
+          const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+          liveStreamSync.sendRoomEvent(roomId, {
+            type: 'PK_BATTLE_START',
+            rival: pkRival,
+            hostScore: 3,
+            rivalScore: 4,
+            roundTimer: 121,
+          });
         }}
         showToast={showToast}
       />
@@ -2276,9 +2824,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         onClose={() => setIsViewersModalOpen(false)}
         streamerName={currentStreamer.name}
         viewersCount={isHost ? liveViewersCount : currentStreamer.viewersCount}
-        viewers={roomViewers}
+        viewers={activeAudience}
         isHost={isHost}
-        onViewProfile={onViewProfile}
+        onViewProfile={(handle) => {
+          handleOpenUserProfile(handle);
+        }}
         showToast={showToast}
       />
 
@@ -2363,6 +2913,98 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               }}
             >
               Done & Return to Feed
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================ */}
+      {/* 13. IN-STREAM USER PROFILE MINI-CARD ("LITTLE TAB")             */}
+      {/* ================================================================ */}
+      <LiveUserProfileModal
+        isOpen={isUserProfileModalOpen}
+        onClose={() => setIsUserProfileModalOpen(false)}
+        user={selectedProfileUser}
+        isHost={isHost}
+        isMuted={mutedUsers.some((u) => u.handle.toLowerCase() === selectedProfileUser?.handle.toLowerCase())}
+        isBlocked={blockedUsers.some((u) => u.handle.toLowerCase() === selectedProfileUser?.handle.toLowerCase())}
+        onMuteUser={handleMuteUser}
+        onKickUser={handleKickUser}
+        onBlockUser={handleBlockUser}
+        onSendChatMessage={(text: string) => handleSendChatMessage(text)}
+        onOpenModerationManagement={() => setIsModerationModalOpen(true)}
+        showToast={showToast}
+        roomContribution={selectedProfileContribution}
+      />
+
+      {/* ================================================================ */}
+      {/* 14. HOST MODERATION MANAGEMENT MODAL                            */}
+      {/* ================================================================ */}
+      <LiveModerationModal
+        isOpen={isModerationModalOpen}
+        onClose={() => setIsModerationModalOpen(false)}
+        mutedUsers={mutedUsers}
+        kickedUsers={kickedUsers}
+        blockedUsers={blockedUsers}
+        onUnmuteUser={(handle: string) => {
+          const u = mutedUsers.find((user) => user.handle.toLowerCase() === handle.toLowerCase());
+          if (u) handleMuteUser(u);
+        }}
+        onUnkickUser={(handle: string) => {
+          setKickedUsers((prev) => prev.filter((k) => k.handle.toLowerCase() !== handle.toLowerCase()));
+          showToast(`✅ Re-admitted @${handle} to broadcast.`);
+        }}
+        onUnblockUser={(handle: string) => {
+          const u = blockedUsers.find((user) => user.handle.toLowerCase() === handle.toLowerCase());
+          if (u) handleBlockUser(u);
+        }}
+        showToast={showToast}
+      />
+
+      {/* ================================================================ */}
+      {/* 15. GRACEFUL "LIVE ENDED" OVERLAY FOR VIEWERS (3s COUNTDOWN)     */}
+      {/* ================================================================ */}
+      {isLiveEndedOverlayOpen && (
+        <div className="liveme-ended-graceful-overlay">
+          <div className="liveme-ended-graceful-content">
+            <div className="liveme-ended-badge">🔴 LIVE ENDED</div>
+            <img
+              src={liveEndedData?.hostAvatar || currentStreamer.avatar}
+              alt={liveEndedData?.hostName || currentStreamer.name}
+              className="liveme-ended-host-avatar"
+            />
+            <h3 className="liveme-ended-host-name">
+              {liveEndedData?.hostName || currentStreamer.name}
+            </h3>
+            <p className="liveme-ended-subtitle">This live broadcast has concluded.</p>
+
+            <div className="liveme-ended-stats-row">
+              <div className="liveme-ended-stat-box">
+                <span className="ended-stat-val">👥 {(liveEndedData?.peakViewers || liveViewersCount).toLocaleString()}</span>
+                <span className="ended-stat-label">Viewers</span>
+              </div>
+              <div className="liveme-ended-stat-box">
+                <span className="ended-stat-val">❤️ {(liveEndedData?.totalLikes || likesReceived).toLocaleString()}</span>
+                <span className="ended-stat-label">Likes</span>
+              </div>
+              <div className="liveme-ended-stat-box">
+                <span className="ended-stat-val">💎 {(liveEndedData?.totalDiamonds || diamondsEarned).toLocaleString()}</span>
+                <span className="ended-stat-label">Diamonds</span>
+              </div>
+            </div>
+
+            <div className="liveme-ended-countdown-box">
+              <span>Closing in </span>
+              <span className="countdown-number">{endedCountdown}</span>
+              <span> seconds...</span>
+            </div>
+
+            <button
+              type="button"
+              className="liveme-ended-close-now-btn"
+              onClick={onClose}
+            >
+              Exit Now
             </button>
           </div>
         </div>

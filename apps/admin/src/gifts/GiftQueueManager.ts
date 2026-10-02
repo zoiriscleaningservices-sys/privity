@@ -4,8 +4,8 @@ export class GiftQueueManager {
   private queue: ActiveGiftQueueItem[] = [];
   private activeItems: ActiveGiftQueueItem[] = [];
   private listeners: Set<(items: ActiveGiftQueueItem[]) => void> = new Set();
-  private maxConcurrentMinor: number = 4;
-  private nextLane: number = 0;
+  private processedEventIds: Set<string> = new Set();
+  private autoRemoveTimers: Map<string, any> = new Map();
 
   public subscribe(listener: (items: ActiveGiftQueueItem[]) => void): () => void {
     this.listeners.add(listener);
@@ -21,39 +21,60 @@ export class GiftQueueManager {
   }
 
   public enqueue(event: GiftEvent, gift: Gift): void {
+    // 1. Strict Deduplication: Prevent gift from being played more than once
+    if (event.id) {
+      if (this.processedEventIds.has(event.id)) {
+        return; // Already processed
+      }
+      this.processedEventIds.add(event.id);
+      if (this.processedEventIds.size > 500) {
+        const firstKey = this.processedEventIds.values().next().value;
+        if (firstKey) this.processedEventIds.delete(firstKey);
+      }
+    }
+
     const priority = gift.priority || GIFT_PRIORITY_MAP[gift.rarity] || 1;
     const isMajor = priority >= 5;
 
-    // Check if we should group repeated small gifts into a streak
-    if (!isMajor) {
-      const existingStreak = this.activeItems.find(
-        (item) =>
-          item.event.giftId === gift.id &&
-          item.event.senderId === event.senderId &&
-          item.status === 'playing'
-      );
+    // Check if we should group repeated small gifts from the SAME sender into a combo streak
+    const existingStreak = this.activeItems.find(
+      (item) =>
+        item.event.giftId === gift.id &&
+        item.event.senderId === event.senderId &&
+        item.status === 'playing'
+    );
 
-      if (existingStreak) {
-        existingStreak.streakCount = (existingStreak.streakCount || 1) + (event.quantity || 1);
-        existingStreak.startTime = Date.now(); // reset timer for streak burst
-        this.notify();
-        return;
+    if (existingStreak) {
+      existingStreak.streakCount = (existingStreak.streakCount || 1) + (event.quantity || 1);
+      existingStreak.startTime = Date.now();
+      // Reset auto-remove timer
+      if (this.autoRemoveTimers.has(existingStreak.queueId)) {
+        clearTimeout(this.autoRemoveTimers.get(existingStreak.queueId));
       }
+      const t = setTimeout(() => {
+        this.removeItem(existingStreak.queueId);
+      }, existingStreak.duration || 3200);
+      this.autoRemoveTimers.set(existingStreak.queueId, t);
+
+      this.notify();
+      return;
     }
+
+    const duration = isMajor ? Math.min(gift.animationDuration || 4500, 5000) : 3000;
 
     const queueItem: ActiveGiftQueueItem = {
       queueId: `q_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       event,
       gift,
       startTime: 0,
-      duration: gift.animationDuration || 4000,
+      duration,
       status: 'pending',
-      lane: (this.nextLane++ % 4),
+      lane: 0,
       streakCount: event.quantity || 1,
     };
 
     if (isMajor) {
-      // Legendary gifts go to the front of pending queue
+      // High-tier gifts get priority in queue
       this.queue.unshift(queueItem);
     } else {
       this.queue.push(queueItem);
@@ -63,6 +84,10 @@ export class GiftQueueManager {
   }
 
   public removeItem(queueId: string): void {
+    if (this.autoRemoveTimers.has(queueId)) {
+      clearTimeout(this.autoRemoveTimers.get(queueId));
+      this.autoRemoveTimers.delete(queueId);
+    }
     this.activeItems = this.activeItems.filter((item) => item.queueId !== queueId);
     this.processQueue();
     this.notify();
@@ -71,47 +96,30 @@ export class GiftQueueManager {
   private processQueue(): void {
     if (this.queue.length === 0) return;
 
-    const hasActiveMajor = this.activeItems.some(
-      (item) => (item.gift.priority || GIFT_PRIORITY_MAP[item.gift.rarity] || 1) >= 5
-    );
-
-    // If a major gift is currently commanding the stage, wait for it to finish
-    if (hasActiveMajor) return;
-
-    // Next item to consider
-    const nextItem = this.queue[0];
-    const nextPriority = nextItem.gift.priority || GIFT_PRIORITY_MAP[nextItem.gift.rarity] || 1;
-
-    if (nextPriority >= 5) {
-      // Legendary gift: commands the main overlay!
-      // Promote from queue to active
-      this.queue.shift();
-      nextItem.status = 'playing';
-      nextItem.startTime = Date.now();
-      this.activeItems.push(nextItem);
-      this.notify();
-    } else {
-      // Minor gift: allow up to maxConcurrentMinor
-      const activeMinorCount = this.activeItems.filter(
-        (item) => (item.gift.priority || GIFT_PRIORITY_MAP[item.gift.rarity] || 1) < 5
-      ).length;
-
-      if (activeMinorCount < this.maxConcurrentMinor) {
-        this.queue.shift();
-        nextItem.status = 'playing';
-        nextItem.startTime = Date.now();
-        this.activeItems.push(nextItem);
-        this.notify();
-
-        // Recursively check if another minor gift can be processed
-        if (this.queue.length > 0 && (this.queue[0].gift.priority || 1) < 5) {
-          this.processQueue();
-        }
-      }
+    // Strict sequential rule: Only 1 gift active at a time!
+    // "show one of the gift 1st and then the 2nd gift And one after you know one after another one"
+    if (this.activeItems.length > 0) {
+      return; // A gift is currently commanding the stage, wait for it to complete
     }
+
+    const nextItem = this.queue.shift();
+    if (!nextItem) return;
+
+    nextItem.status = 'playing';
+    nextItem.startTime = Date.now();
+    this.activeItems.push(nextItem);
+    this.notify();
+
+    // Auto-advance after duration to ensure queue never gets stuck
+    const t = setTimeout(() => {
+      this.removeItem(nextItem.queueId);
+    }, nextItem.duration);
+    this.autoRemoveTimers.set(nextItem.queueId, t);
   }
 
   public clear(): void {
+    this.autoRemoveTimers.forEach((timer) => clearTimeout(timer));
+    this.autoRemoveTimers.clear();
     this.queue = [];
     this.activeItems = [];
     this.notify();
