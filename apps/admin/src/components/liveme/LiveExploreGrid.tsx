@@ -472,17 +472,6 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
           </div>
         )}
       </main>
-
-      {/* 4. FLOATING 3D GIFT BOX (MATCHING SCREENSHOT) */}
-      <button
-        type="button"
-        className="live-floating-gift-orb"
-        onClick={() => showToast('🎁 Daily Bonus & Live Spark Gifts!')}
-        title="Live Rewards"
-      >
-        <span className="gift-emoji-sparkle">🎁</span>
-        <span className="gift-pulse-halo" />
-      </button>
     </div>
   );
 };

@@ -6,3 +6,4 @@ export * from './LiveMeRechargeModal';
 export * from './LiveMeCoinGamesModal';
 export * from './LiveMePkMatchModal';
 export * from './LiveExploreGrid';
+export * from './LivePipPlayer';

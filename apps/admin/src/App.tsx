@@ -61,7 +61,7 @@ import {
 } from './gifts';
 import './gifts/gifts.css';
 import { CameraModal } from './camera';
-import { LiveMeStreamArena, LiveExploreGrid, LIVEME_STREAMERS } from './components/liveme';
+import { LiveMeStreamArena, LiveExploreGrid, LivePipPlayer, LIVEME_STREAMERS } from './components/liveme';
 import {
   TikTokSlideFeed,
   EXCLUSIVE_FORYOU_POSTS,
@@ -1497,6 +1497,7 @@ export function App() {
     } catch {}
     return null;
   });
+  const [minimizedLiveStream, setMinimizedLiveStream] = useState<any | null>(null);
   const [liveChatInput, setLiveChatInput] = useState('');
   const [liveComments, setLiveComments] = useState<Array<{ id: string; user: string; text: string; badge?: string; level?: number; isHost?: boolean; isJoin?: boolean; giftName?: string; giftIcon?: string }>>([
     { id: '1', user: 'Carlos', text: 'became the No. 19 fan in the Fan Club ⭐', isJoin: true },
@@ -5415,7 +5416,7 @@ export function App() {
       {/* ======================================================== */}
       {/* 2. CENTER FEED COLUMN                                    */}
       {/* ======================================================== */}
-      <main className={`feed-column ${activeTab === 'messages' ? 'messages-expanded-view' : ''} ${activeTab === 'discover' || activeTab === 'profile' ? 'fullscreen-top-view' : ''}`}>
+      <main className={`feed-column ${activeTab === 'messages' ? 'messages-expanded-view' : ''} ${activeTab === 'discover' || activeTab === 'profile' || (activeTab === 'feed' && feedFilter === 'live') ? 'fullscreen-top-view' : ''} ${activeTab === 'feed' && feedFilter === 'live' ? 'live-explore-expanded-view' : ''}`}>
         {/* --- VIEW 1: HOME FEED --- */}
         {activeTab === 'feed' && (
           <div
@@ -5537,6 +5538,7 @@ export function App() {
                 onOpenStream={(streamerId) => {
                   const target = LIVEME_STREAMERS.find((s) => s.id === streamerId) || LIVEME_STREAMERS[0];
                   setActiveLiveStream(target as any);
+                  setMinimizedLiveStream(null);
                 }}
                 onBackToFeed={() => setFeedFilter('feed')}
                 onGoLive={() => setIsCameraOpen(true)}
@@ -8659,7 +8661,7 @@ export function App() {
       {/* ======================================================== */}
       {/* 3. RIGHT SIDEBAR (SEARCH & SUGGESTED)                    */}
       {/* ======================================================== */}
-      {activeTab !== 'messages' && (
+      {activeTab !== 'messages' && !(activeTab === 'feed' && feedFilter === 'live') && (
         <aside className="side-intel-column">
         <div className="search-input-shell">
           <span className="search-lens-icon"><IconSearch size={18} /></span>
@@ -8751,20 +8753,14 @@ export function App() {
           isHostBroadcast={isHostBroadcasting}
           userMediaStream={hostLiveCameraStream}
           onClose={() => {
+            const streamer = LIVEME_STREAMERS.find((s) => s.id === activeLiveStream.id) || (activeLiveStream as any);
+            setMinimizedLiveStream(streamer);
             setActiveLiveStream(null);
             setIsHostBroadcasting(false);
-            try {
-              localStorage.removeItem('privity_is_host_broadcasting');
-              localStorage.removeItem('privity_active_live_session');
-              localStorage.removeItem('privity_current_live_host');
-            } catch {}
-            if (hostLiveCameraStream) {
-              hostLiveCameraStream.getTracks().forEach((t) => t.stop());
-              setHostLiveCameraStream(null);
-            }
           }}
           onEndBroadcast={() => {
             setActiveLiveStream(null);
+            setMinimizedLiveStream(null);
             setIsHostBroadcasting(false);
             try {
               localStorage.removeItem('privity_is_host_broadcasting');
@@ -8784,6 +8780,20 @@ export function App() {
           userCoins={userSparksBalance}
           onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
           showToast={triggerToast}
+        />
+      )}
+
+      {/* PICTURE-IN-PICTURE (PIP) MINIMIZED LIVE STREAM FLOATING PLAYER */}
+      {minimizedLiveStream && !activeLiveStream && (
+        <LivePipPlayer
+          streamer={minimizedLiveStream}
+          onMaximize={() => {
+            setActiveLiveStream(minimizedLiveStream);
+            setMinimizedLiveStream(null);
+          }}
+          onClose={() => {
+            setMinimizedLiveStream(null);
+          }}
         />
       )}
 

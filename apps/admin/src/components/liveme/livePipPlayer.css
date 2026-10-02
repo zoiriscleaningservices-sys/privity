@@ -1,0 +1,215 @@
+/* ==========================================================================
+   PRIVITY PICTURE-IN-PICTURE (PIP) FLOATING LIVE STREAM PLAYER
+   ULTRA-PREMIUM VISIONOS SPECULAR GLASS FLOATING CONTAINER
+   ========================================================================== */
+
+.live-pip-container {
+  position: fixed;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  right: 14px;
+  width: 136px;
+  height: 204px;
+  border-radius: 18px;
+  overflow: hidden;
+  z-index: 12000;
+  cursor: pointer;
+  background: #0b0c16;
+  border: 1.5px solid rgba(168, 85, 247, 0.65);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.8), 0 0 22px rgba(168, 85, 247, 0.4);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease;
+  user-select: none;
+  animation: pipPopIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pipPopIn {
+  from {
+    opacity: 0;
+    transform: scale(0.7) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.live-pip-container:hover {
+  transform: translateY(-3px) scale(1.03);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.88), 0 0 28px rgba(168, 85, 247, 0.55);
+  border-color: rgba(192, 132, 252, 0.85);
+}
+
+.live-pip-container:active {
+  transform: scale(0.96);
+}
+
+.live-pip-media-frame {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.live-pip-video,
+.live-pip-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Scrims */
+.live-pip-top-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.7) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.live-pip-bottom-scrim {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.9) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Top Header Bar inside PiP */
+.live-pip-header-bar {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 4;
+}
+
+.live-pip-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
+  padding: 2px 5px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 8.5px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: 0.04em;
+}
+
+.live-pip-pulse-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 5px #ef4444;
+  animation: pipPulseDot 1.2s infinite ease-in-out;
+}
+
+@keyframes pipPulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+/* Dedicated Close X Button on the PiP Window */
+.live-pip-close-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.live-pip-close-btn:hover {
+  background: rgba(239, 68, 68, 0.85);
+  border-color: #ef4444;
+  transform: scale(1.15);
+}
+
+.live-pip-close-btn:active {
+  transform: scale(0.9);
+}
+
+/* Bottom Streamer Meta */
+.live-pip-bottom-meta {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  z-index: 4;
+}
+
+.live-pip-streamer-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
+}
+
+.live-pip-streamer-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.live-pip-name {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.1;
+}
+
+.live-pip-heat {
+  font-size: 9px;
+  color: #f97316;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+/* Specular Ring */
+.live-pip-specular-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 17px;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  z-index: 5;
+}
+
+@media (max-width: 480px) {
+  .live-pip-container {
+    width: 120px;
+    height: 180px;
+    right: 10px;
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+  }
+}

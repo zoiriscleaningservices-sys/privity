@@ -409,9 +409,10 @@ textarea::placeholder {
   transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.feed-column.messages-expanded-view {
+.feed-column.messages-expanded-view,
+.feed-column.live-explore-expanded-view {
   width: calc(100% - 275px);
-  max-width: 1085px;
+  max-width: 1120px;
   flex: 1;
   border-right: none;
 }
@@ -5249,6 +5250,14 @@ textarea::placeholder {
 
   .feed-column.fullscreen-top-view {
     padding-top: 0 !important;
+  }
+
+  .feed-column.live-explore-expanded-view {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    border-right: none !important;
   }
 
   .spatial-messages-container.has-active-chat {
