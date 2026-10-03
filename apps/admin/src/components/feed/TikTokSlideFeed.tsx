@@ -184,8 +184,14 @@ export const TikTokSlideVideo: React.FC<{
 
   return (
     <video
-      ref={videoRefCallback}
-      src={src}
+      ref={(el) => {
+        if (el) {
+          el.muted = isMuted;
+          el.volume = 1.0;
+        }
+        videoRefCallback(el);
+      }}
+      src={cleanMediaUrl(src)}
       poster={post.thumbnailUrl || (post.type === 'video' ? undefined : post.contentUrl)}
       className="tiktok-video-player"
       loop
@@ -759,6 +765,8 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             if (index !== -1) setActiveSlideIndex(index);
           }
           if (videoEl && !pausedMap[postId || '']) {
+            videoEl.muted = isMuted;
+            videoEl.volume = 1.0;
             const playPromise = videoEl.play();
             if (playPromise !== undefined) {
               playPromise.catch(() => {
@@ -780,10 +788,24 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     });
 
     return () => observer.disconnect();
-  }, [displayPosts, pausedMap]);
+  }, [displayPosts, pausedMap, isMuted]);
 
-  // Synchronize Background Music with Active Slide & Mute state
+  // Synchronize Background Music & Active Video with Active Slide & Mute state
   useEffect(() => {
+    const post = displayPosts[activeSlideIndex];
+
+    // 1. Unmute/mute active slide video element
+    if (post?.id) {
+      const activeVid = videoRefs.current[post.id];
+      if (activeVid) {
+        activeVid.muted = isMuted;
+        activeVid.volume = 1.0;
+        if (!isMuted && !pausedMap[post.id]) {
+          activeVid.play().catch(() => {});
+        }
+      }
+    }
+
     const bgAudio = bgAudioRef.current;
     if (!bgAudio) return;
 
@@ -794,7 +816,6 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       return;
     }
 
-    const post = displayPosts[activeSlideIndex];
     if (post?.soundUrl) {
       if (bgAudio.src !== post.soundUrl) {
         bgAudio.src = post.soundUrl;
@@ -960,19 +981,31 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
 
-    const post = posts[activeSlideIndex];
-    const bgAudio = bgAudioRef.current;
-    if (!bgAudio) return;
-
-    if (!nextMuted) {
-      if (post?.soundUrl) {
-        if (bgAudio.src !== post.soundUrl) {
-          bgAudio.src = post.soundUrl;
-        }
-        bgAudio.play().catch(() => {});
+    const post = displayPosts[activeSlideIndex] || posts[activeSlideIndex];
+    
+    // 1. Unmute/mute native HTML5 video audio track with full volume
+    const currentVid = post?.id ? videoRefs.current[post.id] : null;
+    if (currentVid) {
+      currentVid.muted = nextMuted;
+      currentVid.volume = 1.0;
+      if (!nextMuted) {
+        currentVid.play().catch(() => {});
       }
-    } else {
-      bgAudio.pause();
+    }
+
+    // 2. Unmute/mute background music track
+    const bgAudio = bgAudioRef.current;
+    if (bgAudio) {
+      if (!nextMuted) {
+        if (post?.soundUrl) {
+          if (bgAudio.src !== post.soundUrl) {
+            bgAudio.src = post.soundUrl;
+          }
+          bgAudio.play().catch(() => {});
+        }
+      } else {
+        bgAudio.pause();
+      }
     }
   };
 

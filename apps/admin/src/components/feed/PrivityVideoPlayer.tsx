@@ -83,6 +83,26 @@ export const PrivityVideoPlayer: React.FC<PrivityVideoPlayerProps> = ({
     onVideoRef?.(el);
   };
 
+  const cleanMediaUrl = (url?: string): string => {
+    if (!url) return '';
+    return url.split('#')[0];
+  };
+
+  const [isAudioMuted, setIsAudioMuted] = useState(muted);
+
+  const toggleAudio = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const next = !isAudioMuted;
+    setIsAudioMuted(next);
+    if (videoRef.current) {
+      videoRef.current.muted = next;
+      videoRef.current.volume = 1.0;
+      if (!next) {
+        videoRef.current.play().catch(() => {});
+      }
+    }
+  };
+
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-play when scrolled into view and auto-pause when scrolled out of view
@@ -98,7 +118,8 @@ export const PrivityVideoPlayer: React.FC<PrivityVideoPlayerProps> = ({
 
           if (entry.isIntersecting && entry.intersectionRatio >= 0.45) {
             // Video is prominently in view: start playing seamlessly
-            vid.muted = true;
+            vid.muted = isAudioMuted;
+            vid.volume = 1.0;
             const playPromise = vid.play();
             if (playPromise !== undefined) {
               playPromise.catch(() => {
@@ -133,7 +154,7 @@ export const PrivityVideoPlayer: React.FC<PrivityVideoPlayerProps> = ({
         videoRef.current.pause();
       }
     };
-  }, [videoUrl]);
+  }, [videoUrl, isAudioMuted]);
 
   return (
     <div
@@ -153,28 +174,57 @@ export const PrivityVideoPlayer: React.FC<PrivityVideoPlayerProps> = ({
       }}
     >
       {!isError && videoUrl ? (
-        <video
-          ref={handleAttachRef}
-          src={videoUrl}
-          controls={controls}
-          autoPlay={autoPlay}
-          loop={loop}
-          muted={muted}
-          playsInline
-          // @ts-ignore
-          webkit-playsinline="true"
-          preload="metadata"
-          poster={poster}
-          onError={handleVideoError}
-          style={{
-            width: '100%',
-            height: 'auto',
-            maxHeight,
-            borderRadius: '16px',
-            objectFit: 'contain',
-            display: 'block',
-          }}
-        />
+        <>
+          <video
+            ref={handleAttachRef}
+            src={cleanMediaUrl(videoUrl)}
+            controls={controls}
+            autoPlay={autoPlay}
+            loop={loop}
+            muted={isAudioMuted}
+            playsInline
+            // @ts-ignore
+            webkit-playsinline="true"
+            preload="metadata"
+            poster={poster}
+            onError={handleVideoError}
+            style={{
+              width: '100%',
+              height: 'auto',
+              maxHeight,
+              borderRadius: '16px',
+              objectFit: 'contain',
+              display: 'block',
+            }}
+          />
+          <button
+            type="button"
+            className="privity-video-sound-pill"
+            onClick={toggleAudio}
+            style={{
+              position: 'absolute',
+              bottom: '12px',
+              right: '12px',
+              background: isAudioMuted ? 'rgba(0, 0, 0, 0.72)' : 'rgba(99, 102, 241, 0.92)',
+              backdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255, 255, 255, 0.25)',
+              color: '#fff',
+              borderRadius: '20px',
+              padding: '6px 14px',
+              fontSize: '12px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              zIndex: 15,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {isAudioMuted ? '🔇 Tap for Sound' : '🔊 Playing Audio'}
+          </button>
+        </>
       ) : (
         <div
           style={{

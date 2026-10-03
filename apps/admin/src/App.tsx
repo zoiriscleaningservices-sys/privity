@@ -137,8 +137,8 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset v382: Clean reset for 100% accurate real-time numbers, zero glitching, pristine fresh state
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v382_pure_zero';
+// Guaranteed Absolute Zero Reset v390: Clean reset for 100% accurate real-time numbers, zero glitching, pristine fresh state
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v390_absolute_zero';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -872,6 +872,8 @@ export function App() {
   const [liveLayoutMode, setLiveLayoutMode] = useState<'battle' | '4way'>('battle');
   const [isGiftTrayOpen, setIsGiftTrayOpen] = useState(false);
   const [currentAuthUser, setCurrentAuthUser] = useState<UserAccount | null>(() => authService.getCurrentUser());
+  const currentAuthUserRef = React.useRef(currentAuthUser);
+  currentAuthUserRef.current = currentAuthUser;
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [userSparksBalance, setUserSparksBalance] = useState(() => authService.getCurrentUser()?.sparks ?? 0);
   const [battleScoreHost, setBattleScoreHost] = useState(0);
@@ -883,6 +885,7 @@ export function App() {
 
   useEffect(() => {
     return authService.subscribe((user) => {
+      currentAuthUserRef.current = user;
       setCurrentAuthUser(user);
       if (user) {
         setUserSparksBalance(user.sparks ?? 0);
@@ -1277,7 +1280,8 @@ export function App() {
   }, [activeUserHandle]);
 
   const addNotification = React.useCallback((notif: AppNotification, targetUserHandle?: string) => {
-    const target = normalizeHandle(targetUserHandle) || activeUserHandle;
+    const currentMyHandle = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || activeUserHandle);
+    const target = normalizeHandle(targetUserHandle) || currentMyHandle;
     const targetKey = target ? `privity_notifs_${target}` : 'privity_notifications_v1';
 
     // 1. Save into target user's persistent inbox
@@ -1286,8 +1290,8 @@ export function App() {
       safeSaveStorage(targetKey, [notif, ...stored]);
     }
 
-    // 2. If target is active user, update current view
-    if (!target || target === activeUserHandle) {
+    // 2. If target is active user, update current view immediately
+    if (!target || target === currentMyHandle || target === activeUserHandle) {
       setNotifications((prev) => {
         if (prev.some((n) => n.id === notif.id)) return prev;
         return [notif, ...prev];
@@ -2005,7 +2009,7 @@ export function App() {
         processedEventIdsRef.current.add(event.eventId);
       }
 
-      const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
+      const cleanMyHandle = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
 
       // Automatically register any active sender into real-time online presence map
       const senderCandidate = normalizeHandle(
@@ -2116,7 +2120,7 @@ export function App() {
                   ? likesCount
                   : updatedLikers.length;
 
-                const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+                const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
 
                 return {
                   ...p,
@@ -2132,13 +2136,16 @@ export function App() {
           });
 
           // Accurate Notification: When another user likes current user's dispatch
-          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
+          if (!targetPostAuthor) {
+            targetPostAuthor = normalizeHandle(postsRef.current.find(p => p.id === postId)?.authorHandle);
+          }
           if (
             isLiked &&
             cleanLiker &&
             myClean &&
-            cleanLiker !== myClean &&
-            (targetPostAuthor === myClean || (!targetPostAuthor && normalizeHandle(postsRef.current.find(p => p.id === postId)?.authorHandle) === myClean))
+            (cleanLiker !== myClean || event.senderTabId !== myTabSessionId) &&
+            targetPostAuthor === myClean
           ) {
             const notif: AppNotification = {
               id: `notif-like-${postId}-${cleanLiker}-${Date.now()}`,
@@ -2197,11 +2204,17 @@ export function App() {
           });
 
           // Accurate Notification: When another user saves current user's dispatch
-          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
           if (!targetAuthor) {
             targetAuthor = normalizeHandle(postsRef.current.find((p) => p.id === postId)?.authorHandle);
           }
-          if (isSaved && cleanSaver && myClean && cleanSaver !== myClean && targetAuthor === myClean) {
+          if (
+            isSaved &&
+            cleanSaver &&
+            myClean &&
+            (cleanSaver !== myClean || event.senderTabId !== myTabSessionId) &&
+            targetAuthor === myClean
+          ) {
             const notif: AppNotification = {
               id: `notif-save-${postId}-${cleanSaver}-${Date.now()}`,
               type: 'save',
@@ -2239,7 +2252,7 @@ export function App() {
           });
 
           // Accurate Notification: When another user shares current user's dispatch
-          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
           const cleanSharer = normalizeHandle(sharerHandle);
           let targetAuthor = normalizeHandle(postAuthorHandle);
           if (!targetAuthor) {
@@ -2290,31 +2303,52 @@ export function App() {
           const mediaUrl = post.contentUrl || post.videoUrl || post.thumbnailUrl;
           if (mediaUrl) {
             const author = (post.authorHandle || '').replace(/^@/, '').toLowerCase();
-            if (!author) return;
-            setProfiles((prev) => {
-              const prof = prev[author] || getUserProfile(author);
-              const exists = (prof.mediaItems || []).some(
-                (m) => m.id === post.id || isSameMedia(m.url, mediaUrl)
-              );
-              if (exists) return prev;
-              const newMedia: UserMediaItem = {
-                id: post.id,
-                url: mediaUrl,
-                type: post.type === 'video' ? 'video' : 'image',
-                likes: 0,
-                comments: 0,
-                isLiked: false,
-              };
-              const nextProfs = {
-                ...prev,
-                [author]: {
-                  ...prof,
-                  mediaItems: [newMedia, ...(prof.mediaItems || [])],
-                },
-              };
-              safeSaveStorage('privity_profiles_v5', nextProfs);
-              return nextProfs;
-            });
+            if (author) {
+              setProfiles((prev) => {
+                const prof = prev[author] || getUserProfile(author);
+                const exists = (prof.mediaItems || []).some(
+                  (m) => m.id === post.id || isSameMedia(m.url, mediaUrl)
+                );
+                if (exists) return prev;
+                const newMedia: UserMediaItem = {
+                  id: post.id,
+                  url: mediaUrl,
+                  type: post.type === 'video' ? 'video' : 'image',
+                  likes: 0,
+                  comments: 0,
+                  isLiked: false,
+                };
+                const nextProfs = {
+                  ...prev,
+                  [author]: {
+                    ...prof,
+                    mediaItems: [newMedia, ...(prof.mediaItems || [])],
+                  },
+                };
+                safeSaveStorage('privity_profiles_v5', nextProfs);
+                return nextProfs;
+              });
+            }
+          }
+
+          const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
+          const authorClean = normalizeHandle(post.authorHandle);
+          if (authorClean && myClean && authorClean !== myClean) {
+            const notif: AppNotification = {
+              id: `notif-post-${post.id}-${Date.now()}`,
+              type: 'story',
+              actorHandle: authorClean,
+              actorName: post.authorName || authorClean,
+              actorAvatar: post.authorAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${authorClean}`,
+              targetPostId: post.id,
+              postCaptionSnippet: post.caption ? post.caption.slice(0, 60) : 'a new dispatch',
+              postThumbnail: post.contentUrl || post.thumbnailUrl || post.videoUrl,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myClean);
+            triggerToast(`✨ @${authorClean} published a new ${post.type === 'video' ? 'video dispatch 🎬' : 'dispatch'}`);
           }
           break;
         }
@@ -3039,7 +3073,22 @@ export function App() {
             })
           );
 
-          if (cleanLower && cleanLower !== cleanMyHandle.toLowerCase()) {
+          const currentCleanMy = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || cleanMyHandle);
+          if (cleanLower && currentCleanMy && cleanLower !== currentCleanMy) {
+            const notif: AppNotification = {
+              id: `notif-profile-${cleanLower}-${Date.now()}`,
+              type: 'story',
+              actorHandle: clean,
+              actorName: profile.name || clean,
+              actorAvatar: profile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${clean}`,
+              targetPostId: '',
+              postCaptionSnippet: 'updated their profile & visuals',
+              postThumbnail: profile.coverUrl || profile.avatar,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, currentCleanMy);
             triggerToast(`✨ @${clean} updated their profile & avatar`);
           }
           break;
@@ -3424,7 +3473,7 @@ export function App() {
           break;
       }
     },
-    [myTabSessionId, myProfile.handle]
+    [myTabSessionId, myProfile.handle, activeUserHandle]
   );
 
   // Safely parse and process any incoming raw item from ntfy (SSE or Polling)
@@ -6489,6 +6538,8 @@ export function App() {
     const extractedTags = (composerCaption.match(/#[\w-]+/g) || []).map((t) => t.slice(1).toLowerCase().trim()).filter(Boolean);
     const finalTags = extractedTags;
 
+    const isVideo = composerPhotoUrl ? isVideoMedia(composerPhotoUrl) : false;
+
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
       authorId,
@@ -6499,9 +6550,10 @@ export function App() {
       verifiedCategory: myProfile.verifiedCategory,
       verifiedSince: myProfile.verifiedSince,
       cryptoProofId: myProfile.cryptoProofId,
-      type: composerPhotoUrl ? 'image' : 'text',
+      type: composerPhotoUrl ? (isVideo ? 'video' : 'image') : 'text',
       contentUrl: composerPhotoUrl || undefined,
-      thumbnailUrl: composerPhotoUrl || undefined,
+      thumbnailUrl: isVideo ? undefined : (composerPhotoUrl || undefined),
+      videoUrl: (isVideo && composerPhotoUrl) ? composerPhotoUrl : undefined,
       caption: composerCaption,
       tags: finalTags,
       privacy: composerPrivacy,
@@ -6533,7 +6585,7 @@ export function App() {
         const newMedia: UserMediaItem = {
           id: `m-${myClean}-${Date.now()}`,
           url: photoUrl,
-          type: 'image',
+          type: isVideo ? 'video' : 'image',
           likes: 0,
           comments: 0,
           isLiked: false,
@@ -6600,6 +6652,8 @@ export function App() {
     const combinedTags = Array.from(new Set([...tagsArr, ...captionTags]));
     const finalTags = combinedTags;
 
+    const isVideo = modalPhoto ? isVideoMedia(modalPhoto) : false;
+
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
       authorId,
@@ -6610,9 +6664,10 @@ export function App() {
       verifiedCategory: myProfile.verifiedCategory,
       verifiedSince: myProfile.verifiedSince,
       cryptoProofId: myProfile.cryptoProofId,
-      type: modalPhoto ? 'image' : 'text',
+      type: modalPhoto ? (isVideo ? 'video' : 'image') : 'text',
       contentUrl: modalPhoto || undefined,
-      thumbnailUrl: modalPhoto || undefined,
+      thumbnailUrl: isVideo ? undefined : (modalPhoto || undefined),
+      videoUrl: (isVideo && modalPhoto) ? modalPhoto : undefined,
       caption: modalCaption,
       tags: finalTags,
       privacy: modalPrivacy,
@@ -6644,7 +6699,7 @@ export function App() {
         const newMedia: UserMediaItem = {
           id: `m-${myClean}-${Date.now()}`,
           url: photoUrl,
-          type: 'image',
+          type: isVideo ? 'video' : 'image',
           likes: 0,
           comments: 0,
           isLiked: false,
@@ -7731,7 +7786,24 @@ export function App() {
 
                 {composerPhotoUrl && (
                   <div className="composer-preview-dock">
-                    <img src={composerPhotoUrl} alt="Attached Preview" />
+                    {isVideoMedia(composerPhotoUrl) ? (
+                      <video
+                        src={cleanMediaUrl(composerPhotoUrl)}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        style={{
+                          width: '100%',
+                          maxHeight: '220px',
+                          objectFit: 'contain',
+                          borderRadius: '12px',
+                          background: '#05070d',
+                        }}
+                      />
+                    ) : (
+                      <img src={composerPhotoUrl} alt="Attached Preview" />
+                    )}
                     <button
                       type="button"
                       className="composer-dock-close"
@@ -7755,21 +7827,30 @@ export function App() {
                       <option value="public">Public</option>
                     </select>
 
-                    <label className="btn-media-toggle" style={{ cursor: 'pointer' }} title="Attach photo from your device">
+                    <label className="btn-media-toggle" style={{ cursor: 'pointer' }} title="Attach photo or video from your device">
                       <IconPhoto size={16} />
-                      <span>Photo</span>
+                      <span>Photo / Video</span>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/*,video/*,.mp4,.mov,.webm,.m4v"
                         style={{ display: 'none' }}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            compressImageFile(file, 960, 0.72, (dataUrl) => {
-                              setComposerPhotoUrl(dataUrl);
-                              triggerToast('Photo attached to dispatch');
-                            });
+                            const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name);
+                            if (isVideo) {
+                              convertVideoToAnimatedLoop(file, 'studio').then((videoUrl: string) => {
+                                setComposerPhotoUrl(videoUrl);
+                                triggerToast('Video attached with audio! 🎬');
+                              });
+                            } else {
+                              compressImageFile(file, 960, 0.72, (dataUrl) => {
+                                setComposerPhotoUrl(dataUrl);
+                                triggerToast('Photo attached to dispatch');
+                              });
+                            }
                           }
+                          e.target.value = '';
                         }}
                       />
                     </label>
@@ -12794,25 +12875,34 @@ export function App() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <label className="btn-file-upload-label">
                     <IconPhoto size={15} />
-                    <span>Upload Image File</span>
+                    <span>Upload Photo / Video</span>
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/*,video/*,.mp4,.mov,.webm,.m4v"
                       style={{ display: 'none' }}
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          compressImageFile(file, 960, 0.72, (dataUrl) => {
-                            setModalPhoto(dataUrl);
-                            triggerToast('Photo attached to dispatch!');
-                          });
+                          const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name);
+                          if (isVideo) {
+                            convertVideoToAnimatedLoop(file, 'studio').then((videoUrl: string) => {
+                              setModalPhoto(videoUrl);
+                              triggerToast('Video attached with audio! 🎬');
+                            });
+                          } else {
+                            compressImageFile(file, 960, 0.72, (dataUrl) => {
+                              setModalPhoto(dataUrl);
+                              triggerToast('Photo attached to dispatch!');
+                            });
+                          }
                         }
+                        e.target.value = '';
                       }}
                     />
                   </label>
                   <input
                     type="text"
-                    placeholder="Or paste photo image URL..."
+                    placeholder="Or paste photo/video URL..."
                     value={modalPhoto || ''}
                     onChange={(e) => setModalPhoto(e.target.value || null)}
                     className="edit-profile-input"
@@ -12822,17 +12912,35 @@ export function App() {
 
                 {modalPhoto && (
                   <div style={{ position: 'relative', marginTop: '10px' }}>
-                    <img
-                      src={modalPhoto}
-                      alt="Attachment Preview"
-                      style={{
-                        width: '100%',
-                        maxHeight: '220px',
-                        objectFit: 'cover',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid var(--glass-border)',
-                      }}
-                    />
+                    {isVideoMedia(modalPhoto) ? (
+                      <video
+                        src={cleanMediaUrl(modalPhoto)}
+                        autoPlay
+                        loop
+                        muted
+                        playsInline
+                        style={{
+                          width: '100%',
+                          maxHeight: '220px',
+                          objectFit: 'contain',
+                          borderRadius: 'var(--radius-md)',
+                          border: '1px solid var(--glass-border)',
+                          background: '#05070d',
+                        }}
+                      />
+                    ) : (
+                      <img
+                        src={modalPhoto}
+                        alt="Attachment Preview"
+                        style={{
+                          width: '100%',
+                          maxHeight: '220px',
+                          objectFit: 'cover',
+                          borderRadius: 'var(--radius-md)',
+                          border: '1px solid var(--glass-border)',
+                        }}
+                      />
+                    )}
                     <button
                       type="button"
                       onClick={() => setModalPhoto(null)}

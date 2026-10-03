@@ -37,8 +37,8 @@ const STORAGE_SESSION_KEY = 'privity_auth_session_v1';
 const STORAGE_TAB_SESSION_KEY = 'privity_tab_auth_session_v1';
 const STORAGE_ACCOUNTS_KEY = 'privity_accounts_v1';
 
-// Ground Zero Wipe v382: Completely erase all bloated video data, corrupted states, stale messages, activities, and reset cleanly
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v382_pure_zero';
+// Ground Zero Wipe v390: Completely erase all bloated video data, corrupted states, stale messages, activities, and reset cleanly
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v390_absolute_zero';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -147,10 +147,10 @@ class AuthService {
 
   private loadSession() {
     try {
-      // Prioritize persistent localStorage session so refresh NEVER logs the user out
-      let raw = localStorage.getItem(STORAGE_SESSION_KEY);
+      // Prioritize tab session first so different tabs in the same browser can be different users, then fall back to localStorage
+      let raw = sessionStorage.getItem(STORAGE_TAB_SESSION_KEY);
       if (!raw) {
-        raw = sessionStorage.getItem(STORAGE_TAB_SESSION_KEY);
+        raw = localStorage.getItem(STORAGE_SESSION_KEY);
       }
       if (raw) {
         this.currentUser = JSON.parse(raw);
