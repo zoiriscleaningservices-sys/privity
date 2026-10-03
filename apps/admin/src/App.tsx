@@ -2437,17 +2437,20 @@ export function App() {
         }
 
         case 'QUERY_PROFILES': {
-          if (myProfileRef.current && myProfileRef.current.handle) {
+          const profs = profilesRef.current;
+          const accs = authService.getAllAccounts();
+          if ((profs && Object.keys(profs).length > 0) || Object.keys(accs).length > 0) {
             broadcastSyncEventRef.current({
-              action: 'UPDATE_PROFILE',
-              profile: myProfileRef.current,
+              action: 'SYNC_PROFILES_REGISTRY',
+              registry: profs,
+              accounts: accs,
             });
           }
           break;
         }
 
         case 'SYNC_PROFILES_REGISTRY': {
-          const { registry } = event;
+          const { registry, accounts } = event;
           if (registry && typeof registry === 'object') {
             setProfiles((prev) => {
               let changed = false;
@@ -2455,7 +2458,7 @@ export function App() {
               for (const prof of Object.values(registry as Record<string, UserProfile>)) {
                 if (prof && prof.handle) {
                   const cleanK = prof.handle.replace(/^@/, '').toLowerCase();
-                  if (!next[cleanK] || next[cleanK].name !== prof.name || next[cleanK].avatar !== prof.avatar) {
+                  if (!next[cleanK] || next[cleanK].name !== prof.name || next[cleanK].avatar !== prof.avatar || next[cleanK].bio !== prof.bio) {
                     next[cleanK] = { ...(next[cleanK] || {}), ...prof };
                     changed = true;
                   }
@@ -2467,6 +2470,107 @@ export function App() {
               }
               return prev;
             });
+          }
+
+          if (accounts && typeof accounts === 'object') {
+            try {
+              const currentAccounts = authService.getAllAccounts();
+              let changedAccs = false;
+              for (const [k, acc] of Object.entries(accounts as Record<string, any>)) {
+                if (acc && acc.handle && !currentAccounts[k.toLowerCase()]) {
+                  currentAccounts[k.toLowerCase()] = acc;
+                  changedAccs = true;
+                }
+              }
+              if (changedAccs) {
+                localStorage.setItem('privity_accounts_v1', JSON.stringify(currentAccounts));
+              }
+            } catch {}
+          }
+          break;
+        }
+
+        case 'USER_PAGE_CREATED': {
+          const { account, profile } = event;
+          if (!account || !account.handle) return;
+          const cleanH = normalizeHandle(account.handle);
+          if (!cleanH) return;
+
+          const newProf: UserProfile = profile || {
+            id: account.id || `usr-${cleanH}`,
+            name: account.name || cleanH,
+            handle: cleanH,
+            avatar: account.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanH}`,
+            coverUrl: account.coverUrl || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600',
+            isVerified: Boolean(account.isVerified),
+            bio: account.bio || 'Privity creator sharing private-first moments.',
+            location: 'Global',
+            joinedDate: 'Joined 2026',
+            circleStatus: 'Public Connection' as const,
+            isPrivate: false,
+            followersList: [],
+            followingList: [],
+            trustCirclesList: [],
+            mediaItems: [],
+          };
+
+          setProfiles((prev) => {
+            const next = {
+              ...prev,
+              [cleanH]: newProf,
+              [cleanH.toLowerCase()]: newProf,
+            };
+            safeSaveStorage('privity_profiles_v5', next);
+            return next;
+          });
+
+          try {
+            const currentAccs = authService.getAllAccounts();
+            currentAccs[cleanH.toLowerCase()] = account;
+            localStorage.setItem('privity_accounts_v1', JSON.stringify(currentAccs));
+          } catch {}
+
+          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          if (myClean !== cleanH) {
+            triggerToast(`✨ @${cleanH} just created their page! Welcome them! 👋`);
+          }
+          break;
+        }
+
+        case 'USER_ANNOUNCE_JOIN': {
+          const { handle, name, avatar } = event;
+          const cleanH = normalizeHandle(handle);
+          if (!cleanH) return;
+          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          if (myClean !== cleanH) {
+            const announcedProf: UserProfile = {
+              id: `usr-${cleanH}`,
+              name: name || cleanH,
+              handle: cleanH,
+              avatar: avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanH}`,
+              coverUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600',
+              isVerified: false,
+              bio: 'Privity creator sharing private-first moments.',
+              location: 'Global',
+              joinedDate: 'Joined 2026',
+              circleStatus: 'Public Connection' as const,
+              isPrivate: false,
+              followersList: [],
+              followingList: [],
+              trustCirclesList: [],
+              mediaItems: [],
+            };
+            setProfiles((prev) => {
+              if (prev[cleanH] || prev[cleanH.toLowerCase()]) return prev;
+              const next = {
+                ...prev,
+                [cleanH]: announcedProf,
+                [cleanH.toLowerCase()]: announcedProf,
+              };
+              safeSaveStorage('privity_profiles_v5', next);
+              return next;
+            });
+            triggerToast(`🟢 @${cleanH} is online on the network`);
           }
           break;
         }
@@ -2490,7 +2594,7 @@ export function App() {
           if (postsRef.current && postsRef.current.length > 0) {
             broadcastSyncEventRef.current({
               action: 'SYNC_POSTS_REGISTRY',
-              posts: postsRef.current.slice(0, 50),
+              posts: postsRef.current.slice(0, 100),
             });
           }
           break;
@@ -2737,6 +2841,8 @@ export function App() {
         if (!es || es.readyState === EventSource.CLOSED) {
           connectSSE();
         }
+        broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
+        broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
       }
     };
     window.addEventListener('visibilitychange', handleWake);
@@ -2748,7 +2854,18 @@ export function App() {
       broadcastSyncEventRef.current({ action: 'QUERY_LIVES' });
       broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
       broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
-    }, 600);
+
+      // Announce presence so all connected users know a new member joined/arrived
+      const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+      if (myClean) {
+        broadcastSyncEventRef.current({
+          action: 'USER_ANNOUNCE_JOIN',
+          handle: myClean,
+          name: currentAuthUser?.name || myProfile.name || myClean,
+          avatar: currentAuthUser?.avatar || myProfile.avatar,
+        });
+      }
+    }, 400);
 
     return () => {
       clearTimeout(queryStartupTimer);
@@ -5549,6 +5666,10 @@ export function App() {
             setCurrentAuthUser(user);
             setViewedUserHandle(user.handle);
             triggerToast(`Welcome to Privity, ${user.name}!`);
+            broadcastSyncEventRef.current({
+              action: 'USER_PAGE_CREATED',
+              account: user,
+            });
           }}
         />
       </div>
@@ -12186,6 +12307,10 @@ export function App() {
           setCurrentAuthUser(user);
           setIsAuthModalOpen(false);
           triggerToast(`Welcome, ${user.name}!`);
+          broadcastSyncEventRef.current({
+            action: 'USER_PAGE_CREATED',
+            account: user,
+          });
         }}
       />
     </div>

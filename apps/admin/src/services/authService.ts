@@ -2,7 +2,7 @@
 // Full Supabase Cloud Auth Integration with Sovereign Local Fallback
 // Guarantees all new users begin from absolute zero (Level 0, 0 followers, 0 following, 0 likes, 0 sparks)
 
-import { getSupabaseClient, saveSupabaseAnonKey, isSupabaseConfigured, SUPABASE_PROJECT_ID } from './supabaseClient';
+import { getSupabaseClient, saveSupabaseAnonKey, isSupabaseConfigured, SUPABASE_PROJECT_ID, broadcastViaSupabase } from './supabaseClient';
 
 export interface UserAccount {
   id: string;
@@ -195,6 +195,13 @@ class AuthService {
         const accounts = this.getAllAccounts();
         accounts[user.handle.toLowerCase()] = user;
         this.saveAccounts(accounts);
+
+        // Broadcast to all active tabs and global Supabase peers in real time
+        broadcastViaSupabase({
+          action: 'USER_PAGE_CREATED',
+          account: user,
+          timestamp: Date.now(),
+        });
 
         // Attempt upsert to Supabase public.profiles table so other users discover them
         const sb = getSupabaseClient();
