@@ -1028,6 +1028,8 @@ export function App() {
     const loaded = readStorage<PostItem[]>('privity_posts_v5', []);
     return Array.isArray(loaded) ? loaded.filter((p) => !isMockPost(p)) : [];
   });
+  const postsRef = React.useRef(posts);
+  postsRef.current = posts;
 
   // 3. Persistent Following Map (filters out following any mock handles)
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>(() => {
@@ -1057,8 +1059,46 @@ export function App() {
     safeSaveStorage('privity_profiles_v5', profiles);
   }, [profiles]);
 
-  // Ensure current authenticated user is registered into profiles state and announced globally
+  // Ensure all accounts and current authenticated user are registered into profiles state and announced globally
   useEffect(() => {
+    // 1. Sync all accounts from authService so Discovery and chat have all registered users
+    try {
+      const allAccs = authService.getAllAccounts();
+      setProfiles((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const acc of Object.values(allAccs)) {
+          if (!acc || !acc.handle) continue;
+          const h = acc.handle.toLowerCase().replace(/^@/, '').trim();
+          if (h && !isMockHandle(h) && !next[h]) {
+            next[h] = {
+              id: acc.id,
+              name: acc.name,
+              handle: acc.handle,
+              avatar: acc.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${h}`,
+              coverUrl: acc.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+              isVerified: false,
+              bio: acc.bio || 'Privity creator sharing private-first moments and authentic updates.',
+              location: 'Global',
+              joinedDate: 'Joined 2026',
+              circleStatus: 'Public Connection' as const,
+              isPrivate: false,
+              followersList: [],
+              followingList: [],
+              trustCirclesList: [],
+              mediaItems: [],
+            };
+            changed = true;
+          }
+        }
+        if (changed) {
+          safeSaveStorage('privity_profiles_v5', next);
+          return next;
+        }
+        return prev;
+      });
+    } catch {}
+
     if (currentAuthUser && currentAuthUser.handle && !isMockHandle(currentAuthUser.handle)) {
       const h = currentAuthUser.handle.toLowerCase().replace(/^@/, '');
       let updatedProf: UserProfile | null = null;
@@ -2149,6 +2189,33 @@ export function App() {
           break;
         }
 
+        case 'QUERY_POSTS': {
+          if (postsRef.current && postsRef.current.length > 0) {
+            broadcastSyncEventRef.current({
+              action: 'SYNC_POSTS_REGISTRY',
+              posts: postsRef.current.slice(0, 50),
+            });
+          }
+          break;
+        }
+
+        case 'SYNC_POSTS_REGISTRY': {
+          const { posts: remotePosts } = event;
+          if (Array.isArray(remotePosts) && remotePosts.length > 0) {
+            setPosts((prev) => {
+              const existingIds = new Set(prev.map((p) => p.id));
+              const toAdd = remotePosts.filter(
+                (p) => p && p.id && !existingIds.has(p.id) && !isMockPost(p)
+              );
+              if (toAdd.length === 0) return prev;
+              const merged = [...toAdd, ...prev];
+              safeSaveStorage('privity_posts_v5', merged);
+              return merged;
+            });
+          }
+          break;
+        }
+
         case 'LIVE_ENDED': {
           const { streamId, handle } = event;
           if (!streamId && !handle) return;
@@ -2344,10 +2411,11 @@ export function App() {
     window.addEventListener('focus', handleWake);
     window.addEventListener('online', fullCatchUp);
 
-    // 8. Query active sovereign lives and community profiles on startup
+    // 8. Query active sovereign lives, community profiles, and posts on startup
     const queryStartupTimer = setTimeout(() => {
       broadcastSyncEventRef.current({ action: 'QUERY_LIVES' });
       broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
+      broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
     }, 600);
 
     return () => {
@@ -2713,7 +2781,7 @@ export function App() {
 
   // Inline Composer State
   const [composerCaption, setComposerCaption] = useState('');
-  const [composerPrivacy, setComposerPrivacy] = useState<PostPrivacy>('followers');
+  const [composerPrivacy, setComposerPrivacy] = useState<PostPrivacy>('public');
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
 
   // Modal Composer State
@@ -2724,7 +2792,7 @@ export function App() {
   const [isHostBroadcasting, setIsHostBroadcasting] = useState<boolean>(false);
   const [modalCaption, setModalCaption] = useState('');
   const [modalTags, setModalTags] = useState('');
-  const [modalPrivacy, setModalPrivacy] = useState<PostPrivacy>('close_friends');
+  const [modalPrivacy, setModalPrivacy] = useState<PostPrivacy>('public');
   const [modalPhoto, setModalPhoto] = useState<string | null>(null);
 
   // Network active live streams (synchronized across multiple devices)
@@ -5416,6 +5484,10 @@ export function App() {
                     safeSaveStorage('privity_posts_v5', next);
                     return next;
                   });
+                  broadcastSyncEvent({
+                    action: 'NEW_POST',
+                    post: newPost,
+                  });
                 }}
                 onRefreshFeeds={() => {
                   try {
@@ -6341,16 +6413,52 @@ export function App() {
                 {discoverSearch ? 'Search Results' : 'Discover Community Creators'}
               </div>
               {(() => {
-                const creators = Object.values(profiles)
-                  .filter((p) => !isMockHandle(p.handle))
+                // Aggregate from all local accounts, active auth session, and profiles registry
+                const allAccounts = authService.getAllAccounts();
+                const combinedMap: Record<string, UserProfile> = { ...profiles };
+
+                for (const acc of Object.values(allAccounts)) {
+                  if (!acc || !acc.handle) continue;
+                  const h = acc.handle.toLowerCase().replace(/^@/, '').trim();
+                  if (!h || isMockHandle(h)) continue;
+                  if (!combinedMap[h]) {
+                    combinedMap[h] = {
+                      id: acc.id,
+                      name: acc.name,
+                      handle: acc.handle,
+                      avatar: acc.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${h}`,
+                      coverUrl: acc.coverUrl || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600',
+                      isVerified: false,
+                      bio: acc.bio || 'Privity creator sharing private-first moments and authentic updates.',
+                      location: 'Global',
+                      joinedDate: 'Joined 2026',
+                      circleStatus: 'Public Connection' as const,
+                      isPrivate: false,
+                      followersList: [],
+                      followingList: [],
+                      trustCirclesList: [],
+                      mediaItems: [],
+                    };
+                  }
+                }
+
+                if (currentAuthUser && currentAuthUser.handle) {
+                  const myH = currentAuthUser.handle.toLowerCase().replace(/^@/, '').trim();
+                  if (myH && !isMockHandle(myH) && !combinedMap[myH]) {
+                    combinedMap[myH] = myProfile;
+                  }
+                }
+
+                const creators = Object.values(combinedMap)
+                  .filter((p) => p && p.handle && !isMockHandle(p.handle))
                   .filter((p) => {
                     if (!discoverSearch) return true;
-                    const q = discoverSearch.toLowerCase();
+                    const q = discoverSearch.toLowerCase().trim();
                     return (
-                      p.name.toLowerCase().includes(q) ||
-                      p.handle.toLowerCase().includes(q) ||
+                      (p.name || '').toLowerCase().includes(q) ||
+                      (p.handle || '').toLowerCase().includes(q) ||
                       (p.category && p.category.toLowerCase().includes(q)) ||
-                      p.bio.toLowerCase().includes(q)
+                      (p.bio && p.bio.toLowerCase().includes(q))
                     );
                   });
 

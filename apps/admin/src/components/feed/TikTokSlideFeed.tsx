@@ -424,9 +424,13 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     }
 
     if (activeChannel === 'following') {
-      // Following: User's visual posts (visible to followers) + 100% exclusive following creators
-      const userMedia = customUserPosts.filter((p) => p.type !== 'text' && p.privacy !== 'close_friends');
-      return [...userMedia, ...mergeOverrides(EXCLUSIVE_FOLLOWING_POSTS)];
+      // Following: Posts from users the current user follows + own posts
+      const myClean = (currentUser.handle || '').toLowerCase().replace(/^@/, '');
+      const followingPosts = customUserPosts.filter((p) => {
+        const authorClean = (p.authorHandle || '').toLowerCase().replace(/^@/, '');
+        return authorClean === myClean || !!followingMap[authorClean] || !!followingMap[p.authorHandle];
+      });
+      return [...followingPosts, ...mergeOverrides(EXCLUSIVE_FOLLOWING_POSTS)];
     }
 
     if (activeChannel === 'birdie') {
@@ -435,9 +439,8 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       return [...userText, ...mergeOverrides(EXCLUSIVE_BIRDIE_POSTS)];
     }
 
-    // For You: Public photo/video dispatches + high-energy discovery posts
-    const userForYou = customUserPosts.filter((p) => p.privacy === 'public' && p.type !== 'text');
-    return [...userForYou, ...mergeOverrides(EXCLUSIVE_FORYOU_POSTS)];
+    // For You: Universal Community Feed - everybody on the platform sees what everyone posted!
+    return [...customUserPosts, ...mergeOverrides(EXCLUSIVE_FORYOU_POSTS)];
   }, [posts, activeChannel, deletedPostIds]);
 
   // Active slide index tracked via IntersectionObserver / scroll position
@@ -1623,12 +1626,22 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                       webkit-playsinline="true"
                       muted={false}
                     />
-                  ) : (
+                  ) : mediaUrl ? (
                     <img
                       src={mediaUrl}
                       alt={post.caption}
                       className="tiktok-photo-player"
                     />
+                  ) : (
+                    <div className="tiktok-text-dispatch-viewport">
+                      <div className="tiktok-text-dispatch-card">
+                        <span className="tiktok-text-quote-mark">“</span>
+                        <p className="tiktok-text-content">{post.caption || 'Authentic dispatch'}</p>
+                        <div className="tiktok-text-author-badge">
+                          <span>@{post.authorHandle.replace(/^@/, '')}</span>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {/* Cinematic Top & Bottom Vignette Tint Scrim */}
