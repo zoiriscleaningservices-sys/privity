@@ -1,4 +1,4 @@
-export type CameraMode = 'POST' | 'CREATE' | 'LIVE';
+export type CameraMode = 'POST' | 'CREATE' | 'LIVE' | 'STORY';
 
 export type DurationMode = '10m' | '60s' | '15s' | 'PHOTO' | 'TEXT';
 

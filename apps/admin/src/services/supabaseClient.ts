@@ -97,6 +97,8 @@ export function reconnectSupabaseRealtime(_force = false) {
   }
 }
 
+const chunkBuffers = new Map<string, { total: number; chunks: string[]; received: number; timer: any }>();
+
 export function getSupabaseRealtimeChannel() {
   const sb = getSupabaseClient();
   if (!sb) return null;
@@ -111,13 +113,13 @@ export function getSupabaseRealtimeChannel() {
 
   if (!realtimeSyncChannel) {
     try {
-      realtimeSyncChannel = sb.channel('privity_sync_hub', {
+      realtimeSyncChannel = sb.channel('privity_sync_v370', {
         config: { broadcast: { self: false } },
       });
 
       realtimeSyncChannel.subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Supabase Realtime] Connected to privity_sync_hub');
+          console.log('[Supabase Realtime] Connected to privity_sync_v370');
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn('[Supabase Realtime] Channel status:', status, 'Scheduling auto-reconnect...');
           if (!reconnectTimer) {
@@ -131,6 +133,8 @@ export function getSupabaseRealtimeChannel() {
 
       if (!isBroadcastAttached) {
         isBroadcastAttached = true;
+
+        // 1. Single frame events
         realtimeSyncChannel.on('broadcast', { event: 'privity_event' }, ({ payload }: any) => {
           broadcastListeners.forEach((listener) => {
             try {
@@ -139,6 +143,48 @@ export function getSupabaseRealtimeChannel() {
               console.error('[Supabase Realtime] Listener error:', err);
             }
           });
+        });
+
+        // 2. Chunked streaming reassembly for large payloads (photos, videos, banners)
+        realtimeSyncChannel.on('broadcast', { event: 'privity_chunk' }, ({ payload }: any) => {
+          try {
+            const { transferId, index, total, chunk } = payload || {};
+            if (!transferId || total === undefined || index === undefined) return;
+
+            let entry = chunkBuffers.get(transferId);
+            if (!entry) {
+              entry = {
+                total,
+                chunks: new Array(total).fill(''),
+                received: 0,
+                timer: setTimeout(() => {
+                  chunkBuffers.delete(transferId);
+                }, 45000),
+              };
+              chunkBuffers.set(transferId, entry);
+            }
+
+            if (!entry.chunks[index]) {
+              entry.chunks[index] = chunk;
+              entry.received++;
+            }
+
+            if (entry.received === entry.total) {
+              clearTimeout(entry.timer);
+              chunkBuffers.delete(transferId);
+              const fullJson = entry.chunks.join('');
+              const fullPayload = JSON.parse(fullJson);
+              broadcastListeners.forEach((listener) => {
+                try {
+                  listener(fullPayload);
+                } catch (err) {
+                  console.error('[Supabase Realtime] Listener error:', err);
+                }
+              });
+            }
+          } catch (err) {
+            console.error('[Supabase Realtime] Chunk assembly error:', err);
+          }
         });
       }
     } catch (e) {
@@ -156,11 +202,33 @@ export function broadcastViaSupabase(payload: any) {
       ch = reconnectSupabaseRealtime(true);
     }
     if (ch) {
-      ch.send({
-        type: 'broadcast',
-        event: 'privity_event',
-        payload,
-      });
+      const jsonStr = JSON.stringify(payload);
+      // Small payloads (<= 28KB): send as single WebSocket frame
+      if (jsonStr.length <= 28000) {
+        ch.send({
+          type: 'broadcast',
+          event: 'privity_event',
+          payload,
+        });
+      } else {
+        // Large payloads (photos, videos, banners): chunk into 24KB slices to never exceed WebSocket limits
+        const CHUNK_SIZE = 24000;
+        const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
+        const transferId = 'tr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+        for (let i = 0; i < totalChunks; i++) {
+          const chunkData = jsonStr.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+          ch.send({
+            type: 'broadcast',
+            event: 'privity_chunk',
+            payload: {
+              transferId,
+              index: i,
+              total: totalChunks,
+              chunk: chunkData,
+            },
+          });
+        }
+      }
     }
   } catch (e) {
     console.warn('[Supabase Realtime] Broadcast failed:', e);

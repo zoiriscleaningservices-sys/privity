@@ -136,14 +136,20 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset v360: Completely erase all profiles, activities, shots, sessions, and log everybody out
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v360';
+// Guaranteed Absolute Zero Reset v370: Completely erase all old mock data, stale messages, activities, charts, and reset cleanly
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v370';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && k.startsWith('privity_') && k !== GROUND_ZERO_FLAG && k !== 'privity_anon_key') {
+      if (
+        k &&
+        k.startsWith('privity_') &&
+        k !== GROUND_ZERO_FLAG &&
+        k !== 'privity_anon_key' &&
+        k !== 'privity_supabase_anon_key'
+      ) {
         keysToRemove.push(k);
       }
     }
@@ -448,11 +454,11 @@ const PRESET_BANNERS = [
   'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600&auto=format&fit=crop&q=85',
 ];
 
-// High-performance image file reader & canvas compressor (fits easily in localStorage)
+// High-performance image file reader & canvas compressor (ultra lightweight, instant WebSocket sync)
 const compressImageFile = (
   file: File,
-  maxDim: number,
-  quality: number,
+  maxDim: number = 640,
+  quality: number = 0.58,
   onComplete: (dataUrl: string) => void
 ) => {
   const reader = new FileReader();
@@ -1163,24 +1169,34 @@ export function App() {
       const allAccs = authService.getAllAccounts();
       for (const acc of Object.values(allAccs)) {
         const h = acc.handle.toLowerCase().replace(/^@/, '');
-        if (h && !isMockHandle(h) && !cleaned[h]) {
-          cleaned[h] = {
-            id: acc.id,
-            name: acc.name,
-            handle: acc.handle,
-            avatar: acc.avatar,
-            coverUrl: acc.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
-            isVerified: false,
-            bio: acc.bio || 'Privity creator sharing private-first moments and authentic updates.',
-            location: 'Global',
-            joinedDate: 'Joined 2026',
-            circleStatus: 'Public Connection',
-            isPrivate: false,
-            followersList: [],
-            followingList: [],
-            trustCirclesList: [],
-            mediaItems: [],
-          };
+        if (h && !isMockHandle(h)) {
+          if (!cleaned[h]) {
+            cleaned[h] = {
+              id: acc.id,
+              name: acc.name,
+              handle: acc.handle,
+              avatar: acc.avatar,
+              coverUrl: acc.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+              isVerified: false,
+              bio: acc.bio || 'Privity creator sharing private-first moments and authentic updates.',
+              location: 'Global',
+              joinedDate: 'Joined 2026',
+              circleStatus: 'Public Connection',
+              isPrivate: false,
+              followersList: [],
+              followingList: [],
+              trustCirclesList: [],
+              mediaItems: [],
+            };
+          } else {
+            // Keep newest avatar & coverUrl from account preserved across resets
+            if (acc.avatar && acc.avatar !== cleaned[h].avatar) {
+              cleaned[h].avatar = acc.avatar;
+            }
+            if (acc.coverUrl && acc.coverUrl !== cleaned[h].coverUrl) {
+              cleaned[h].coverUrl = acc.coverUrl;
+            }
+          }
         }
       }
     } catch {}
@@ -5936,6 +5952,7 @@ export function App() {
     tags,
     privacy,
     soundName,
+    targetDestination = 'feed',
   }: {
     caption: string;
     mediaUrl?: string | null;
@@ -5943,6 +5960,7 @@ export function App() {
     tags: string;
     privacy: 'close_friends' | 'followers' | 'public';
     soundName?: string;
+    targetDestination?: 'feed' | 'story';
   }) => {
     const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
     if (!myClean) {
@@ -5956,6 +5974,30 @@ export function App() {
     const authorId = currentAuthUser?.id || myProfile.id || `usr-${myClean}`;
     const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
 
+    // 1. STORY DESTINATION (Story is stories, separated from feed)
+    if (targetDestination === 'story') {
+      const newStory: StoryItem = {
+        id: `st-${myClean}-${Date.now()}`,
+        authorName,
+        authorHandle: myClean,
+        authorAvatar,
+        isVerified,
+        mediaUrl: mediaUrl || '',
+        mediaType: mediaType === 'video' ? 'video' : 'image',
+        caption: caption || undefined,
+        timeAgo: 'Just now',
+        createdAt: Date.now(),
+        privacy: privacy as any,
+        likesCount: 0,
+        isLiked: false,
+      };
+      handleAddStory(newStory);
+      setIsCameraOpen(false);
+      triggerToast('Story published to your circle!');
+      return;
+    }
+
+    // 2. FEED DISPATCH DESTINATION (Feed is feed, never auto-creates story)
     const rawTags = tags
       .split(' ')
       .map((t) => t.replace('#', '').trim().toLowerCase())
@@ -6016,23 +6058,6 @@ export function App() {
         safeSaveStorage('privity_profiles_v5', nextProfiles);
         return nextProfiles;
       });
-
-      const newStory: StoryItem = {
-        id: `st-${myClean}-${Date.now()}`,
-        authorName,
-        authorHandle: myClean,
-        authorAvatar,
-        isVerified,
-        mediaUrl,
-        mediaType: mediaType === 'video' ? 'video' : 'image',
-        caption: caption || undefined,
-        timeAgo: 'Just now',
-        createdAt: Date.now(),
-        privacy: privacy as any,
-        likesCount: 0,
-        isLiked: false,
-      };
-      handleAddStory(newStory);
     }
 
     setPosts((prev) => {
@@ -9508,7 +9533,7 @@ export function App() {
                               };
                               reader.readAsDataURL(file);
                             } else {
-                              compressImageFile(file, 1200, 0.75, (dataUrl) => {
+                              compressImageFile(file, 720, 0.58, (dataUrl) => {
                                 handleDirectBannerChange(dataUrl);
                               });
                             }
@@ -9589,7 +9614,7 @@ export function App() {
                                     };
                                     reader.readAsDataURL(file);
                                   } else {
-                                    compressImageFile(file, 360, 0.8, (dataUrl) => {
+                                    compressImageFile(file, 280, 0.65, (dataUrl) => {
                                       handleDirectAvatarChange(dataUrl);
                                     });
                                   }
@@ -11666,7 +11691,7 @@ export function App() {
                               };
                               reader.readAsDataURL(file);
                             } else {
-                              compressImageFile(file, 960, 0.72, (dataUrl) => {
+                              compressImageFile(file, 720, 0.58, (dataUrl) => {
                                 setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
                                 triggerToast('Cover banner photo updated!');
                               });
@@ -11757,7 +11782,7 @@ export function App() {
                                   };
                                   reader.readAsDataURL(file);
                                 } else {
-                                  compressImageFile(file, 320, 0.80, (dataUrl) => {
+                                  compressImageFile(file, 280, 0.65, (dataUrl) => {
                                     setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
                                     triggerToast('Avatar photo updated!');
                                   });

@@ -59,6 +59,7 @@ export interface CameraModalProps {
     tags: string;
     privacy: 'close_friends' | 'followers' | 'public';
     soundName?: string;
+    targetDestination?: 'feed' | 'story';
   }) => void;
   onGoLive: (liveData: {
     title: string;
@@ -337,7 +338,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       const canvas = document.createElement('canvas');
       let w = video.videoWidth;
       let h = video.videoHeight;
-      const maxDim = 960;
+      const maxDim = 640;
       if (w > h && w > maxDim) {
         h = Math.round((h * maxDim) / w);
         w = maxDim;
@@ -358,7 +359,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
           ctx.filter = selectedPreset.filterStyle;
         }
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+        dataUrl = canvas.toDataURL('image/jpeg', 0.58);
       }
     }
 
@@ -518,7 +519,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
             const canvas = document.createElement('canvas');
             let w = img.width;
             let h = img.height;
-            const maxDim = 960;
+            const maxDim = 640;
             if (w > h && w > maxDim) {
               h = Math.round((h * maxDim) / w);
               w = maxDim;
@@ -533,7 +534,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
               ctx.drawImage(img, 0, 0, w, h);
               setCapturedMedia({
                 type: 'photo',
-                dataUrl: canvas.toDataURL('image/jpeg', 0.72),
+                dataUrl: canvas.toDataURL('image/jpeg', 0.58),
               });
             } else {
               setCapturedMedia({
@@ -560,6 +561,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       tags: reviewTags,
       privacy: reviewPrivacy,
       soundName: selectedSound ? `${selectedSound.name} - ${selectedSound.artist}` : undefined,
+      targetDestination: (activeTab === 'STORY' || activeTab === 'CREATE') ? 'story' : 'feed',
     });
 
     onClose();
@@ -570,8 +572,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     if (!storyText.trim()) return;
 
     const canvas = document.createElement('canvas');
-    canvas.width = 720;
-    canvas.height = 1280;
+    canvas.width = 640;
+    canvas.height = 1136;
     const ctx = canvas.getContext('2d');
     if (ctx) {
       const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
@@ -581,22 +583,23 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 42px "Plus Jakarta Sans", sans-serif';
+      ctx.font = 'bold 36px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const lines = storyText.split('\n');
       lines.forEach((line, idx) => {
-        ctx.fillText(line, canvas.width / 2, canvas.height / 2 - (lines.length * 24) + idx * 56);
+        ctx.fillText(line, canvas.width / 2, canvas.height / 2 - (lines.length * 20) + idx * 48);
       });
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
       onPublishPost({
         caption: storyText,
         mediaUrl: dataUrl,
         mediaType: 'photo',
         tags: '#privity #story',
         privacy: 'public',
+        targetDestination: 'story',
       });
     }
 

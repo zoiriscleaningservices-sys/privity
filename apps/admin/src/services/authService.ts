@@ -37,14 +37,20 @@ const STORAGE_SESSION_KEY = 'privity_auth_session_v1';
 const STORAGE_TAB_SESSION_KEY = 'privity_tab_auth_session_v1';
 const STORAGE_ACCOUNTS_KEY = 'privity_accounts_v1';
 
-// Ground Zero Wipe v360: Completely erase all profiles, activities, shots, sessions, and log everybody out
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v360';
+// Ground Zero Wipe v370: Completely erase all old mock data, stale messages, activities, charts, and reset cleanly
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v370';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && k.startsWith('privity_') && k !== GROUND_ZERO_FLAG && k !== 'privity_anon_key') {
+      if (
+        k &&
+        k.startsWith('privity_') &&
+        k !== GROUND_ZERO_FLAG &&
+        k !== 'privity_anon_key' &&
+        k !== 'privity_supabase_anon_key'
+      ) {
         keysToRemove.push(k);
       }
     }

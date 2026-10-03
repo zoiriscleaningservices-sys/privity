@@ -473,28 +473,30 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
     if (activeChannel === 'circles') {
       // Circles: User's visual posts + 100% exclusive circles creators
-      const userMedia = customUserPosts.filter((p) => p.type !== 'text');
+      const userMedia = customUserPosts.filter((p) => p.type !== 'text' && !p.tags?.some((t) => t.toLowerCase().includes('birdie')));
       return [...userMedia, ...mergeOverrides(EXCLUSIVE_CIRCLES_POSTS)];
     }
 
     if (activeChannel === 'following') {
-      // Following: Posts from users the current user follows + own posts
+      // Following: Visual posts from users the current user follows + own posts
       const myClean = (currentUser.handle || '').toLowerCase().replace(/^@/, '');
       const followingPosts = customUserPosts.filter((p) => {
         const authorClean = (p.authorHandle || '').toLowerCase().replace(/^@/, '');
-        return authorClean === myClean || !!followingMap[authorClean] || !!followingMap[p.authorHandle];
+        const isFollowed = authorClean === myClean || !!followingMap[authorClean] || !!followingMap[p.authorHandle];
+        return isFollowed && p.type !== 'text' && !p.tags?.some((t) => t.toLowerCase().includes('birdie'));
       });
       return [...followingPosts, ...mergeOverrides(EXCLUSIVE_FOLLOWING_POSTS)];
     }
 
     if (activeChannel === 'birdie') {
-      // Birdie: Text dispatches ONLY + exclusive birdie dispatches
-      const userText = customUserPosts.filter((p) => p.type === 'text');
+      // Birdie: Text chirps & dispatches ONLY + exclusive birdie dispatches
+      const userText = customUserPosts.filter((p) => p.type === 'text' || p.tags?.some((t) => t.toLowerCase().includes('birdie')));
       return [...userText, ...mergeOverrides(EXCLUSIVE_BIRDIE_POSTS)];
     }
 
-    // For You: Universal Community Feed - everybody on the platform sees what everyone posted!
-    return [...customUserPosts, ...mergeOverrides(EXCLUSIVE_FORYOU_POSTS)];
+    // For You: Universal Community Visual Feed (images and videos) for all users
+    const forYouPosts = customUserPosts.filter((p) => p.type !== 'text' && !p.tags?.some((t) => t.toLowerCase().includes('birdie')));
+    return [...forYouPosts, ...mergeOverrides(EXCLUSIVE_FORYOU_POSTS)];
   }, [posts, activeChannel, deletedPostIds]);
 
   // Active slide index tracked via IntersectionObserver / scroll position
