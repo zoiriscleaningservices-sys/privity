@@ -330,7 +330,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   const birdieScrollRef = useRef<HTMLDivElement>(null);
 
   // Dedicated Story & Post Creator State
-  const [creatorMode, setCreatorMode] = useState<'story' | 'post'>('story');
+  const [creatorMode, setCreatorMode] = useState<'story' | 'post'>('post');
   const [postDraftCaption, setPostDraftCaption] = useState('');
   const [postDraftPrivacy, setPostDraftPrivacy] = useState<'public' | 'followers' | 'close_friends'>('public');
 

@@ -98,7 +98,6 @@ export const BANNED_MOCK_HANDLES = new Set([
 export const isMockHandle = (handle?: string): boolean => {
   if (!handle) return false;
   const clean = handle.replace(/^@/, '').toLowerCase().trim();
-  if (clean.startsWith('google_') || clean.startsWith('usr-') || clean.startsWith('sc-')) return true;
   return BANNED_MOCK_HANDLES.has(clean);
 };
 
@@ -110,7 +109,6 @@ export const getCleanFollowingHandles = (map: Record<string, boolean>, excludeHa
     if (!map[k]) return;
     const clean = k.toLowerCase().replace(/^@/, '').trim();
     if (!clean) return;
-    if (clean.startsWith('google_') || clean.startsWith('usr-') || clean.startsWith('sc-')) return;
     if (isMockHandle(clean)) return;
     if (ex && clean === ex) return;
     set.add(clean);
@@ -138,8 +136,8 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset v350: Completely erase all profiles, activities, shots, sessions, and log everybody out
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v350';
+// Guaranteed Absolute Zero Reset v360: Completely erase all profiles, activities, shots, sessions, and log everybody out
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v360';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -1583,7 +1581,7 @@ export function App() {
   // ========================================================
   // REAL-TIME MULTI-DEVICE SYNCHRONIZATION ENGINE
   // ========================================================
-  const SYNC_TOPIC = 'privity_sync_global_live';
+  const SYNC_TOPIC = 'privity_sync_live_v360';
   const SYNC_ENDPOINT = `https://ntfy.sh/${SYNC_TOPIC}`;
 
   // Unique Device ID generated once per browser/device
@@ -1661,13 +1659,24 @@ export function App() {
       console.warn('Supabase broadcast failed', e);
     }
 
-    // 3. Cloud broadcast to all active devices (ntfy fallback)
+    // 3. Cloud broadcast to all active devices (ntfy)
     try {
-      fetch(SYNC_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch((err) => console.warn('Cloud sync push err', err));
+      const jsonStr = JSON.stringify(payload);
+      if (jsonStr.length > 3500) {
+        // Large payload with photo/video -> upload as ntfy attachment so it is never rejected or truncated
+        fetch(`${SYNC_ENDPOINT}?filename=event.json`, {
+          method: 'PUT',
+          headers: { 'Filename': 'event.json' },
+          body: jsonStr,
+        }).catch((err) => console.warn('Cloud sync attachment err', err));
+      } else {
+        // Compact payload -> send as plain text body so ntfy populates item.message directly
+        fetch(SYNC_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          body: jsonStr,
+        }).catch((err) => console.warn('Cloud sync push err', err));
+      }
     } catch (e) {
       console.warn('Cloud sync err', e);
     }
@@ -2943,7 +2952,28 @@ export function App() {
 
     // 3. Persistent Server-Sent Events (SSE) stream for instant sub-second delivery
     let es: EventSource | null = null;
+    let ntfyWs: WebSocket | null = null;
     let reconnectTimeout: any = null;
+
+    const connectNtfyWs = () => {
+      try {
+        if (ntfyWs) {
+          try { ntfyWs.close(); } catch {}
+        }
+        ntfyWs = new WebSocket(`wss://ntfy.sh/${SYNC_TOPIC}/ws`);
+        ntfyWs.onmessage = (e) => {
+          try {
+            const item = JSON.parse(e.data);
+            handleRawNtfyItem(item);
+          } catch (err) {}
+        };
+        ntfyWs.onerror = () => {
+          try { ntfyWs?.close(); } catch {}
+        };
+      } catch (e) {
+        console.warn('ntfy WebSocket connection failed', e);
+      }
+    };
 
     const connectSSE = () => {
       try {
@@ -2961,6 +2991,7 @@ export function App() {
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
           reconnectTimeout = setTimeout(() => {
             connectSSE();
+            connectNtfyWs();
             quickCatchUp();
           }, 2500);
         };
@@ -2970,6 +3001,7 @@ export function App() {
     };
 
     connectSSE();
+    connectNtfyWs();
 
     // 4. Supabase Realtime WebSocket listener for sub-50ms instant sync across all devices
     const unsubSupabase = onSupabaseBroadcast((evt) => {
@@ -3072,6 +3104,7 @@ export function App() {
       clearInterval(pollInterval);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       es?.close();
+      try { ntfyWs?.close(); } catch {}
       unsubSupabase();
       if (dbProfilesSubscription) {
         try {
