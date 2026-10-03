@@ -9640,3 +9640,37 @@ textarea::placeholder {
   color: var(--text-muted);
 }
 
+.btn-glass-banner-edit {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.btn-glass-banner-edit:hover {
+  background: rgba(30, 41, 59, 0.9) !important;
+  border-color: rgba(0, 240, 255, 0.5) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4) !important;
+}
+
+.btn-glass-banner-edit:active {
+  transform: scale(0.96);
+}
+
+.btn-primary-glow {
+  background: linear-gradient(135deg, #00f0ff 0%, #0070f3 100%);
+  color: #030712;
+  border: none;
+  box-shadow: 0 4px 16px rgba(0, 240, 255, 0.3);
+  transition: all 0.2s ease;
+}
+
+.btn-primary-glow:hover {
+  box-shadow: 0 6px 24px rgba(0, 240, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-primary-glow:active {
+  transform: scale(0.97);
+}
+
+

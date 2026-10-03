@@ -163,9 +163,26 @@ class AuthService {
     return null;
   }
 
+  // Synchronize remote account updates from peer broadcasts
+  public syncRemoteAccount(account: Partial<UserAccount> & { handle: string }) {
+    if (!account || !account.handle) return;
+    const clean = account.handle.toLowerCase().replace(/^@/, '');
+    const accounts = this.getAllAccounts();
+    accounts[clean] = {
+      ...(accounts[clean] || {}),
+      ...(account as any),
+    };
+    this.saveAccounts(accounts);
+    if (this.currentUser && (this.currentUser.handle || '').toLowerCase().replace(/^@/, '') === clean) {
+      this.currentUser = { ...this.currentUser, ...(account as any) };
+      try {
+        sessionStorage.setItem(STORAGE_TAB_SESSION_KEY, JSON.stringify(this.currentUser));
+      } catch {}
+      this.notify();
+    }
+  }
 
 
-  // Get all registered accounts on device
   public getAllAccounts(): Record<string, UserAccount> {
     try {
       const raw = localStorage.getItem(STORAGE_ACCOUNTS_KEY);

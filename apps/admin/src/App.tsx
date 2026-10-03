@@ -69,7 +69,7 @@ import {
   StoryItem,
 } from './components/feed/TikTokSlideFeed';
 import { authService, UserAccount } from './services/authService';
-import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast } from './services/supabaseClient';
+import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnectSupabaseRealtime } from './services/supabaseClient';
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
 
@@ -1439,11 +1439,13 @@ export function App() {
       if (fromProf) {
         return {
           ...fromProf,
-          id: currentAuthUser?.id || fromProf.id,
-          name: currentAuthUser?.name || fromProf.name,
+          id: fromProf.id || currentAuthUser?.id || `usr-${activeAuthHandle}`,
+          name: fromProf.name || currentAuthUser?.name || activeAuthHandle,
           handle: activeAuthHandle,
-          avatar: currentAuthUser?.avatar || fromProf.avatar,
-          isVerified: Boolean(currentAuthUser?.isVerified || fromProf.isVerified),
+          avatar: fromProf.avatar || currentAuthUser?.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAuthHandle}`,
+          coverUrl: fromProf.coverUrl || currentAuthUser?.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+          bio: fromProf.bio || currentAuthUser?.bio || '',
+          isVerified: Boolean(fromProf.isVerified || currentAuthUser?.isVerified),
         };
       }
     }
@@ -1988,10 +1990,11 @@ export function App() {
         case 'SEND_DM': {
           const { recipientHandle, senderHandle, message } = event;
           if (!recipientHandle || !message || !message.id) return;
-          const targetKey =
-            recipientHandle === cleanMyHandle
-              ? (senderHandle || message.senderHandle || 'unknown').replace(/^@/, '')
-              : recipientHandle.replace(/^@/, '');
+          const cleanRecip = (recipientHandle || '').replace(/^@/, '').toLowerCase();
+          const cleanSender = (senderHandle || message.senderHandle || 'unknown').replace(/^@/, '');
+          const myCleanLower = (cleanMyHandle || '').toLowerCase();
+
+          const targetKey = cleanRecip === myCleanLower ? cleanSender : (recipientHandle || '').replace(/^@/, '');
           setDirectMessages((prev) => {
             const thread = prev[targetKey] || [];
             if (thread.some((m) => m.id === message.id)) return prev;
@@ -2003,11 +2006,11 @@ export function App() {
             return updated;
           });
           if (
-            cleanMyHandle &&
-            (recipientHandle || '').toLowerCase().replace(/^@/, '') === cleanMyHandle.toLowerCase() &&
-            (senderHandle || '').toLowerCase().replace(/^@/, '') !== cleanMyHandle.toLowerCase()
+            myCleanLower &&
+            cleanRecip === myCleanLower &&
+            cleanSender.toLowerCase() !== myCleanLower
           ) {
-            triggerToast(`💬 @${(senderHandle || 'user').replace(/^@/, '')}: ${message.text || (message.isVoiceMemo ? 'Sent a voice memo 🎙️' : 'Sent an attachment')}`);
+            triggerToast(`💬 @${cleanSender}: ${message.text || (message.isVoiceMemo ? 'Sent a voice memo 🎙️' : 'Sent an attachment')}`);
           }
           break;
         }
@@ -2216,21 +2219,35 @@ export function App() {
         }
 
         case 'UPDATE_PROFILE': {
-          const { profile } = event;
+          const { profile, account } = event;
           if (!profile || !profile.handle) return;
           const clean = profile.handle.replace(/^@/, '');
           const cleanLower = clean.toLowerCase();
 
           // 1. Update profiles dictionary
           setProfiles((prev) => {
+            const existing = prev[clean] || prev[cleanLower] || {};
             const next = {
               ...prev,
-              [clean]: { ...prev[clean], ...profile },
-              [cleanLower]: { ...prev[cleanLower], ...profile },
+              [clean]: { ...existing, ...profile },
+              [cleanLower]: { ...existing, ...profile },
             };
             safeSaveStorage('privity_profiles_v5', next);
             return next;
           });
+
+          // 2. Synchronize registered account details
+          try {
+            authService.syncRemoteAccount({
+              id: profile.id,
+              name: profile.name,
+              handle: clean,
+              avatar: profile.avatar,
+              coverUrl: profile.coverUrl,
+              bio: profile.bio,
+              ...(account || {}),
+            } as any);
+          } catch {}
 
           // 2. Instantly update all existing dispatches / posts / comments authored by this user
           setPosts((prev) => {
@@ -2404,10 +2421,6 @@ export function App() {
             };
             return [streamItem, ...filtered];
           });
-          if (event.action === 'LIVE_STARTED') {
-            const hostName = host.creatorName || host.name || `@${cleanHostHandle || 'someone'}`;
-            triggerToast(`🔴 ${hostName} is now LIVE!`);
-          }
           break;
         }
 
@@ -2458,7 +2471,14 @@ export function App() {
               for (const prof of Object.values(registry as Record<string, UserProfile>)) {
                 if (prof && prof.handle) {
                   const cleanK = prof.handle.replace(/^@/, '').toLowerCase();
-                  if (!next[cleanK] || next[cleanK].name !== prof.name || next[cleanK].avatar !== prof.avatar || next[cleanK].bio !== prof.bio) {
+                  if (
+                    !next[cleanK] ||
+                    next[cleanK].name !== prof.name ||
+                    next[cleanK].avatar !== prof.avatar ||
+                    next[cleanK].bio !== prof.bio ||
+                    next[cleanK].coverUrl !== prof.coverUrl ||
+                    (prof.mediaItems && prof.mediaItems.length !== (next[cleanK].mediaItems || []).length)
+                  ) {
                     next[cleanK] = { ...(next[cleanK] || {}), ...prof };
                     changed = true;
                   }
@@ -2834,9 +2854,10 @@ export function App() {
       }
     }, 3000);
 
-    // 7. On window visibility / focus (e.g. user unlocks phone or switches back to tab)
+    // 7. On window/document visibility, mobile pageshow, focus, or network return
     const handleWake = () => {
-      if (document.visibilityState === 'visible') {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        reconnectSupabaseRealtime(true);
         quickCatchUp();
         if (!es || es.readyState === EventSource.CLOSED) {
           connectSSE();
@@ -2845,7 +2866,10 @@ export function App() {
         broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
       }
     };
-    window.addEventListener('visibilitychange', handleWake);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleWake);
+    }
+    window.addEventListener('pageshow', handleWake);
     window.addEventListener('focus', handleWake);
     window.addEventListener('online', fullCatchUp);
 
@@ -2878,7 +2902,10 @@ export function App() {
           sb?.removeChannel(dbProfilesSubscription);
         } catch {}
       }
-      window.removeEventListener('visibilitychange', handleWake);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleWake);
+      }
+      window.removeEventListener('pageshow', handleWake);
       window.removeEventListener('focus', handleWake);
       window.removeEventListener('online', fullCatchUp);
     };
@@ -2937,6 +2964,7 @@ export function App() {
       const next = {
         ...prev,
         [cleanHandle.toLowerCase()]: updated,
+        [cleanHandle]: updated,
       };
       if (myProfile.handle && myProfile.handle.toLowerCase() !== cleanHandle.toLowerCase()) {
         delete next[myProfile.handle.toLowerCase()];
@@ -2948,6 +2976,30 @@ export function App() {
       }
       return next;
     });
+
+    // Update active tab session and auth accounts
+    try {
+      authService.updateProfile({
+        name: updated.name,
+        handle: cleanHandle,
+        avatar: updated.avatar,
+        coverUrl: updated.coverUrl,
+        bio: updated.bio,
+      });
+    } catch {}
+
+    setCurrentAuthUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            name: updated.name,
+            handle: cleanHandle,
+            avatar: updated.avatar,
+            coverUrl: updated.coverUrl,
+            bio: updated.bio,
+          }
+        : null
+    );
 
     // Synchronize posts, comments, and replies authored by user in real time
     setPosts((prev) =>
@@ -3005,7 +3057,203 @@ export function App() {
     broadcastSyncEvent({
       action: 'UPDATE_PROFILE',
       profile: updated,
+      account: {
+        id: updated.id,
+        name: updated.name,
+        handle: cleanHandle,
+        avatar: updated.avatar,
+        coverUrl: updated.coverUrl,
+        bio: updated.bio,
+      },
     });
+  };
+
+  // Direct cover banner change with instant network synchronization
+  const handleDirectBannerChange = (bannerUrl: string) => {
+    const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!cleanHandle) return;
+
+    const updated: UserProfile = {
+      ...myProfile,
+      coverUrl: bannerUrl,
+    };
+
+    setProfiles((prev) => {
+      const next = {
+        ...prev,
+        [cleanHandle.toLowerCase()]: updated,
+        [cleanHandle]: updated,
+      };
+      safeSaveStorage('privity_profiles_v5', next);
+      return next;
+    });
+
+    try {
+      authService.updateProfile({ coverUrl: bannerUrl });
+    } catch {}
+
+    setCurrentAuthUser((prev) => (prev ? { ...prev, coverUrl: bannerUrl } : null));
+
+    broadcastSyncEvent({
+      action: 'UPDATE_PROFILE',
+      profile: updated,
+      account: {
+        id: updated.id,
+        name: updated.name,
+        handle: cleanHandle,
+        avatar: updated.avatar,
+        coverUrl: bannerUrl,
+        bio: updated.bio,
+      },
+    });
+
+    triggerToast('Cover banner updated instantly');
+  };
+
+  // Direct profile avatar photo change with instant network synchronization
+  const handleDirectAvatarChange = (avatarUrl: string) => {
+    const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!cleanHandle) return;
+
+    const updated: UserProfile = {
+      ...myProfile,
+      avatar: avatarUrl,
+    };
+
+    setProfiles((prev) => {
+      const next = {
+        ...prev,
+        [cleanHandle.toLowerCase()]: updated,
+        [cleanHandle]: updated,
+      };
+      safeSaveStorage('privity_profiles_v5', next);
+      return next;
+    });
+
+    try {
+      authService.updateProfile({ avatar: avatarUrl });
+    } catch {}
+
+    setCurrentAuthUser((prev) => (prev ? { ...prev, avatar: avatarUrl } : null));
+
+    setPosts((prev) => {
+      let changed = false;
+      const nextPosts = prev.map((p) => {
+        const isPostAuthor =
+          (p.authorHandle && p.authorHandle.replace(/^@/, '').toLowerCase() === cleanHandle.toLowerCase()) ||
+          p.authorId === updated.id;
+        if (isPostAuthor) {
+          changed = true;
+          return { ...p, authorAvatar: avatarUrl };
+        }
+        return p;
+      });
+      if (changed) safeSaveStorage('privity_posts_v5', nextPosts);
+      return changed ? nextPosts : prev;
+    });
+
+    broadcastSyncEvent({
+      action: 'UPDATE_PROFILE',
+      profile: updated,
+      account: {
+        id: updated.id,
+        name: updated.name,
+        handle: cleanHandle,
+        avatar: avatarUrl,
+        coverUrl: updated.coverUrl,
+        bio: updated.bio,
+      },
+    });
+
+    triggerToast('Profile photo updated instantly');
+  };
+
+  // Add photo directly to profile Studio & Media with instant broadcast
+  const handleAddProfileMedia = (photoUrl: string) => {
+    const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!cleanHandle) return;
+
+    const newMedia: UserMediaItem = {
+      id: `m-${cleanHandle}-${Date.now()}`,
+      url: photoUrl,
+      type: 'image',
+      likes: 0,
+      comments: 0,
+      isLiked: false,
+    };
+
+    const currentMedia = myProfile.mediaItems || [];
+    const updatedMedia = [newMedia, ...currentMedia];
+
+    const updatedProf: UserProfile = {
+      ...myProfile,
+      mediaItems: updatedMedia,
+    };
+
+    setProfiles((prev) => {
+      const next = {
+        ...prev,
+        [cleanHandle.toLowerCase()]: updatedProf,
+        [cleanHandle]: updatedProf,
+      };
+      safeSaveStorage('privity_profiles_v5', next);
+      return next;
+    });
+
+    const authorName = currentAuthUser?.name || myProfile.name || cleanHandle;
+    const authorAvatar = currentAuthUser?.avatar || myProfile.avatar;
+    const authorHandle = `@${cleanHandle}`;
+    const authorId = currentAuthUser?.id || myProfile.id || `usr-${cleanHandle}`;
+
+    const newPost: PostItem = {
+      id: `p-${Date.now()}`,
+      authorId,
+      authorName,
+      authorHandle,
+      authorAvatar,
+      isVerified: Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified),
+      type: 'image',
+      contentUrl: photoUrl,
+      thumbnailUrl: photoUrl,
+      caption: 'Added new visual to profile studio',
+      tags: ['studio', 'media'],
+      privacy: 'public',
+      likesCount: 0,
+      commentsCount: 0,
+      sharesCount: 0,
+      savesCount: 0,
+      isLiked: false,
+      isSaved: false,
+      likersList: [],
+      timeAgo: 'Just now',
+      comments: [],
+    };
+
+    setPosts((prev) => {
+      const next = [newPost, ...prev];
+      safeSaveStorage('privity_posts_v5', next);
+      return next;
+    });
+
+    broadcastSyncEvent({
+      action: 'UPDATE_PROFILE',
+      profile: updatedProf,
+      account: {
+        id: updatedProf.id,
+        name: updatedProf.name,
+        handle: cleanHandle,
+        avatar: updatedProf.avatar,
+        coverUrl: updatedProf.coverUrl,
+        bio: updatedProf.bio,
+      },
+    });
+
+    broadcastSyncEvent({
+      action: 'NEW_POST',
+      post: newPost,
+    });
+
+    triggerToast('Photo added to your profile studio');
   };
 
   // Like media item directly on profile with synchronized posts & photo likes registry
@@ -3758,6 +4006,7 @@ export function App() {
   const [privateLockModal, setPrivateLockModal] = useState<{ handle: string; name: string } | null>(null);
 
   const navigateToProfile = (handle: string) => {
+    setActiveChatUser(null);
     const clean = handle.replace(/^@/, '');
     if (viewedUserHandle && viewedUserHandle !== clean && activeTab === 'profile') {
       setProfileHistory((prev) => [...prev, viewedUserHandle]);
@@ -7151,18 +7400,32 @@ export function App() {
               <div className="messages-roster-pane">
                 {/* Modern Native Header for Messages */}
                 <div className="dm-native-header">
-                  <button
-                    type="button"
-                    className="dm-header-icon-btn"
-                    onClick={() => {
-                      setMessageModalMode('group');
-                      setIsCreateGroupOpen(true);
-                    }}
-                    title="Create New Group"
-                    aria-label="Create New Group"
-                  >
-                    <IconUsersPlus size={20} color="#fff" />
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      className="dm-header-icon-btn"
+                      onClick={() => {
+                        setMessageModalMode('dm');
+                        setIsCreateGroupOpen(true);
+                      }}
+                      title="New Direct Message"
+                      aria-label="New Direct Message"
+                    >
+                      <IconChat size={18} color="#fff" />
+                    </button>
+                    <button
+                      type="button"
+                      className="dm-header-icon-btn"
+                      onClick={() => {
+                        setMessageModalMode('group');
+                        setIsCreateGroupOpen(true);
+                      }}
+                      title="Create New Group"
+                      aria-label="Create New Group"
+                    >
+                      <IconUsersPlus size={18} color="#fff" />
+                    </button>
+                  </div>
 
                   <div className="dm-segmented-control" role="tablist">
                     <button
@@ -7306,8 +7569,115 @@ export function App() {
                     {/* Roster Channels List */}
                     <div className="messages-roster-list">
                       {filteredChannels.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '32px 14px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                          No conversations found matching "{chatSearchQuery}"
+                        <div style={{ padding: '24px 16px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '36px', marginBottom: '10px' }}>💬</div>
+                          <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>
+                            {chatSearchQuery ? `No chats matching "${chatSearchQuery}"` : 'Direct Sovereign Messaging'}
+                          </div>
+                          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: 1.5 }}>
+                            End-to-end encrypted direct messaging with instant real-time synchronization.
+                          </p>
+                          <button
+                            type="button"
+                            className="btn-primary-glow"
+                            style={{
+                              padding: '8px 18px',
+                              borderRadius: '20px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              marginBottom: '20px',
+                            }}
+                            onClick={() => {
+                              setMessageModalMode('dm');
+                              setIsCreateGroupOpen(true);
+                            }}
+                          >
+                            <IconChat size={14} />
+                            <span>+ Start Conversation</span>
+                          </button>
+
+                          <div style={{ textAlign: 'left', borderTop: '1px solid var(--glass-border)', paddingTop: '16px' }}>
+                            <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                              Available Creators & Contacts
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {Object.values(profiles)
+                                .filter((u) => {
+                                  if (!u || !u.handle) return false;
+                                  const h = u.handle.toLowerCase().replace(/^@/, '');
+                                  if (h === cleanMyHandle.toLowerCase()) return false;
+                                  if (isMockHandle(h)) return false;
+                                  if (chatSearchQuery.trim()) {
+                                    const q = chatSearchQuery.toLowerCase();
+                                    return h.includes(q) || (u.name || '').toLowerCase().includes(q);
+                                  }
+                                  return true;
+                                })
+                                .slice(0, 10)
+                                .map((creator) => {
+                                  const cleanH = creator.handle.replace(/^@/, '');
+                                  return (
+                                    <div
+                                      key={cleanH}
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        padding: '8px 10px',
+                                        background: 'var(--glass-card-bg)',
+                                        border: '1px solid var(--glass-border)',
+                                        borderRadius: '10px',
+                                      }}
+                                    >
+                                      <div
+                                        style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, cursor: 'pointer' }}
+                                        onClick={() => {
+                                          setActiveChatUser(creator);
+                                          setChatMediaAttachment(null);
+                                        }}
+                                      >
+                                        <img
+                                          src={creator.avatar}
+                                          alt={creator.name}
+                                          style={{ width: '34px', height: '34px', borderRadius: '50%', objectFit: 'cover' }}
+                                        />
+                                        <div style={{ minWidth: 0 }}>
+                                          <div style={{ fontSize: '12px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{creator.name}</span>
+                                            {creator.isVerified && <VerifiedBadge authorName={creator.name} category={creator.verifiedCategory} />}
+                                          </div>
+                                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{cleanH}</div>
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        style={{
+                                          background: 'rgba(0, 240, 255, 0.15)',
+                                          border: '1px solid rgba(0, 240, 255, 0.4)',
+                                          color: 'var(--brand-cyan)',
+                                          padding: '5px 12px',
+                                          borderRadius: '14px',
+                                          fontSize: '11px',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                          flexShrink: 0,
+                                        }}
+                                        onClick={() => {
+                                          setActiveChatUser(creator);
+                                          setChatMediaAttachment(null);
+                                        }}
+                                      >
+                                        Chat
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         filteredChannels.map((handle) => {
@@ -7606,7 +7976,10 @@ export function App() {
 
                     <div
                       className="messages-thread-user-meta"
-                      onClick={() => navigateToProfile(currentRecipient.handle)}
+                      onClick={() => {
+                        setActiveChatUser(null);
+                        navigateToProfile(currentRecipient.handle);
+                      }}
                       title={`View @${currentRecipient.handle}'s profile`}
                     >
                       <div className="messages-thread-avatar-wrap">
@@ -7666,7 +8039,10 @@ export function App() {
                       type="button"
                       className="btn-glass-back"
                       style={{ padding: '7px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                      onClick={() => navigateToProfile(currentRecipient.handle)}
+                      onClick={() => {
+                        setActiveChatUser(null);
+                        navigateToProfile(currentRecipient.handle);
+                      }}
                       title="Inspect full creator portfolio"
                     >
                       <IconUser size={13} />
@@ -8845,7 +9221,46 @@ export function App() {
               <div
                 className="profile-cover-stage"
                 style={{ backgroundImage: `url(${profile.coverUrl})`, position: 'relative' }}
-              />
+              >
+                {isOwnProfile && (
+                  <div style={{ position: 'absolute', top: '14px', right: '14px', zIndex: 10 }}>
+                    <label
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: 'rgba(15, 23, 42, 0.75)',
+                        backdropFilter: 'blur(12px)',
+                        border: '1px solid rgba(255, 255, 255, 0.25)',
+                        color: '#fff',
+                        padding: '6px 14px',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                      }}
+                      title="Change Banner Photo"
+                    >
+                      <IconPhoto size={14} color="#00f0ff" />
+                      <span>Change Banner</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            compressImageFile(file, 1200, 0.75, (dataUrl) => {
+                              handleDirectBannerChange(dataUrl);
+                            });
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
 
               {/* Profile Card Info */}
               <div className="profile-header-card">
@@ -8857,13 +9272,26 @@ export function App() {
                       className="profile-avatar-squircle"
                     />
                     {isOwnProfile && (
-                      <button
+                      <label
                         className="btn-glass-avatar-edit"
-                        onClick={handleOpenEditProfile}
                         title="Change Profile Photo"
+                        style={{ cursor: 'pointer' }}
                       >
                         <IconPhoto size={13} />
-                      </button>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              compressImageFile(file, 360, 0.8, (dataUrl) => {
+                                handleDirectAvatarChange(dataUrl);
+                              });
+                            }
+                          }}
+                        />
+                      </label>
                     )}
                   </div>
 
@@ -9548,6 +9976,42 @@ export function App() {
                 {/* Sub Tab 2: Media & Studio Grid */}
                 {profileSubTab === 'media' && (
                   <div style={{ marginTop: '16px' }}>
+                    {isOwnProfile && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
+                        <label
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            background: 'rgba(0, 240, 255, 0.15)',
+                            border: '1px solid rgba(0, 240, 255, 0.4)',
+                            color: '#fff',
+                            padding: '8px 16px',
+                            borderRadius: '20px',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 14px rgba(0, 240, 255, 0.2)',
+                          }}
+                        >
+                          <IconPhoto size={15} color="var(--brand-cyan)" />
+                          <span>+ Add Photo to Studio</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                compressImageFile(file, 960, 0.8, (dataUrl) => {
+                                  handleAddProfileMedia(dataUrl);
+                                });
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    )}
                     {profile.mediaItems && profile.mediaItems.length > 0 ? (
                       <div className="profile-media-grid">
                         {profile.mediaItems.map((item) => {
@@ -12206,7 +12670,7 @@ export function App() {
           isCameraOpen ||
           activeLiveStream ||
           isHostBroadcasting ||
-          activeChatUser ||
+          (activeTab === 'messages' && Boolean(activeChatUser)) ||
           lightboxUrl ||
           isModalOpen ||
           isEditProfileOpen ||

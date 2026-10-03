@@ -73,20 +73,62 @@ export const isSupabaseConfigured = (): boolean => {
 let realtimeSyncChannel: any = null;
 const broadcastListeners = new Set<(payload: any) => void>();
 let isBroadcastAttached = false;
+let reconnectTimer: any = null;
+
+export function reconnectSupabaseRealtime(_force = false) {
+  const sb = getSupabaseClient();
+  if (!sb) return null;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  try {
+    if (realtimeSyncChannel) {
+      try {
+        sb.removeChannel(realtimeSyncChannel);
+      } catch {}
+      realtimeSyncChannel = null;
+      isBroadcastAttached = false;
+    }
+    return getSupabaseRealtimeChannel();
+  } catch (err) {
+    console.warn('[Supabase Realtime] Reconnect failed:', err);
+    return null;
+  }
+}
 
 export function getSupabaseRealtimeChannel() {
   const sb = getSupabaseClient();
   if (!sb) return null;
+
+  if (realtimeSyncChannel && (realtimeSyncChannel.state === 'closed' || realtimeSyncChannel.state === 'errored')) {
+    try {
+      sb.removeChannel(realtimeSyncChannel);
+    } catch {}
+    realtimeSyncChannel = null;
+    isBroadcastAttached = false;
+  }
+
   if (!realtimeSyncChannel) {
     try {
       realtimeSyncChannel = sb.channel('privity_sync_hub', {
         config: { broadcast: { self: false } },
       });
+
       realtimeSyncChannel.subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
           console.log('[Supabase Realtime] Connected to privity_sync_hub');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('[Supabase Realtime] Channel status:', status, 'Scheduling auto-reconnect...');
+          if (!reconnectTimer) {
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              reconnectSupabaseRealtime(true);
+            }, 1200);
+          }
         }
       });
+
       if (!isBroadcastAttached) {
         isBroadcastAttached = true;
         realtimeSyncChannel.on('broadcast', { event: 'privity_event' }, ({ payload }: any) => {
@@ -109,7 +151,10 @@ export function getSupabaseRealtimeChannel() {
 
 export function broadcastViaSupabase(payload: any) {
   try {
-    const ch = getSupabaseRealtimeChannel();
+    let ch = getSupabaseRealtimeChannel();
+    if (!ch || ch.state === 'closed' || ch.state === 'errored') {
+      ch = reconnectSupabaseRealtime(true);
+    }
     if (ch) {
       ch.send({
         type: 'broadcast',
@@ -129,4 +174,25 @@ export function onSupabaseBroadcast(callback: (payload: any) => void): () => voi
     broadcastListeners.delete(callback);
   };
 }
+
+// Auto-reconnect on Mobile OS and browser lifecycle events
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    console.log('[Supabase Realtime] Network returned online -> Reconnecting channel');
+    reconnectSupabaseRealtime(true);
+  });
+  window.addEventListener('pageshow', () => {
+    console.log('[Supabase Realtime] Mobile pageshow -> Reconnecting channel');
+    reconnectSupabaseRealtime(true);
+  });
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Supabase Realtime] Mobile app visible -> Reconnecting channel');
+        reconnectSupabaseRealtime(true);
+      }
+    });
+  }
+}
+
 
