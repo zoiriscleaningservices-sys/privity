@@ -24,6 +24,9 @@ import { LiveStudioControlsModal } from './LiveStudioControlsModal';
 import { LiveGiftGoalModal, StreamGiftGoal } from './LiveGiftGoalModal';
 import { LiveDailyLeaderboardModal } from './LiveDailyLeaderboardModal';
 import { broadcastViaSupabase, onSupabaseBroadcast } from '../../services/supabaseClient';
+import bubbleBattleImg from '../../assets/live-bubbles/bubble-battle.jpg';
+import bubbleBeautyImg from '../../assets/live-bubbles/bubble-beauty.jpg';
+import bubbleStudioImg from '../../assets/live-bubbles/bubble-studio.jpg';
 import './liveme.css';
 
 export interface LiveBroadcastSummaryData {
@@ -3324,9 +3327,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   title="Battle Matchmaker & Co-Host Guests"
                 >
                   <img
-                    src="/live-bubbles/bubble-battle.jpg"
-                    alt="Battle & Guests"
+                    src={bubbleBattleImg}
+                    alt=""
+                    loading="eager"
                     className="liveme-host-bubble-img"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = 'none';
+                    }}
                   />
                   {isPkBattleActive && <span className="liveme-host-bubble-badge">PK</span>}
                   {activeGuests.length > 0 && <span className="liveme-host-bubble-badge">{activeGuests.length}</span>}
@@ -3340,9 +3347,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   title="Beauty Filters & Skin Enhancements"
                 >
                   <img
-                    src="/live-bubbles/bubble-beauty.jpg"
-                    alt="Beauty & Filters"
+                    src={bubbleBeautyImg}
+                    alt=""
+                    loading="eager"
                     className="liveme-host-bubble-img"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = 'none';
+                    }}
                   />
                 </button>
 
@@ -3354,9 +3365,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   title="Studio Controls, Mirror, Mic & Dual Camera"
                 >
                   <img
-                    src="/live-bubbles/bubble-studio.jpg"
-                    alt="Studio Tools"
+                    src={bubbleStudioImg}
+                    alt=""
+                    loading="eager"
                     className="liveme-host-bubble-img"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = 'none';
+                    }}
                   />
                   {micAudioLevel > 15 && !isMicMuted && <span className="liveme-host-bubble-vu-ring" />}
                   {isDualCameraActive && <span className="liveme-host-bubble-badge">2</span>}
