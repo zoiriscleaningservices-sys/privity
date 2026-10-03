@@ -137,8 +137,8 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset v380: Completely erase all bloated video data, corrupted states, stale messages, activities, and reset cleanly
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v380';
+// Guaranteed Absolute Zero Reset v381: Clean reset for 100% accurate real-time numbers, zero glitching, pristine fresh state
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v381_real_zero';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -281,6 +281,7 @@ interface PostItem {
   commentsCount: number;
   sharesCount: number;
   savesCount: number;
+  saversList?: string[];
   isLiked?: boolean;
   isSaved?: boolean;
   isReposted?: boolean;
@@ -309,6 +310,16 @@ export const isPostLikedByUser = (post?: PostItem | null, handle?: string | null
   return !!post.isLiked;
 };
 
+export const isPostSavedByUser = (post?: PostItem | null, handle?: string | null, savedIds?: string[]): boolean => {
+  if (!post) return false;
+  const clean = normalizeHandle(handle);
+  if (clean && Array.isArray(post.saversList)) {
+    return post.saversList.some((h) => normalizeHandle(h) === clean);
+  }
+  if (savedIds && savedIds.includes(post.id)) return true;
+  return !!post.isSaved;
+};
+
 export const calcCommentsCount = (comments?: PostComment[]): number => {
   if (!Array.isArray(comments)) return 0;
   return comments.reduce((acc, c) => acc + 1 + (c.replies?.length || 0), 0);
@@ -323,7 +334,7 @@ export const isCommentLikedByUser = (comment?: { likersList?: string[] } | null,
 
 export interface AppNotification {
   id: string;
-  type: 'like' | 'comment' | 'follow' | 'mention' | 'gift' | 'save' | 'share';
+  type: 'like' | 'comment' | 'follow' | 'mention' | 'gift' | 'save' | 'share' | 'live' | 'story' | 'read';
   actorHandle: string;
   actorName: string;
   actorAvatar: string;
@@ -671,6 +682,7 @@ export const MediaAvatar: React.FC<{
         title={title}
       >
         <video
+          key={src}
           src={src}
           autoPlay
           loop
@@ -1116,42 +1128,43 @@ export function App() {
   useEffect(() => {
     const hydrateMediaLoops = async () => {
       try {
-        const avatarKey = localStorage.getItem('privity_user_avatar_media_key');
+        const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile?.handle);
+        if (!cleanHandle) return;
+
+        const avatarKey =
+          localStorage.getItem(`privity_user_avatar_media_key_${cleanHandle}`) ||
+          localStorage.getItem('privity_user_avatar_media_key');
         if (avatarKey) {
           const freshUrl = await getFreshMediaUrl(avatarKey);
           if (freshUrl) {
             const finalUrl = freshUrl.includes('#') ? freshUrl : `${freshUrl}#video.mp4`;
-            const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
-            if (cleanHandle) {
-              setProfiles((prev) => {
-                const cur = prev[cleanHandle.toLowerCase()] || prev[cleanHandle];
-                if (!cur) return prev;
-                return {
-                  ...prev,
-                  [cleanHandle.toLowerCase()]: { ...cur, avatar: finalUrl },
-                };
-              });
-              setCurrentAuthUser((prev) => (prev ? { ...prev, avatar: finalUrl } : null));
-            }
+            setProfiles((prev) => {
+              const cur = prev[cleanHandle.toLowerCase()] || prev[cleanHandle] || { handle: cleanHandle, name: cleanHandle, avatar: finalUrl };
+              return {
+                ...prev,
+                [cleanHandle.toLowerCase()]: { ...cur, avatar: finalUrl },
+                [cleanHandle]: { ...cur, avatar: finalUrl },
+              };
+            });
+            setCurrentAuthUser((prev) => (prev ? { ...prev, avatar: finalUrl } : null));
           }
         }
-        const bannerKey = localStorage.getItem('privity_user_banner_media_key');
+        const bannerKey =
+          localStorage.getItem(`privity_user_banner_media_key_${cleanHandle}`) ||
+          localStorage.getItem('privity_user_banner_media_key');
         if (bannerKey) {
           const freshUrl = await getFreshMediaUrl(bannerKey);
           if (freshUrl) {
             const finalUrl = freshUrl.includes('#') ? freshUrl : `${freshUrl}#video.mp4`;
-            const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
-            if (cleanHandle) {
-              setProfiles((prev) => {
-                const cur = prev[cleanHandle.toLowerCase()] || prev[cleanHandle];
-                if (!cur) return prev;
-                return {
-                  ...prev,
-                  [cleanHandle.toLowerCase()]: { ...cur, coverUrl: finalUrl },
-                };
-              });
-              setCurrentAuthUser((prev) => (prev ? { ...prev, coverUrl: finalUrl } : null));
-            }
+            setProfiles((prev) => {
+              const cur = prev[cleanHandle.toLowerCase()] || prev[cleanHandle] || { handle: cleanHandle, name: cleanHandle, coverUrl: finalUrl };
+              return {
+                ...prev,
+                [cleanHandle.toLowerCase()]: { ...cur, coverUrl: finalUrl },
+                [cleanHandle]: { ...cur, coverUrl: finalUrl },
+              };
+            });
+            setCurrentAuthUser((prev) => (prev ? { ...prev, coverUrl: finalUrl } : null));
           }
         }
       } catch (err) {
@@ -1349,7 +1362,20 @@ export function App() {
       }
     })();
     const loaded = readStorage<PostItem[]>('privity_posts_v5', []);
-    return Array.isArray(loaded) ? loaded.filter((p) => !isMockPost(p) && !deleted.has(p.id)) : [];
+    if (!Array.isArray(loaded)) return [];
+    return loaded
+      .filter((p) => !isMockPost(p) && !deleted.has(p.id))
+      .map((p) => {
+        const likers = Array.isArray(p.likersList) ? Array.from(new Set(p.likersList.map(normalizeHandle).filter(Boolean))) : [];
+        const savers = Array.isArray(p.saversList) ? Array.from(new Set(p.saversList.map(normalizeHandle).filter(Boolean))) : [];
+        return {
+          ...p,
+          likersList: likers,
+          saversList: savers,
+          likesCount: likers.length > 0 ? likers.length : Math.max(0, p.likesCount || 0),
+          savesCount: savers.length > 0 ? savers.length : Math.max(0, p.savesCount || 0),
+        };
+      });
   });
   const postsRef = React.useRef(posts);
   postsRef.current = posts;
@@ -1430,7 +1456,7 @@ export function App() {
       let updatedProf: UserProfile | null = null;
       setProfiles((prev) => {
         const existing = prev[h];
-        if (!existing || existing.name !== currentAuthUser.name || existing.avatar !== currentAuthUser.avatar) {
+        if (!existing || existing.name !== currentAuthUser.name || existing.avatar !== currentAuthUser.avatar || existing.coverUrl !== currentAuthUser.coverUrl) {
           updatedProf = {
             id: currentAuthUser.id,
             name: currentAuthUser.name,
@@ -2069,16 +2095,34 @@ export function App() {
         }
 
         case 'SAVE_POST': {
-          const { postId, isSaved, savesCount, saverHandle, saverName, saverAvatar, postAuthorHandle, postCaptionSnippet, postThumbnail } = event;
+          const { postId, isSaved, savesCount, saverHandle, saverName, saverAvatar, postAuthorHandle, postCaptionSnippet, postThumbnail, saversList: remoteSavers } = event;
+          if (!postId) break;
+          const cleanSaver = normalizeHandle(saverHandle);
+          let targetAuthor = normalizeHandle(postAuthorHandle);
+
           setPosts((prev) => {
             const nextPosts = prev.map((p) => {
               if (p.id === postId) {
+                if (!targetAuthor && p.authorHandle) {
+                  targetAuthor = normalizeHandle(p.authorHandle);
+                }
+                const currentSavers = (p.saversList || []).map(normalizeHandle).filter(Boolean);
+                const updatedSavers = Array.isArray(remoteSavers)
+                  ? Array.from(new Set(remoteSavers.map(normalizeHandle).filter(Boolean)))
+                  : cleanSaver
+                  ? (isSaved
+                    ? Array.from(new Set([...currentSavers, cleanSaver]))
+                    : currentSavers.filter((h) => h !== cleanSaver))
+                  : currentSavers;
+
                 const count = typeof savesCount === 'number'
                   ? savesCount
-                  : isSaved ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1);
+                  : updatedSavers.length;
+
                 return {
                   ...p,
-                  savesCount: count,
+                  saversList: updatedSavers,
+                  savesCount: Math.max(0, count),
                 };
               }
               return p;
@@ -2089,8 +2133,6 @@ export function App() {
 
           // Accurate Notification: When another user saves current user's dispatch
           const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
-          const cleanSaver = normalizeHandle(saverHandle);
-          let targetAuthor = normalizeHandle(postAuthorHandle);
           if (!targetAuthor) {
             targetAuthor = normalizeHandle(postsRef.current.find((p) => p.id === postId)?.authorHandle);
           }
@@ -2542,6 +2584,47 @@ export function App() {
           break;
         }
 
+        case 'READ_DM': {
+          const { readerHandle, readerName, readerAvatar, senderHandle } = event;
+          const cleanReader = (readerHandle || '').replace(/^@/, '').toLowerCase().trim();
+          const cleanSender = (senderHandle || '').replace(/^@/, '').toLowerCase().trim();
+          const myCleanLower = (cleanMyHandle || '').toLowerCase().trim();
+
+          // If this user sent messages to the reader, mark the sent messages as read!
+          if (myCleanLower && cleanSender === myCleanLower && cleanReader) {
+            setDirectMessages((prev) => {
+              const thread = prev[cleanReader] || [];
+              let changed = false;
+              const updated = thread.map((m) => {
+                const mSender = (m.senderHandle || '').replace(/^@/, '').toLowerCase().trim();
+                if (mSender === myCleanLower && !m.isRead) {
+                  changed = true;
+                  return { ...m, isRead: true };
+                }
+                return m;
+              });
+              if (!changed) return prev;
+              const next = { ...prev, [cleanReader]: updated };
+              safeSaveStorage('privity_direct_messages_v5', next);
+              return next;
+            });
+
+            // Activity record
+            const notif: AppNotification = {
+              id: `notif-read-${cleanReader}-${Date.now()}`,
+              type: 'read',
+              actorHandle: cleanReader,
+              actorName: readerName || cleanReader,
+              actorAvatar: readerAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanReader}`,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myCleanLower);
+          }
+          break;
+        }
+
         case 'TOGGLE_FOLLOW': {
           const { targetHandle, followerHandle, followerName, isFollowing } = event;
           if (!targetHandle) return;
@@ -2881,7 +2964,19 @@ export function App() {
             return next;
           });
           const cleanAuthor = (story.authorHandle || '').replace(/^@/, '');
-          if (cleanAuthor && cleanAuthor.toLowerCase() !== cleanMyHandle.toLowerCase()) {
+          const myCleanLower = (cleanMyHandle || '').toLowerCase();
+          if (cleanAuthor && cleanAuthor.toLowerCase() !== myCleanLower) {
+            const notif: AppNotification = {
+              id: `notif-story-${story.id}-${cleanAuthor}`,
+              type: 'story',
+              actorHandle: cleanAuthor,
+              actorName: story.authorName || cleanAuthor,
+              actorAvatar: story.authorAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanAuthor}`,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myCleanLower);
             triggerToast(`📸 ${story.authorName || `@${cleanAuthor}`} added a new story!`);
           }
           break;
@@ -2933,6 +3028,23 @@ export function App() {
             };
             return [streamItem, ...filtered];
           });
+
+          // Accurate Notification if this is a new live broadcast from another user
+          const myCleanLower = (cleanMyHandle || '').toLowerCase();
+          if (event.action === 'LIVE_STARTED' && cleanHostHandle && cleanHostHandle !== myCleanLower) {
+            const notif: AppNotification = {
+              id: `notif-live-${host.id}-${cleanHostHandle}`,
+              type: 'live',
+              actorHandle: cleanHostHandle,
+              actorName: host.creatorName || host.name || cleanHostHandle,
+              actorAvatar: host.creatorAvatar || host.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanHostHandle}`,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myCleanLower);
+            triggerToast(`🔴 @${cleanHostHandle} is now LIVE broadcasting!`);
+          }
           break;
         }
 
@@ -5020,31 +5132,63 @@ export function App() {
     }
 
     const photoUrl = targetPost.contentUrl || targetPost.thumbnailUrl;
-    const currentLikers = (targetPost.likersList || []).map(normalizeHandle).filter(Boolean);
-    const isCurrentlyLiked = isPostLikedByUser(targetPost, myClean);
-    if (fromDoubleTap && isCurrentlyLiked) return;
+    let computedNextLiked = false;
+    let computedNextCount = 0;
+    let computedNextLikers: string[] = [];
 
-    const nextLiked = fromDoubleTap ? true : !isCurrentlyLiked;
-    const nextLikers = nextLiked
-      ? Array.from(new Set([...currentLikers, myClean]))
-      : currentLikers.filter((h) => h !== myClean);
+    // 1. Update posts immediately with functional Set deduplication
+    setPosts((prevPosts) => {
+      let currentList = prevPosts;
+      if (!currentList.some((p) => p.id === postId) && targetPost) {
+        currentList = [...currentList, targetPost];
+      }
 
-    const nextCount = nextLikers.length;
+      const nextPosts = currentList.map((p) => {
+        if (p.id === postId || (photoUrl && (isSameMedia(p.contentUrl, photoUrl) || isSameMedia(p.thumbnailUrl, photoUrl)))) {
+          const curLikers = (p.likersList || []).map(normalizeHandle).filter(Boolean);
+          const isCurLiked = curLikers.includes(myClean);
+          if (fromDoubleTap && isCurLiked) {
+            computedNextLiked = true;
+            computedNextLikers = curLikers;
+            computedNextCount = curLikers.length;
+            return p;
+          }
+          const willBeLiked = fromDoubleTap ? true : !isCurLiked;
+          const updLikers = willBeLiked
+            ? Array.from(new Set([...curLikers, myClean]))
+            : curLikers.filter((h) => h !== myClean);
 
-    // 1. Update photoLikesMap immediately for media
+          computedNextLiked = willBeLiked;
+          computedNextLikers = updLikers;
+          computedNextCount = updLikers.length;
+
+          return {
+            ...p,
+            likersList: updLikers,
+            likesCount: computedNextCount,
+            isLiked: willBeLiked,
+          };
+        }
+        return p;
+      });
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+
+    // 2. Update photoLikesMap immediately for media
     if (photoUrl) {
       const baseKey = extractMediaBaseKey(photoUrl);
       setPhotoLikesMap((prev) => {
         const next = {
           ...prev,
-          ...(baseKey ? { [baseKey]: { isLiked: nextLiked, count: nextCount } } : {}),
-          ...(!photoUrl.startsWith('data:') ? { [photoUrl]: { isLiked: nextLiked, count: nextCount } } : {}),
+          ...(baseKey ? { [baseKey]: { isLiked: computedNextLiked, count: computedNextCount } } : {}),
+          ...(!photoUrl.startsWith('data:') ? { [photoUrl]: { isLiked: computedNextLiked, count: computedNextCount } } : {}),
         };
         safeSaveStorage('privity_photo_likes_v5', next);
         return next;
       });
 
-      // 2. Update profiles mediaItems synchronously
+      // 3. Update profiles mediaItems synchronously
       setProfiles((prevProfs) => {
         let changed = false;
         const nextProfs = { ...prevProfs };
@@ -5055,7 +5199,7 @@ export function App() {
               ...prof,
               mediaItems: prof.mediaItems.map((m) =>
                 isSameMedia(m.url, photoUrl)
-                  ? { ...m, isLiked: nextLiked, likes: nextCount }
+                  ? { ...m, isLiked: computedNextLiked, likes: computedNextCount }
                   : m
               ),
             };
@@ -5068,44 +5212,15 @@ export function App() {
       });
     }
 
-    // 3. Update posts immediately
-    setPosts((prevPosts) => {
-      const exists = prevPosts.some((p) => p.id === postId);
-      let nextPosts;
-      if (exists) {
-        nextPosts = prevPosts.map((p) => {
-          if (p.id === postId || (photoUrl && (isSameMedia(p.contentUrl, photoUrl) || isSameMedia(p.thumbnailUrl, photoUrl)))) {
-            return {
-              ...p,
-              likersList: nextLikers,
-              likesCount: nextCount,
-              isLiked: nextLiked,
-            };
-          }
-          return p;
-        });
-      } else {
-        const newP = {
-          ...targetPost!,
-          likersList: nextLikers,
-          likesCount: nextCount,
-          isLiked: nextLiked,
-        };
-        nextPosts = [newP, ...prevPosts];
-      }
-      safeSaveStorage('privity_posts_v5', nextPosts);
-      return nextPosts;
-    });
-
     const likerName = currentAuthUser?.name || myProfile.name || myClean;
     const likerAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
 
     broadcastSyncEvent({
       action: 'LIKE_POST',
       postId,
-      isLiked: nextLiked,
-      likesCount: nextCount,
-      likersList: nextLikers,
+      isLiked: computedNextLiked,
+      likesCount: computedNextCount,
+      likersList: computedNextLikers,
       userHandle: myClean,
       likerHandle: myClean,
       likerName,
@@ -5115,33 +5230,50 @@ export function App() {
       postThumbnail: targetPost.contentUrl || targetPost.thumbnailUrl,
     });
 
-    triggerToast(nextLiked ? 'Liked dispatch ❤️' : 'Unliked dispatch');
+    triggerToast(computedNextLiked ? 'Liked dispatch ❤️' : 'Unliked dispatch');
   };
 
-  // Bookmark / Save
+  // Bookmark / Save with Real-time Deduped Savers List
   const handleSave = (postId: string) => {
-    let nextSavedState = false;
-    let nextSavesCount = 0;
-    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
-    const savedKey = myClean ? `privity_saved_posts_${myClean}` : 'privity_saved_posts_default';
-    const currentSaved = readStorage<string[]>(savedKey, []);
-
     let targetPost = posts.find((p) => p.id === postId);
     if (!targetPost) {
       targetPost = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
     }
+    if (!targetPost) return;
+
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!myClean) {
+      setIsAuthModalOpen(true);
+      triggerToast('Please sign in or create an account to save dispatches');
+      return;
+    }
+
+    const savedKey = `privity_saved_posts_${myClean}`;
+    const currentSaved = readStorage<string[]>(savedKey, []);
+
+    let nextSavedState = false;
+    let nextSavesCount = 0;
+    let nextSavers: string[] = [];
 
     setPosts((prev) => {
       let currentList = prev;
       if (!currentList.some((p) => p.id === postId) && targetPost) {
         currentList = [...currentList, targetPost];
       }
-      nextSavedState = !currentSaved.includes(postId);
+
       const nextPosts = currentList.map((p) => {
         if (p.id === postId) {
-          nextSavesCount = nextSavedState ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1);
+          const currentSavers = (p.saversList || []).map(normalizeHandle).filter(Boolean);
+          const isCurrentlySaved = currentSavers.includes(myClean) || currentSaved.includes(postId);
+          nextSavedState = !isCurrentlySaved;
+          nextSavers = nextSavedState
+            ? Array.from(new Set([...currentSavers, myClean]))
+            : currentSavers.filter((h) => h !== myClean);
+          nextSavesCount = nextSavers.length;
+
           return {
             ...p,
+            saversList: nextSavers,
             savesCount: nextSavesCount,
             isSaved: nextSavedState,
           };
@@ -5164,6 +5296,7 @@ export function App() {
       postId,
       isSaved: nextSavedState,
       savesCount: nextSavesCount,
+      saversList: nextSavers,
       saverHandle: myClean,
       saverName: currentAuthUser?.name || myProfile.name || myClean,
       saverAvatar: currentAuthUser?.avatar || myProfile.avatar,
@@ -5795,6 +5928,44 @@ export function App() {
     setActiveTab('messages');
     triggerToast('Opened chat with @' + cleanRecipientHandle + ' 💬');
   };
+
+  // Real-time READ_DM sync: when viewing a thread with activeChatUser, mark their incoming messages read and broadcast receipt
+  useEffect(() => {
+    if (!activeChatUser) return;
+    const partnerHandle = (activeChatUser.handle || '').replace(/^@/, '').toLowerCase().trim();
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!partnerHandle || !myClean) return;
+
+    let hasUnread = false;
+    setDirectMessages((prev) => {
+      const thread = prev[partnerHandle] || [];
+      hasUnread = thread.some(
+        (m) => m.senderHandle && m.senderHandle.replace(/^@/, '').toLowerCase().trim() === partnerHandle && !m.isRead
+      );
+      if (!hasUnread) return prev;
+
+      const updated = thread.map((m) => {
+        if (m.senderHandle && m.senderHandle.replace(/^@/, '').toLowerCase().trim() === partnerHandle) {
+          return { ...m, isRead: true };
+        }
+        return m;
+      });
+
+      const next = { ...prev, [partnerHandle]: updated };
+      safeSaveStorage('privity_direct_messages_v5', next);
+      return next;
+    });
+
+    if (hasUnread) {
+      broadcastSyncEvent({
+        action: 'READ_DM',
+        readerHandle: myClean,
+        readerName: currentAuthUser?.name || myProfile.name || myClean,
+        readerAvatar: currentAuthUser?.avatar || myProfile.avatar,
+        senderHandle: partnerHandle,
+      });
+    }
+  }, [activeChatUser?.handle, currentAuthUser?.handle, myProfile.handle, directMessages[activeChatUser?.handle?.replace(/^@/, '') || '']?.length]);
 
   // Like or unlike comment
   const handleLikeComment = (postId: string, commentId: string, replyId?: string) => {
@@ -8433,7 +8604,7 @@ export function App() {
                             if (isMine) {
                               const partnerActive = presence === 'active' || presence === 'inactive';
                               const timeSinceMsg = Date.now() - lastMsg.timestamp;
-                              const isIgnored = lastMsg.isRead || (partnerActive && timeSinceMsg > 60000) || timeSinceMsg > 180000;
+                              const isIgnored = Boolean(lastMsg.isRead) && ((partnerActive && timeSinceMsg > 60000) || timeSinceMsg > 180000);
 
                               if (isIgnored) {
                                 snippetNode = (
@@ -8449,6 +8620,7 @@ export function App() {
                                   <span className="channel-last-text">
                                     <span style={{ opacity: 0.65 }}>You: </span>
                                     {lastMsg.isVoiceMemo ? '🎙️ Voice memo' : lastMsg.mediaUrl ? '📸 Attachment' : lastMsg.text}
+                                    <span style={{ marginLeft: '5px', color: 'var(--brand-cyan)', fontSize: '11px', fontWeight: 700 }} title="Delivered">✓✓</span>
                                   </span>
                                 );
                               }
@@ -8663,7 +8835,20 @@ export function App() {
                                 className={`notif-entry-item ${notif.isRead ? 'read' : 'unread'}`}
                                 onClick={() => {
                                   markNotificationRead(notif.id);
-                                  if (notif.targetPostId) {
+                                  if (notif.type === 'live') {
+                                    handleSelectFeedTab('live');
+                                  } else if (notif.type === 'story') {
+                                    const sIndex = stories.findIndex((s) => normalizeHandle(s.authorHandle) === cleanActor);
+                                    if (sIndex !== -1) {
+                                      setDmActiveStoryIndex(sIndex);
+                                    } else {
+                                      setViewedUserHandle(cleanActor);
+                                      setActiveTab('profile');
+                                    }
+                                  } else if (notif.type === 'read') {
+                                    setActiveChatUser(getUserProfile(cleanActor));
+                                    setActiveTab('messages');
+                                  } else if (notif.targetPostId) {
                                     setActiveTab('feed');
                                     setFeedFilter('all');
                                     setHighlightPostId(notif.targetPostId);
@@ -8694,6 +8879,9 @@ export function App() {
                                     {notif.type === 'gift' && '🎁'}
                                     {notif.type === 'save' && '🔖'}
                                     {notif.type === 'share' && '🚀'}
+                                    {notif.type === 'live' && '🔴'}
+                                    {notif.type === 'story' && '✨'}
+                                    {notif.type === 'read' && '👁️'}
                                   </span>
                                 </div>
 
@@ -8716,6 +8904,9 @@ export function App() {
                                     {notif.type === 'gift' && `sent you a gift: ${notif.giftName || 'Virtual Gift'}`}
                                     {notif.type === 'save' && 'saved your dispatch to their bookmarks'}
                                     {notif.type === 'share' && 'shared your dispatch'}
+                                    {notif.type === 'live' && 'is currently LIVE broadcasting'}
+                                    {notif.type === 'story' && 'published a new story'}
+                                    {notif.type === 'read' && 'opened and read your message'}
                                   </div>
 
                                   {notif.commentText && (
@@ -8745,6 +8936,57 @@ export function App() {
                                     }}
                                   >
                                     {isFollowingActor ? 'Following' : 'Follow Back'}
+                                  </button>
+                                )}
+
+                                {notif.type === 'live' && (
+                                  <button
+                                    type="button"
+                                    className="notif-action-btn-follow"
+                                    style={{ background: 'rgba(239, 68, 68, 0.2)', borderColor: '#ef4444', color: '#ef4444' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      markNotificationRead(notif.id);
+                                      handleSelectFeedTab('live');
+                                    }}
+                                  >
+                                    Watch Live 🔴
+                                  </button>
+                                )}
+
+                                {notif.type === 'story' && (
+                                  <button
+                                    type="button"
+                                    className="notif-action-btn-follow"
+                                    style={{ background: 'rgba(0, 240, 255, 0.15)', borderColor: 'var(--brand-cyan)', color: 'var(--brand-cyan)' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      markNotificationRead(notif.id);
+                                      const sIndex = stories.findIndex((s) => normalizeHandle(s.authorHandle) === cleanActor);
+                                      if (sIndex !== -1) {
+                                        setDmActiveStoryIndex(sIndex);
+                                      } else {
+                                        setViewedUserHandle(cleanActor);
+                                        setActiveTab('profile');
+                                      }
+                                    }}
+                                  >
+                                    View Story ✨
+                                  </button>
+                                )}
+
+                                {notif.type === 'read' && (
+                                  <button
+                                    type="button"
+                                    className="notif-action-btn-follow"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      markNotificationRead(notif.id);
+                                      setActiveChatUser(getUserProfile(cleanActor));
+                                      setActiveTab('messages');
+                                    }}
+                                  >
+                                    Open Chat 💬
                                   </button>
                                 )}
                               </div>
@@ -9186,7 +9428,7 @@ export function App() {
                               <>
                                 {(() => {
                                   const partnerPresence = getUserPresenceState(cleanRecipientHandle);
-                                  const isIgnored = msg.isRead || ((partnerPresence === 'active' || partnerPresence === 'inactive') && (Date.now() - msg.timestamp > 60000)) || (Date.now() - msg.timestamp > 180000);
+                                  const isIgnored = Boolean(msg.isRead) && (((partnerPresence === 'active' || partnerPresence === 'inactive') && (Date.now() - msg.timestamp > 60000)) || (Date.now() - msg.timestamp > 180000));
                                   if (isIgnored) {
                                     return (
                                       <span className="channel-ignored-status" style={{ fontSize: '10px', padding: '1px 5px' }}>
@@ -9978,6 +10220,7 @@ export function App() {
               >
                 {isVideoMedia(profile.coverUrl) ? (
                   <video
+                    key={profile.coverUrl}
                     src={profile.coverUrl}
                     autoPlay
                     loop
@@ -10079,6 +10322,7 @@ export function App() {
                       >
                         {isVideoMedia(profile.avatar) ? (
                           <video
+                            key={profile.avatar}
                             src={profile.avatar}
                             autoPlay
                             loop
@@ -10861,15 +11105,23 @@ export function App() {
                             type="file"
                             accept="image/*,video/*"
                             style={{ display: 'none' }}
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
+                                const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
                                 if (file.type.startsWith('video')) {
-                                  const reader = new FileReader();
-                                  reader.onload = () => {
-                                    handleAddProfileMedia(reader.result as string, 'video');
-                                  };
-                                  reader.readAsDataURL(file);
+                                  triggerToast('Optimizing video for studio...');
+                                  try {
+                                    const loopUrl = await convertVideoToAnimatedLoop(file, 'studio', cleanH);
+                                    handleAddProfileMedia(loopUrl, 'video');
+                                  } catch (err) {
+                                    console.error('Failed to convert studio video:', err);
+                                    const reader = new FileReader();
+                                    reader.onload = () => {
+                                      handleAddProfileMedia(reader.result as string, 'video');
+                                    };
+                                    reader.readAsDataURL(file);
+                                  }
                                 } else {
                                   compressImageFile(file, 960, 0.8, (dataUrl) => {
                                     handleAddProfileMedia(dataUrl, 'image');

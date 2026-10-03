@@ -5,13 +5,20 @@ import { storeMediaBlob } from './mediaDb';
 
 export async function convertVideoToAnimatedLoop(
   file: File | Blob,
-  mode: 'avatar' | 'banner' = 'avatar'
+  mode: 'avatar' | 'banner' | 'studio' = 'avatar',
+  userHandle?: string
 ): Promise<string> {
   try {
-    const mediaId = `privity_${mode}_loop_${Date.now()}`;
+    const cleanUser = userHandle ? userHandle.replace(/^@/, '').toLowerCase().trim() : '';
+    const mediaId = cleanUser
+      ? `privity_${mode}_${cleanUser}_${Date.now()}`
+      : `privity_${mode}_loop_${Date.now()}`;
     const storedUrl = await storeMediaBlob(mediaId, file);
     try {
       localStorage.setItem(`privity_user_${mode}_media_key`, mediaId);
+      if (cleanUser) {
+        localStorage.setItem(`privity_user_${mode}_media_key_${cleanUser}`, mediaId);
+      }
     } catch {}
     
     // Ensure the returned URL is treated as native video loop by isVideoMedia

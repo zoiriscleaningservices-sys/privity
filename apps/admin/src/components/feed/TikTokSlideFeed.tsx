@@ -70,6 +70,7 @@ export interface PostItem {
   isSaved?: boolean;
   isReposted?: boolean;
   likersList?: string[];
+  saversList?: string[];
   timeAgo: string;
   comments: PostComment[];
 }
@@ -576,7 +577,17 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     }
 
     // For You: Universal Community Visual Feed (images and videos) for all users regardless of follow status
-    const forYouPosts = customUserPosts.filter((p) => p.type !== 'text' && !p.tags?.some((t) => t.toLowerCase().includes('birdie')));
+    // Respects privacy: close_friends dispatches only appear to author or authorized circle members
+    const myClean = (currentUser.handle || '').toLowerCase().replace(/^@/, '');
+    const closeFriendsSet = new Set((closeFriendsList || []).map((h) => (h || '').toLowerCase().replace(/^@/, '')));
+    const forYouPosts = customUserPosts.filter((p) => {
+      if (p.type === 'text' || p.tags?.some((t) => t.toLowerCase().includes('birdie'))) return false;
+      if (p.privacy === 'close_friends') {
+        const authorClean = (p.authorHandle || '').toLowerCase().replace(/^@/, '');
+        return authorClean === myClean || closeFriendsSet.has(authorClean);
+      }
+      return true;
+    });
     return [...forYouPosts, ...mergeOverrides(EXCLUSIVE_FORYOU_POSTS)];
   }, [posts, activeChannel, deletedPostIds, followingMap, closeFriendsList, currentUser?.handle]);
 
@@ -1914,7 +1925,15 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
                   {/* 4. Bookmark / Favorite Button */}
                   {(() => {
-                    const isPostSaved = (savedPostIds && savedPostIds.includes(post.id)) || !!post.isSaved;
+                    const myClean = (currentUser?.handle || '').toLowerCase().replace(/^@/, '');
+                    const isPostSaved = (Array.isArray(post.saversList) && myClean)
+                      ? post.saversList.map((h: string) => (h || '').toLowerCase().replace(/^@/, '')).includes(myClean)
+                      : ((savedPostIds && savedPostIds.includes(post.id)) || !!post.isSaved);
+                    const rawSaves = Array.isArray(post.saversList)
+                      ? post.saversList.length
+                      : (typeof post.savesCount === 'number' && !isNaN(post.savesCount) ? post.savesCount : 0);
+                    const savesDisplay = rawSaves >= 1000 ? `${(rawSaves / 1000).toFixed(1)}k` : rawSaves;
+
                     return (
                       <button
                         type="button"
@@ -1929,7 +1948,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                           </svg>
                         </div>
                         <span className="tiktok-rail-count">
-                          {post.savesCount >= 1000 ? `${(post.savesCount / 1000).toFixed(1)}k` : (post.savesCount || 0)}
+                          {savesDisplay}
                         </span>
                       </button>
                     );
