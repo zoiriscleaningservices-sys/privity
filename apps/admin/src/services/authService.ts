@@ -37,8 +37,8 @@ const STORAGE_SESSION_KEY = 'privity_auth_session_v1';
 const STORAGE_TAB_SESSION_KEY = 'privity_tab_auth_session_v1';
 const STORAGE_ACCOUNTS_KEY = 'privity_accounts_v1';
 
-// Ground Zero Wipe v380: Completely erase all bloated video data, corrupted states, stale messages, activities, and reset cleanly
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v380';
+// Ground Zero Wipe v382: Completely erase all bloated video data, corrupted states, stale messages, activities, and reset cleanly
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v382_pure_zero';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -118,13 +118,13 @@ class AuthService {
     });
 
     // Subscribe to Supabase auth events
-    supabase.auth.onAuthStateChange((event, session) => {
+    supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         const account = mapSupabaseUserToAccount(session.user);
         this.setSession(account);
-      } else if (event === 'SIGNED_OUT') {
-        this.setSession(null);
       }
+      // Note: Never clear session on generic SIGNED_OUT events from unauthenticated Supabase peers.
+      // Explicit logouts only occur when user clicks "Log Out" in Settings via authService.logout().
     });
   }
 
@@ -147,9 +147,10 @@ class AuthService {
 
   private loadSession() {
     try {
-      let raw = sessionStorage.getItem(STORAGE_TAB_SESSION_KEY);
+      // Prioritize persistent localStorage session so refresh NEVER logs the user out
+      let raw = localStorage.getItem(STORAGE_SESSION_KEY);
       if (!raw) {
-        raw = localStorage.getItem(STORAGE_SESSION_KEY);
+        raw = sessionStorage.getItem(STORAGE_TAB_SESSION_KEY);
       }
       if (raw) {
         this.currentUser = JSON.parse(raw);
@@ -178,6 +179,7 @@ class AuthService {
     if (target) {
       this.currentUser = target;
       try {
+        localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(target));
         sessionStorage.setItem(STORAGE_TAB_SESSION_KEY, JSON.stringify(target));
       } catch {}
       this.notify();

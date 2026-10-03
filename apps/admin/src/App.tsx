@@ -137,8 +137,8 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset v381: Clean reset for 100% accurate real-time numbers, zero glitching, pristine fresh state
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v381_real_zero';
+// Guaranteed Absolute Zero Reset v382: Clean reset for 100% accurate real-time numbers, zero glitching, pristine fresh state
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v382_pure_zero';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -2839,6 +2839,16 @@ export function App() {
               ...(account || {}),
             } as any);
           } catch {}
+
+          if (cleanLower === (cleanMyHandle || '').toLowerCase()) {
+            setCurrentAuthUser((prev) => (prev ? {
+              ...prev,
+              name: profile.name || prev.name,
+              avatar: profile.avatar || prev.avatar,
+              coverUrl: profile.coverUrl || prev.coverUrl,
+              bio: profile.bio || prev.bio,
+            } : null));
+          }
 
           // 2. Instantly update all existing dispatches / posts / comments authored by this user
           setPosts((prev) => {
@@ -10126,15 +10136,13 @@ export function App() {
 
         {/* --- VIEW 4: DYNAMIC APPLE VISIONOS PROFILE --- */}
         {activeTab === 'profile' && (() => {
-          const profile = getUserProfile(viewedUserHandle);
-          const isOwnProfile =
-            Boolean(myProfile.handle) &&
-            (profile.handle.toLowerCase() === myProfile.handle.toLowerCase() ||
-             viewedUserHandle.toLowerCase() === myProfile.handle.toLowerCase());
+          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          const viewedClean = normalizeHandle(viewedUserHandle);
+          const isOwnProfile = !viewedClean || viewedClean === myClean;
+          const profile = isOwnProfile ? myProfile : getUserProfile(viewedUserHandle);
           const isFollowingThisUser = isUserFollowed(profile.handle);
           const isInCloseFriends = closeFriendsList.includes(profile.handle);
           const targetClean = normalizeHandle(profile.handle);
-          const myClean = normalizeHandle(myProfile.handle);
 
           const userDispatches = posts.filter(
             (p) =>
@@ -10284,9 +10292,10 @@ export function App() {
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
+                            const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
                             if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
-                              triggerToast('Updating banner...');
-                              const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner');
+                              triggerToast('Updating banner video...');
+                              const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner', cleanH);
                               handleDirectBannerChange(animatedUrl);
                             } else {
                               compressImageFile(file, 1600, 0.86, (dataUrl) => {
@@ -10361,9 +10370,10 @@ export function App() {
                               onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (file) {
+                                  const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
                                   if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
-                                    triggerToast('Updating profile picture...');
-                                    const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar');
+                                    triggerToast('Updating profile video...');
+                                    const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar', cleanH);
                                     handleDirectAvatarChange(animatedUrl);
                                   } else {
                                     compressImageFile(file, 280, 0.65, (dataUrl) => {
@@ -12411,6 +12421,7 @@ export function App() {
                   <label className="edit-profile-label">Cover Banner</label>
                   {isVideoMedia(editForm.coverUrl) ? (
                     <video
+                      key={editForm.coverUrl}
                       src={editForm.coverUrl}
                       autoPlay
                       loop
@@ -12451,11 +12462,12 @@ export function App() {
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
+                            const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
                             if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
-                              triggerToast('Updating banner...');
-                              const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner');
+                              triggerToast('Updating banner video...');
+                              const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner', cleanH);
                               setEditForm((prev) => ({ ...prev, coverUrl: animatedUrl }));
-                              triggerToast('Cover banner updated!');
+                              triggerToast('Cover banner video updated!');
                             } else {
                               compressImageFile(file, 1600, 0.86, (dataUrl) => {
                                 setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
@@ -12498,6 +12510,7 @@ export function App() {
                     {isVideoMedia(editForm.avatar) ? (
                       <div style={{ position: 'relative', width: '68px', height: '68px', flexShrink: 0 }}>
                         <video
+                          key={editForm.avatar}
                           src={editForm.avatar}
                           autoPlay
                           loop
@@ -12541,11 +12554,12 @@ export function App() {
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
+                                const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
                                 if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
-                                  triggerToast('Updating profile picture...');
-                                  const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar');
+                                  triggerToast('Updating profile video...');
+                                  const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar', cleanH);
                                   setEditForm((prev) => ({ ...prev, avatar: animatedUrl }));
-                                  triggerToast('Profile picture updated!');
+                                  triggerToast('Profile video updated!');
                                 } else {
                                   compressImageFile(file, 280, 0.65, (dataUrl) => {
                                     setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
