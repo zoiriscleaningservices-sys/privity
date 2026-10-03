@@ -120,10 +120,13 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset: Wipes legacy cached fake/mock data in localStorage
-if (typeof window !== 'undefined' && localStorage.getItem('privity_absolute_wipe_zero_v105') !== 'done') {
+// Guaranteed Absolute Zero Reset: Wipes legacy cached data & accounts to start completely from zero
+if (typeof window !== 'undefined' && localStorage.getItem('privity_ground_zero_v200') !== 'done') {
   try {
     const keysToRemove = [
+      'privity_accounts_v1',
+      'privity_auth_session_v1',
+      'privity_tab_auth_session_v1',
       'privity_posts_v5',
       'privity_profiles_v5',
       'privity_following_v5',
@@ -133,6 +136,11 @@ if (typeof window !== 'undefined' && localStorage.getItem('privity_absolute_wipe
       'privity_photo_likes_v5',
       'privity_live_streams_v2',
       'privity_ended_streams_v1',
+      'privity_ended_streams_v2',
+      'privity_remote_active_streams',
+      'privity_current_live_host',
+      'privity_is_host_broadcasting',
+      'privity_active_live_session',
       'privity_follow_requests_v5',
       'privity_viewed_handle_v5',
       'privity_zero_reset_v1',
@@ -141,9 +149,11 @@ if (typeof window !== 'undefined' && localStorage.getItem('privity_absolute_wipe
       'privity_zero_reset_v4',
       'privity_feed_posts_cache',
       'privity_explore_streams',
+      'privity_absolute_wipe_zero_v105',
     ];
     keysToRemove.forEach((k) => localStorage.removeItem(k));
-    localStorage.setItem('privity_absolute_wipe_zero_v105', 'done');
+    sessionStorage.clear();
+    localStorage.setItem('privity_ground_zero_v200', 'done');
   } catch (e) {}
 }
 
@@ -1490,6 +1500,74 @@ export function App() {
   myProfileRef.current = myProfile;
 
   // ========================================================
+  // REAL-TIME ONLINE PRESENCE ENGINE
+  // ========================================================
+  const [onlineUsersMap, setOnlineUsersMap] = useState<Record<string, number>>({});
+  const [, setPresenceTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setPresenceTick((p) => p + 1), 10000);
+    return () => clearInterval(t);
+  }, []);
+
+  const isUserOnline = useCallback(
+    (handle?: string | null): boolean => {
+      if (!handle) return false;
+      const clean = normalizeHandle(handle);
+      if (!clean) return false;
+      const myClean = normalizeHandle(currentAuthUser?.handle || myProfile?.handle);
+      if (clean === myClean && myClean.length > 0) return true;
+      const lastSeen = onlineUsersMap[clean];
+      if (!lastSeen) return false;
+      return Date.now() - lastSeen < 35000;
+    },
+    [currentAuthUser?.handle, myProfile?.handle, onlineUsersMap]
+  );
+
+  useEffect(() => {
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile?.handle);
+    if (!myClean) return;
+
+    const sendPresencePing = () => {
+      broadcastSyncEventRef.current({
+        action: 'PRESENCE_PING',
+        handle: myClean,
+        timestamp: Date.now(),
+      });
+    };
+
+    // Immediate presence ping on mount
+    sendPresencePing();
+
+    // Query other online peers
+    broadcastSyncEventRef.current({
+      action: 'PRESENCE_QUERY',
+      handle: myClean,
+    });
+
+    // Periodic heartbeat ping every 12 seconds
+    const interval = setInterval(sendPresencePing, 12000);
+
+    const handleUserActivity = () => sendPresencePing();
+    window.addEventListener('focus', handleUserActivity);
+    window.addEventListener('pointerdown', handleUserActivity);
+
+    const handleUnload = () => {
+      broadcastSyncEventRef.current({
+        action: 'PRESENCE_OFFLINE',
+        handle: myClean,
+      });
+    };
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleUserActivity);
+      window.removeEventListener('pointerdown', handleUserActivity);
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, [currentAuthUser?.handle, myProfile?.handle]);
+
+  // ========================================================
   // REAL-TIME MULTI-DEVICE SYNCHRONIZATION ENGINE
   // ========================================================
   const SYNC_TOPIC = 'privity_sync_global_live';
@@ -1596,7 +1674,52 @@ export function App() {
 
       const cleanMyHandle = (myProfile.handle || '').replace(/^@/, '');
 
+      // Automatically register any active sender into real-time online presence map
+      const senderCandidate = normalizeHandle(
+        event.handle ||
+        event.senderHandle ||
+        event.followerHandle ||
+        event.authorHandle ||
+        event.userHandle ||
+        (event.account && event.account.handle) ||
+        (event.profile && event.profile.handle)
+      );
+      if (senderCandidate) {
+        setOnlineUsersMap((prev) => ({ ...prev, [senderCandidate]: Date.now() }));
+      }
+
       switch (event.action) {
+        case 'PRESENCE_PING': {
+          const clean = normalizeHandle(event.handle);
+          if (clean) {
+            setOnlineUsersMap((prev) => ({ ...prev, [clean]: Date.now() }));
+          }
+          break;
+        }
+
+        case 'PRESENCE_QUERY': {
+          if (cleanMyHandle) {
+            broadcastSyncEventRef.current({
+              action: 'PRESENCE_PING',
+              handle: cleanMyHandle,
+              timestamp: Date.now(),
+            });
+          }
+          break;
+        }
+
+        case 'PRESENCE_OFFLINE': {
+          const clean = normalizeHandle(event.handle);
+          if (clean) {
+            setOnlineUsersMap((prev) => {
+              const next = { ...prev };
+              delete next[clean];
+              return next;
+            });
+          }
+          break;
+        }
+
         case 'LIVESTREAM_GIFT_EVENT': {
           const { giftEvent, gift } = event;
           if (!giftEvent || !gift) return;
@@ -6420,60 +6543,109 @@ export function App() {
               ))}
 
               {/* Your Own Story / Circle Unit */}
-              <div className="circle-unit" onClick={() => setIsCameraOpen(true)} title="Add to your Story">
-                <div className="circle-halo-ring" style={{ position: 'relative' }}>
-                  <img
-                    src={myProfile.avatar}
-                    alt={myProfile.name}
-                    className="circle-user-img"
-                  />
+              {(() => {
+                const myStoryIdx = stories.findIndex((s) => normalizeHandle(s.authorHandle) === normalizeHandle(myProfile.handle));
+                return (
                   <div
-                    style={{
-                      position: 'absolute',
-                      bottom: '-2px',
-                      right: '-2px',
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      background: 'var(--brand)',
-                      color: '#fff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '14px',
-                      fontWeight: 700,
-                      border: '2px solid var(--bg-card)',
+                    className="circle-unit"
+                    onClick={() => {
+                      if (myStoryIdx !== -1) {
+                        setDmActiveStoryIndex(myStoryIdx);
+                      } else {
+                        setIsCameraOpen(true);
+                      }
                     }}
+                    title={myStoryIdx !== -1 ? 'View your Story' : 'Add to your Story'}
                   >
-                    +
-                  </div>
-                </div>
-                <span className="circle-tag-name">Your Story</span>
-              </div>
-
-              {/* Dynamic Followed Creators Circles */}
-              {Object.keys(followingMap)
-                .filter((h) => followingMap[h] && h !== myProfile.handle && !h.startsWith('sc-'))
-                .map((handle) => {
-                  const prof = getUserProfile(handle);
-                  return (
-                    <div
-                      key={handle}
-                      className="circle-unit"
-                      onClick={() => navigateToProfile(handle)}
-                      title={`View ${prof.name}'s Profile`}
-                    >
-                      <div className="circle-halo-ring cf">
-                        <img
-                          src={prof.avatar}
-                          alt={prof.name}
-                          className="circle-user-img"
-                        />
+                    <div className="circle-halo-ring" style={{ position: 'relative', border: myStoryIdx !== -1 ? '2.5px solid #ec4899' : undefined }}>
+                      <img
+                        src={myProfile.avatar}
+                        alt={myProfile.name}
+                        className="circle-user-img"
+                      />
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsCameraOpen(true);
+                        }}
+                        title="Add New Story"
+                        style={{
+                          position: 'absolute',
+                          bottom: '-2px',
+                          right: '-2px',
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          background: 'var(--brand)',
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '14px',
+                          fontWeight: 700,
+                          border: '2px solid var(--bg-card)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        +
                       </div>
-                      <span className="circle-tag-name">{prof.name.split(' ')[0]}</span>
+                    </div>
+                    <span className="circle-tag-name">Your Story</span>
+                  </div>
+                );
+              })()}
+
+              {/* Dynamic Stories from creators & Followed Circles */}
+              {(() => {
+                const rendered = new Set<string>();
+                const elements: React.ReactNode[] = [];
+
+                // Stories from active creators (including followed)
+                stories.forEach((st) => {
+                  const cleanAuth = normalizeHandle(st.authorHandle);
+                  if (!cleanAuth || cleanAuth === normalizeHandle(myProfile.handle) || rendered.has(cleanAuth)) return;
+                  rendered.add(cleanAuth);
+                  const sIdx = stories.findIndex((s) => s.id === st.id);
+                  elements.push(
+                    <div
+                      key={`story-${st.id}`}
+                      className="circle-unit story-unit"
+                      onClick={() => setDmActiveStoryIndex(sIdx)}
+                      title={`Watch @${cleanAuth}'s Story`}
+                    >
+                      <div className="circle-halo-ring active-story" style={{ border: '2.5px solid transparent', background: 'linear-gradient(135deg, #f43f5e 0%, #ec4899 40%, #8b5cf6 100%) border-box', padding: '2px' }}>
+                        <img src={st.authorAvatar} alt={st.authorName} className="circle-user-img" />
+                      </div>
+                      <span className="circle-tag-name" style={{ color: '#fff', fontWeight: 600 }}>{st.authorName.split(' ')[0]}</span>
                     </div>
                   );
-                })}
+                });
+
+                // Followed creators without active stories
+                Object.keys(followingMap)
+                  .filter((h) => followingMap[h] && normalizeHandle(h) !== normalizeHandle(myProfile.handle) && !h.startsWith('sc-'))
+                  .forEach((handle) => {
+                    const cleanH = normalizeHandle(handle);
+                    if (rendered.has(cleanH)) return;
+                    rendered.add(cleanH);
+                    const prof = getUserProfile(handle);
+                    elements.push(
+                      <div
+                        key={`follow-${handle}`}
+                        className="circle-unit"
+                        onClick={() => navigateToProfile(handle)}
+                        title={`View ${prof.name}'s Profile`}
+                      >
+                        <div className="circle-halo-ring cf">
+                          <img src={prof.avatar} alt={prof.name} className="circle-user-img" />
+                        </div>
+                        <span className="circle-tag-name">{prof.name.split(' ')[0]}</span>
+                      </div>
+                    );
+                  });
+
+                return elements;
+              })()}
 
               <div className="circle-unit" onClick={() => setIsCameraOpen(true)}>
                 <div className="circle-halo-ring add-circle">
@@ -7357,17 +7529,24 @@ export function App() {
 
         {/* --- VIEW 3: SPATIAL DIRECT MESSAGING SUITE (VISIONOS SUITE) --- */}
         {activeTab === 'messages' && (() => {
-          // 1. Gather all conversation partner handles
+          // 1. Gather all conversation partner handles & registered users
+          const existingDmHandles = Object.keys(directMessages).map((h) => h.replace(/^@/, ''));
+          const allRegisteredProfiles = Object.keys(profiles).map((h) => h.replace(/^@/, ''));
+          const allRegisteredAccounts = Object.values(authService.getAllAccounts()).map((a) => a.handle.replace(/^@/, ''));
+          const myClean = (myProfile.handle || '').replace(/^@/, '').toLowerCase();
+
           const allPartnerHandles = Array.from(
             new Set([
-              ...Object.keys(directMessages),
+              ...existingDmHandles,
+              ...allRegisteredProfiles,
+              ...allRegisteredAccounts,
             ])
-          ).filter((h) => h !== myProfile.handle && !h.startsWith('sc-'));
+          ).filter((h) => h && h.toLowerCase() !== myClean && !h.startsWith('sc-') && !isMockHandle(h));
 
           // 2. Filter channels based on search and active channel filter
           const filteredChannels = allPartnerHandles.filter((handle) => {
             const user = getUserProfile(handle);
-            const thread = directMessages[handle] || [];
+            const thread = directMessages[handle] || directMessages[handle.toLowerCase()] || [];
             const lastMsg = thread[thread.length - 1];
 
             // Tab filter
@@ -7378,13 +7557,14 @@ export function App() {
               return false;
             }
 
-            // Search query
+            // Search query (search handle, name, bio, or message content)
             if (!chatSearchQuery.trim()) return true;
-            const q = chatSearchQuery.toLowerCase();
-            const matchesName = user.name.toLowerCase().includes(q);
-            const matchesHandle = user.handle.toLowerCase().includes(q);
-            const matchesLastMsg = lastMsg && lastMsg.text.toLowerCase().includes(q);
-            return matchesName || matchesHandle || matchesLastMsg;
+            const q = chatSearchQuery.toLowerCase().trim().replace(/^@/, '');
+            const matchesName = (user.name || '').toLowerCase().includes(q);
+            const matchesHandle = (user.handle || '').toLowerCase().includes(q);
+            const matchesBio = (user.bio || '').toLowerCase().includes(q);
+            const matchesLastMsg = lastMsg && (lastMsg.text || '').toLowerCase().includes(q);
+            return matchesName || matchesHandle || matchesBio || matchesLastMsg;
           });
 
           // Active chat partner resolution
@@ -7716,7 +7896,7 @@ export function App() {
                                   className="channel-avatar-img"
                                   style={{ borderColor: isCF ? 'var(--cf-emerald)' : undefined }}
                                 />
-                                <span className="online-presence-dot" />
+                                <span className={`online-presence-dot ${isUserOnline(user.handle) ? 'online' : 'offline'}`} title={isUserOnline(user.handle) ? 'Active now' : 'Offline'} />
                               </div>
                               <div className="channel-info-col">
                                 <div className="channel-name-row">
@@ -7725,7 +7905,11 @@ export function App() {
                                     {user.isVerified && <VerifiedBadge authorName={user.name} category={user.verifiedCategory} />}
                                   </span>
                                   <span className="channel-timestamp">
-                                    {lastMsg ? lastMsg.timeAgo : 'Active'}
+                                    {isUserOnline(user.handle) ? (
+                                      <span className="channel-online-text">Active now</span>
+                                    ) : (
+                                      lastMsg ? lastMsg.timeAgo : 'Offline'
+                                    )}
                                   </span>
                                 </div>
                                 <div className="channel-snippet-row">
@@ -7989,7 +8173,7 @@ export function App() {
                           className="messages-thread-avatar"
                           style={{ borderColor: isPartnerInCloseFriends ? 'var(--cf-emerald)' : undefined }}
                         />
-                        <span className="online-presence-dot" />
+                        <span className={`online-presence-dot ${isUserOnline(cleanRecipientHandle) ? 'online' : 'offline'}`} />
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <div className="messages-thread-name">
@@ -8023,11 +8207,13 @@ export function App() {
                         )}
                       </div>
                       <div className="messages-thread-status">
-                        <span className="status-indicator-dot" />
+                        <span className={`status-indicator-dot ${isUserOnline(cleanRecipientHandle) ? 'active' : 'idle'}`} />
                         <span>
                           {isRecipientTyping
                             ? `@${cleanRecipientHandle} is typing in real time...`
-                            : `End-to-End Encrypted · Ed25519 Verified · Real-Time`}
+                            : isUserOnline(cleanRecipientHandle)
+                            ? 'Active now · Real-Time'
+                            : 'Offline · End-to-End Encrypted'}
                         </span>
                       </div>
                     </div>
@@ -8496,170 +8682,7 @@ export function App() {
               )}
               </div>
             
-              {/* Fullscreen Story Viewer from DM Rail (Slide Down to Dismiss) */}
-              {dmActiveStoryIndex !== null && (() => {
-                const curStory = stories[dmActiveStoryIndex];
-                if (!curStory) return null;
-
-                return (
-                  <div
-                    className="story-viewer-backdrop"
-                    style={{
-                      position: 'fixed',
-                      inset: 0,
-                      zIndex: 10000,
-                      backgroundColor: dmStoryDragY > 0 ? `rgba(0, 0, 0, ${Math.max(0, 1 - dmStoryDragY / 260)})` : '#000',
-                    }}
-                    onClick={() => {
-                      setDmActiveStoryIndex(null);
-                      setDmStoryDragY(0);
-                    }}
-                  >
-                    <div
-                      className="story-viewer-modal"
-                      onClick={(e) => e.stopPropagation()}
-                      onTouchStart={(e) => {
-                        (window as any).__dmStoryTouchStartY = e.touches[0].clientY;
-                        (window as any).__dmStoryTouchStartX = e.touches[0].clientX;
-                      }}
-                      onTouchMove={(e) => {
-                        const dy = e.touches[0].clientY - ((window as any).__dmStoryTouchStartY || 0);
-                        const dx = e.touches[0].clientX - ((window as any).__dmStoryTouchStartX || 0);
-                        if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
-                          setDmStoryDragY(dy);
-                        }
-                      }}
-                      onTouchEnd={() => {
-                        if (dmStoryDragY > 70) {
-                          setDmActiveStoryIndex(null);
-                          setDmStoryDragY(0);
-                        } else {
-                          setDmStoryDragY(0);
-                        }
-                      }}
-                      onMouseDown={(e) => {
-                        (window as any).__dmStoryMouseStartY = e.clientY;
-                        (window as any).__dmStoryMouseStartX = e.clientX;
-                        (window as any).__dmStoryMouseDown = true;
-                      }}
-                      onMouseMove={(e) => {
-                        if (!(window as any).__dmStoryMouseDown) return;
-                        const dy = e.clientY - ((window as any).__dmStoryMouseStartY || 0);
-                        const dx = e.clientX - ((window as any).__dmStoryMouseStartX || 0);
-                        if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
-                          setDmStoryDragY(dy);
-                        }
-                      }}
-                      onMouseUp={() => {
-                        (window as any).__dmStoryMouseDown = false;
-                        if (dmStoryDragY > 70) {
-                          setDmActiveStoryIndex(null);
-                          setDmStoryDragY(0);
-                        } else {
-                          setDmStoryDragY(0);
-                        }
-                      }}
-                      style={{
-                        transform: dmStoryDragY > 0 ? `translateY(${dmStoryDragY}px) scale(${Math.max(0.75, 1 - dmStoryDragY / 900)})` : undefined,
-                        opacity: dmStoryDragY > 0 ? Math.max(0.2, 1 - dmStoryDragY / 450) : 1,
-                        borderRadius: dmStoryDragY > 0 ? `${Math.min(32, dmStoryDragY / 3)}px` : undefined,
-                      }}
-                    >
-                      <div className="story-viewer-drag-bar" title="Slide down to close story" />
-
-                      <div className="story-viewer-header" style={{ position: 'absolute', top: '24px', left: '14px', right: '14px', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div
-                          className="story-viewer-author"
-                          style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}
-                          onClick={() => {
-                            setDmActiveStoryIndex(null);
-                            navigateToProfile(curStory.authorHandle);
-                          }}
-                        >
-                          <img src={curStory.authorAvatar} alt={curStory.authorName} className="story-viewer-avatar" style={{ width: '38px', height: '38px', borderRadius: '50%', border: '1.5px solid #fff' }} />
-                          <div>
-                            <div style={{ color: '#fff', fontWeight: 700, fontSize: '14px' }}>{curStory.authorName}</div>
-                            <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '11px' }}>@{curStory.authorHandle} · {curStory.timeAgo}</div>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          className="story-viewer-close"
-                          onClick={() => {
-                            setDmActiveStoryIndex(null);
-                            setDmStoryDragY(0);
-                          }}
-                          style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '50%', width: '32px', height: '32px', color: '#fff', cursor: 'pointer' }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-
-                      <div className="story-viewer-media-wrap" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-                        {curStory.mediaType === 'video' ? (
-                          <video src={curStory.mediaUrl} autoPlay loop playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <img src={curStory.mediaUrl} alt={curStory.caption || 'Story'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        )}
-                        {curStory.caption && (
-                          <div className="story-viewer-caption-box">
-                            <p>{curStory.caption}</p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Reply & Quick Reactions */}
-                      <div className="story-viewer-bottom-bar" onClick={(e) => e.stopPropagation()}>
-                        <div className="story-quick-reactions">
-                          {['❤️', '🔥', '👏', '😂'].map((emoji, eIdx) => (
-                            <button
-                              key={eIdx}
-                              type="button"
-                              className="story-reaction-emoji-btn"
-                              onClick={() => {
-                                handleStoryReplyToDM(curStory.authorHandle, `Reacted ${emoji} to your story`);
-                                setDmActiveStoryIndex(null);
-                              }}
-                            >
-                              {emoji}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="story-reply-input-wrap">
-                          <input
-                            type="text"
-                            placeholder={`Reply to @${curStory.authorHandle}...`}
-                            value={dmStoryReplyText}
-                            onChange={(e) => setDmStoryReplyText(e.target.value)}
-                            className="story-reply-input"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && dmStoryReplyText.trim()) {
-                                handleStoryReplyToDM(curStory.authorHandle, `Replied to your story: "${dmStoryReplyText.trim()}"`);
-                                setDmStoryReplyText('');
-                                setDmActiveStoryIndex(null);
-                              }
-                            }}
-                          />
-                          <button
-                            type="button"
-                            disabled={!dmStoryReplyText.trim()}
-                            className="story-reply-send-btn"
-                            onClick={() => {
-                              if (!dmStoryReplyText.trim()) return;
-                              handleStoryReplyToDM(curStory.authorHandle, `Replied to your story: "${dmStoryReplyText.trim()}"`);
-                              setDmStoryReplyText('');
-                              setDmActiveStoryIndex(null);
-                            }}
-                          >
-                            Send
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
+              {/* Fullscreen Story Viewer is hosted globally at universal root layer */}
 
               {/* Apple-style Direct Message & Group Creation Modal */}
               {isCreateGroupOpen && (
@@ -9265,35 +9288,59 @@ export function App() {
               {/* Profile Card Info */}
               <div className="profile-header-card">
                 <div className="profile-hero-row">
-                  <div style={{ position: 'relative', flexShrink: 0 }}>
-                    <img
-                      src={profile.avatar}
-                      alt={profile.name}
-                      className="profile-avatar-squircle"
-                    />
-                    {isOwnProfile && (
-                      <label
-                        className="btn-glass-avatar-edit"
-                        title="Change Profile Photo"
-                        style={{ cursor: 'pointer' }}
+                  {(() => {
+                    const userStoryIndex = stories.findIndex(
+                      (st) => normalizeHandle(st.authorHandle) === normalizeHandle(profile.handle)
+                    );
+                    const hasActiveStory = userStoryIndex !== -1;
+
+                    return (
+                      <div
+                        style={{ position: 'relative', flexShrink: 0, cursor: hasActiveStory ? 'pointer' : 'default' }}
+                        onClick={() => {
+                          if (hasActiveStory) {
+                            setDmActiveStoryIndex(userStoryIndex);
+                          }
+                        }}
+                        title={hasActiveStory ? `Tap to view @${profile.handle}'s story` : profile.name}
                       >
-                        <IconPhoto size={13} />
-                        <input
-                          type="file"
-                          accept="image/*"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              compressImageFile(file, 360, 0.8, (dataUrl) => {
-                                handleDirectAvatarChange(dataUrl);
-                              });
-                            }
-                          }}
+                        <img
+                          src={profile.avatar}
+                          alt={profile.name}
+                          className={`profile-avatar-squircle ${hasActiveStory ? 'has-active-story-ring' : ''}`}
                         />
-                      </label>
-                    )}
-                  </div>
+                        {hasActiveStory && (
+                          <div className="profile-story-badge" title="Active Story">
+                            <span className="profile-story-badge-pulse" />
+                            <span>STORY</span>
+                          </div>
+                        )}
+                        {isOwnProfile && (
+                          <label
+                            className="btn-glass-avatar-edit"
+                            title="Change Profile Photo"
+                            style={{ cursor: 'pointer' }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <IconPhoto size={13} />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  compressImageFile(file, 360, 0.8, (dataUrl) => {
+                                    handleDirectAvatarChange(dataUrl);
+                                  });
+                                }
+                              }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Specular VisionOS Stats Shelf right next to profile picture */}
                   {(() => {
@@ -9398,7 +9445,20 @@ export function App() {
                       />
                     )}
                   </div>
-                  <div className="profile-handle-sub">@{profile.handle} • {profile.category || 'Creator'}</div>
+                  <div className="profile-handle-sub" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <span>@{profile.handle} • {profile.category || 'Creator'}</span>
+                    {isUserOnline(profile.handle) ? (
+                      <span className="profile-online-badge">
+                        <span className="status-indicator-dot active" />
+                        <span>Active now</span>
+                      </span>
+                    ) : (
+                      <span className="profile-online-badge offline">
+                        <span className="status-indicator-dot idle" />
+                        <span>Offline</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <p className="profile-bio-text">{profile.bio}</p>
@@ -12777,6 +12837,171 @@ export function App() {
           });
         }}
       />
+
+      {/* Universal Fullscreen Story Viewer (Accessible from Profile, Feed, Messages & Birdie) */}
+      {dmActiveStoryIndex !== null && (() => {
+        const curStory = stories[dmActiveStoryIndex];
+        if (!curStory) return null;
+
+        return (
+          <div
+            className="story-viewer-backdrop"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 10000,
+              backgroundColor: dmStoryDragY > 0 ? `rgba(0, 0, 0, ${Math.max(0, 1 - dmStoryDragY / 260)})` : '#000',
+            }}
+            onClick={() => {
+              setDmActiveStoryIndex(null);
+              setDmStoryDragY(0);
+            }}
+          >
+            <div
+              className="story-viewer-modal"
+              onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => {
+                (window as any).__dmStoryTouchStartY = e.touches[0].clientY;
+                (window as any).__dmStoryTouchStartX = e.touches[0].clientX;
+              }}
+              onTouchMove={(e) => {
+                const dy = e.touches[0].clientY - ((window as any).__dmStoryTouchStartY || 0);
+                const dx = e.touches[0].clientX - ((window as any).__dmStoryTouchStartX || 0);
+                if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+                  setDmStoryDragY(dy);
+                }
+              }}
+              onTouchEnd={() => {
+                if (dmStoryDragY > 70) {
+                  setDmActiveStoryIndex(null);
+                  setDmStoryDragY(0);
+                } else {
+                  setDmStoryDragY(0);
+                }
+              }}
+              onMouseDown={(e) => {
+                (window as any).__dmStoryMouseStartY = e.clientY;
+                (window as any).__dmStoryMouseStartX = e.clientX;
+                (window as any).__dmStoryMouseDown = true;
+              }}
+              onMouseMove={(e) => {
+                if (!(window as any).__dmStoryMouseDown) return;
+                const dy = e.clientY - ((window as any).__dmStoryMouseStartY || 0);
+                const dx = e.clientX - ((window as any).__dmStoryMouseStartX || 0);
+                if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+                  setDmStoryDragY(dy);
+                }
+              }}
+              onMouseUp={() => {
+                (window as any).__dmStoryMouseDown = false;
+                if (dmStoryDragY > 70) {
+                  setDmActiveStoryIndex(null);
+                  setDmStoryDragY(0);
+                } else {
+                  setDmStoryDragY(0);
+                }
+              }}
+              style={{
+                transform: dmStoryDragY > 0 ? `translateY(${dmStoryDragY}px) scale(${Math.max(0.75, 1 - dmStoryDragY / 900)})` : undefined,
+                opacity: dmStoryDragY > 0 ? Math.max(0.2, 1 - dmStoryDragY / 450) : 1,
+                borderRadius: dmStoryDragY > 0 ? `${Math.min(32, dmStoryDragY / 3)}px` : undefined,
+              }}
+            >
+              <div className="story-viewer-drag-bar" title="Slide down to close story" />
+
+              <div className="story-viewer-header" style={{ position: 'absolute', top: '24px', left: '14px', right: '14px', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div
+                  className="story-viewer-author"
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}
+                  onClick={() => {
+                    setDmActiveStoryIndex(null);
+                    navigateToProfile(curStory.authorHandle);
+                  }}
+                >
+                  <img src={curStory.authorAvatar} alt={curStory.authorName} className="story-viewer-avatar" style={{ width: '38px', height: '38px', borderRadius: '50%', border: '1.5px solid #fff' }} />
+                  <div>
+                    <div style={{ color: '#fff', fontWeight: 700, fontSize: '14px' }}>{curStory.authorName}</div>
+                    <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '11px' }}>@{curStory.authorHandle} · {curStory.timeAgo}</div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="story-viewer-close"
+                  onClick={() => {
+                    setDmActiveStoryIndex(null);
+                    setDmStoryDragY(0);
+                  }}
+                  style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '50%', width: '32px', height: '32px', color: '#fff', cursor: 'pointer' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="story-viewer-media-wrap" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+                {curStory.mediaType === 'video' ? (
+                  <video src={curStory.mediaUrl} autoPlay loop playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <img src={curStory.mediaUrl} alt={curStory.caption || 'Story'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+                {curStory.caption && (
+                  <div className="story-viewer-caption-box">
+                    <p>{curStory.caption}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Reply & Quick Reactions */}
+              <div className="story-viewer-bottom-bar" onClick={(e) => e.stopPropagation()}>
+                <div className="story-quick-reactions">
+                  {['❤️', '🔥', '👏', '😂'].map((emoji, eIdx) => (
+                    <button
+                      key={eIdx}
+                      type="button"
+                      className="story-reaction-emoji-btn"
+                      onClick={() => {
+                        handleStoryReplyToDM(curStory.authorHandle, `Reacted ${emoji} to your story`);
+                        setDmActiveStoryIndex(null);
+                      }}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+                <div className="story-reply-input-wrap">
+                  <input
+                    type="text"
+                    placeholder={`Reply to @${curStory.authorHandle}...`}
+                    value={dmStoryReplyText}
+                    onChange={(e) => setDmStoryReplyText(e.target.value)}
+                    className="story-reply-input"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && dmStoryReplyText.trim()) {
+                        handleStoryReplyToDM(curStory.authorHandle, `Replied to your story: "${dmStoryReplyText.trim()}"`);
+                        setDmStoryReplyText('');
+                        setDmActiveStoryIndex(null);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!dmStoryReplyText.trim()}
+                    className="story-reply-send-btn"
+                    onClick={() => {
+                      if (!dmStoryReplyText.trim()) return;
+                      handleStoryReplyToDM(curStory.authorHandle, `Replied to your story: "${dmStoryReplyText.trim()}"`);
+                      setDmStoryReplyText('');
+                      setDmActiveStoryIndex(null);
+                    }}
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

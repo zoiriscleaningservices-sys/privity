@@ -37,6 +37,15 @@ const STORAGE_SESSION_KEY = 'privity_auth_session_v1';
 const STORAGE_TAB_SESSION_KEY = 'privity_tab_auth_session_v1';
 const STORAGE_ACCOUNTS_KEY = 'privity_accounts_v1';
 
+// Ground Zero Wipe: Clear legacy accounts & sessions to start from absolute zero
+if (typeof window !== 'undefined' && localStorage.getItem('privity_ground_zero_v200') !== 'done') {
+  try {
+    localStorage.removeItem(STORAGE_ACCOUNTS_KEY);
+    localStorage.removeItem(STORAGE_SESSION_KEY);
+    sessionStorage.removeItem(STORAGE_TAB_SESSION_KEY);
+  } catch {}
+}
+
 export function mapSupabaseUserToAccount(sbUser: any): UserAccount {
   const meta = sbUser.user_metadata || {};
   const email = (sbUser.email || '').toLowerCase().trim();

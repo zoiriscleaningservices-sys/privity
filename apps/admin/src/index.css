@@ -9673,4 +9673,104 @@ textarea::placeholder {
   transform: scale(0.97);
 }
 
+/* ========================================================
+   REAL-TIME ONLINE PRESENCE & STORY VISUAL ENHANCEMENTS
+   ======================================================== */
+
+.profile-avatar-squircle.has-active-story-ring {
+  border: 3px solid transparent !important;
+  background-origin: border-box !important;
+  background-clip: content-box, border-box !important;
+  background-image: linear-gradient(#0b0f19, #0b0f19), linear-gradient(135deg, #f43f5e 0%, #ec4899 40%, #8b5cf6 70%, #3b82f6 100%) !important;
+  box-shadow: 0 0 20px rgba(244, 63, 94, 0.45), 0 8px 30px rgba(0, 0, 0, 0.6) !important;
+  cursor: pointer !important;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease !important;
+}
+
+.profile-avatar-squircle.has-active-story-ring:hover {
+  transform: scale(1.05) !important;
+  box-shadow: 0 0 28px rgba(244, 63, 94, 0.65), 0 10px 36px rgba(0, 0, 0, 0.7) !important;
+}
+
+.profile-story-badge {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #f43f5e, #8b5cf6);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.profile-story-badge-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+  animation: pulseStoryBadge 1.5s infinite;
+}
+
+@keyframes pulseStoryBadge {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.9); opacity: 0.7; }
+}
+
+.online-presence-dot.online {
+  background: #10b981 !important;
+  box-shadow: 0 0 8px #10b981 !important;
+}
+
+.online-presence-dot.offline {
+  background: #64748b !important;
+  box-shadow: none !important;
+  opacity: 0.45 !important;
+}
+
+.status-indicator-dot.active {
+  background: #10b981 !important;
+  box-shadow: 0 0 7px #10b981 !important;
+}
+
+.status-indicator-dot.idle {
+  background: #64748b !important;
+  box-shadow: none !important;
+  opacity: 0.5 !important;
+}
+
+.profile-online-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #10b981;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.profile-online-badge.offline {
+  background: rgba(100, 116, 139, 0.15);
+  border-color: rgba(100, 116, 139, 0.3);
+  color: #94a3b8;
+}
+
+.channel-online-text {
+  color: #10b981;
+  font-weight: 700;
+  font-size: 11px;
+}
+
 
