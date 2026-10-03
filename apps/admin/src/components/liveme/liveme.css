@@ -2676,9 +2676,7 @@
   position: absolute;
   inset: 0;
   z-index: 100;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -4146,5 +4144,1513 @@
   padding: 6px 0;
   pointer-events: none;
 }
+
+/* ========================================================================= */
+/* 7. FLY-IN VIEWER JOIN BANNER (FLIES IN FROM LEFT TO RIGHT, STOPS, JOINED)  */
+/* ========================================================================= */
+.liveme-join-flyin-container {
+  position: absolute;
+  left: 14px;
+  bottom: 240px;
+  z-index: 55;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liveme-join-flyin-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px 8px 8px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.88) 0%, rgba(30, 27, 75, 0.85) 50%, rgba(236, 72, 153, 0.45) 100%);
+  border: 1.5px solid rgba(244, 114, 182, 0.55);
+  border-radius: 9999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 16px rgba(236, 72, 153, 0.35);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: auto;
+  cursor: pointer;
+  animation: livemeFlyInLeft 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  max-width: 320px;
+}
+
+@keyframes livemeFlyInLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-120%) scale(0.9);
+  }
+  70% {
+    opacity: 1;
+    transform: translateX(10px) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.liveme-join-flyin-card.exiting {
+  animation: livemeFlyOutLeft 0.4s ease forwards;
+}
+
+@keyframes livemeFlyOutLeft {
+  0% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-100%) scale(0.9);
+  }
+}
+
+.liveme-join-flyin-avatar-box {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+}
+
+.liveme-join-flyin-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #ec4899;
+}
+
+.liveme-join-flyin-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background: linear-gradient(135deg, #ec4899, #f43f5e);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  line-height: 1;
+}
+
+.liveme-join-flyin-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.liveme-join-flyin-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.liveme-join-flyin-name {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.liveme-join-flyin-star {
+  font-size: 10px;
+  color: #fbbf24;
+}
+
+.liveme-join-flyin-action {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.liveme-join-flyin-wave {
+  font-size: 14px;
+  animation: livemeWaveHand 1.2s infinite ease-in-out;
+  transform-origin: 70% 70%;
+}
+
+@keyframes livemeWaveHand {
+  0%, 100% { transform: rotate(0deg); }
+  20%, 60% { transform: rotate(14deg); }
+  40%, 80% { transform: rotate(-14deg); }
+}
+
+/* ========================================================================= */
+/* 8. THREE UNIQUE AI-GENERATED HOST ACTION BUBBLES IN BOTTOM BAR            */
+/* ========================================================================= */
+.liveme-host-bubbles-dock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.liveme-host-bubble-btn {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.liveme-host-bubble-btn:hover {
+  transform: translateY(-2px) scale(1.08);
+}
+
+.liveme-host-bubble-btn:active {
+  transform: scale(0.94);
+}
+
+.liveme-host-bubble-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.liveme-host-bubble-btn.battle {
+  filter: drop-shadow(0 0 10px rgba(236, 72, 153, 0.75));
+}
+
+.liveme-host-bubble-btn.battle.active {
+  animation: liveme-match-pulse 1.2s infinite alternate ease-in-out;
+}
+
+.liveme-host-bubble-btn.beauty {
+  filter: drop-shadow(0 0 10px rgba(244, 114, 182, 0.75));
+}
+
+.liveme-host-bubble-btn.studio {
+  filter: drop-shadow(0 0 10px rgba(6, 182, 212, 0.75));
+}
+
+.liveme-host-bubble-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #0f172a;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.liveme-host-bubble-vu-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid #06b6d4;
+  opacity: 0.8;
+  animation: livemeVuPulse 0.8s infinite ease;
+}
+
+@keyframes livemeVuPulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+/* ========================================================================= */
+/* 9. BEAUTY & STUDIO ENHANCEMENTS MODAL                                      */
+/* ========================================================================= */
+.liveme-enhancements-backdrop,
+.liveme-studio-modal-backdrop,
+.liveme-goal-modal-backdrop,
+.liveme-leaderboard-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: livemeFadeIn 0.2s ease;
+}
+
+.liveme-enhancements-sheet,
+.liveme-studio-modal-sheet,
+.liveme-goal-modal-sheet,
+.liveme-leaderboard-sheet {
+  width: 100%;
+  max-width: 480px;
+  background: #111420;
+  border-top: 1.5px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24px 24px 0 0;
+  padding: 18px 18px max(24px, env(safe-area-inset-bottom, 24px));
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 82vh;
+  overflow-y: auto;
+  animation: livemeSlideUp 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.liveme-enhancements-header,
+.liveme-studio-modal-header,
+.liveme-goal-modal-header,
+.liveme-leaderboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.liveme-enhancements-title-box,
+.liveme-studio-header-title,
+.liveme-goal-title-group,
+.liveme-leaderboard-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.liveme-enhancements-sparkle,
+.liveme-studio-header-icon,
+.liveme-goal-icon,
+.liveme-leaderboard-title-group .icon {
+  font-size: 26px;
+}
+
+.liveme-enhancements-title,
+.liveme-studio-header-title h3,
+.liveme-goal-title-group h3,
+.liveme-leaderboard-title-group h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.liveme-enhancements-sub,
+.liveme-studio-header-title p,
+.liveme-goal-title-group p,
+.liveme-leaderboard-title-group p {
+  margin: 2px 0 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.liveme-enhancements-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.liveme-enhancements-reset-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  color: #f472b6;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.liveme-enhancements-reset-btn:hover {
+  background: rgba(244, 114, 182, 0.15);
+}
+
+.liveme-enhancements-close-btn,
+.liveme-studio-close-btn,
+.liveme-goal-close-btn,
+.liveme-leaderboard-close {
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: #fff;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Enhancements Tabs */
+.liveme-enhancements-tabs {
+  display: flex;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 4px;
+  border-radius: 12px;
+  gap: 4px;
+}
+
+.liveme-enhancements-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.liveme-enhancements-tab.active {
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.35), rgba(168, 85, 247, 0.35));
+  border: 1px solid rgba(244, 114, 182, 0.5);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.liveme-enhancements-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 6px 0;
+}
+
+.liveme-enhancements-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liveme-slider-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.liveme-slider-value {
+  color: #f472b6;
+  font-weight: 800;
+  font-family: monospace;
+}
+
+.liveme-slider-row {
+  width: 100%;
+}
+
+.liveme-beauty-range {
+  width: 100%;
+  accent-color: #ec4899;
+  cursor: pointer;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.liveme-tone-chips {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.liveme-tone-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.liveme-tone-chip.active {
+  border-color: #ec4899;
+  background: rgba(236, 72, 153, 0.2);
+}
+
+.liveme-tone-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* Filters Grid */
+.liveme-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.liveme-filter-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.liveme-filter-thumb-wrap {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.liveme-filter-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.liveme-filter-card.active .liveme-filter-thumb-wrap {
+  border-color: #ec4899;
+  box-shadow: 0 0 14px rgba(236, 72, 153, 0.6);
+  transform: scale(1.05);
+}
+
+.liveme-filter-check {
+  position: absolute;
+  inset: 0;
+  background: rgba(236, 72, 153, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 18px;
+}
+
+.liveme-filter-name {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Lighting Chips */
+.liveme-lighting-chips {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.liveme-lighting-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.liveme-lighting-card.active {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.16);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+}
+
+.liveme-lighting-icon {
+  font-size: 20px;
+}
+
+.liveme-lighting-title {
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.liveme-lighting-active-badge {
+  font-size: 9px;
+  color: #38bdf8;
+  font-weight: 800;
+  background: rgba(56, 189, 248, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.liveme-enhancements-done-btn,
+.liveme-studio-done-btn,
+.liveme-goal-save-btn {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%);
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(236, 72, 153, 0.4);
+  transition: transform 0.15s ease;
+}
+
+.liveme-enhancements-done-btn:active,
+.liveme-studio-done-btn:active,
+.liveme-goal-save-btn:active {
+  transform: scale(0.98);
+}
+
+/* ========================================================================= */
+/* 10. STUDIO CONTROLS MODAL & DUAL CAMERA                                    */
+/* ========================================================================= */
+.liveme-studio-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.liveme-studio-card-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.liveme-studio-card-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.liveme-studio-card-btn.active {
+  background: rgba(6, 182, 212, 0.15);
+  border-color: #06b6d4;
+}
+
+.liveme-studio-card-btn.danger {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.liveme-studio-card-icon {
+  font-size: 22px;
+}
+
+.liveme-studio-card-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.liveme-studio-card-text .title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.liveme-studio-card-text .sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.liveme-studio-card-pill {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.liveme-studio-card-pill.on {
+  background: #06b6d4;
+  color: #000;
+}
+
+.liveme-studio-card-pill.off {
+  background: #ef4444;
+  color: #fff;
+}
+
+/* Audio VU Meter */
+.liveme-studio-vu-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.liveme-studio-vu-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.liveme-studio-vu-db {
+  color: #06b6d4;
+  font-family: monospace;
+  font-weight: 800;
+}
+
+.liveme-studio-vu-bar-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.liveme-studio-vu-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #38bdf8 70%, #ef4444 100%);
+  transition: width 0.08s ease;
+}
+
+.liveme-studio-vu-bar-fill.muted {
+  background: #ef4444;
+}
+
+/* Dual Camera Section */
+.liveme-studio-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.liveme-studio-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.liveme-studio-section-title .left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.liveme-studio-section-title .icon {
+  font-size: 22px;
+}
+
+.liveme-studio-section-title h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.liveme-studio-section-title p {
+  margin: 2px 0 0 0;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.liveme-studio-toggle-switch {
+  width: 44px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s ease;
+  padding: 0;
+}
+
+.liveme-studio-toggle-switch .thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+}
+
+.liveme-studio-toggle-switch.active {
+  background: #06b6d4;
+}
+
+.liveme-studio-toggle-switch.active .thumb {
+  transform: translateX(20px);
+}
+
+.liveme-dual-camera-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.liveme-dual-layout-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.liveme-dual-layout-picker .label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.liveme-dual-pos-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.liveme-dual-pos-btn.active {
+  background: rgba(6, 182, 212, 0.25);
+  border-color: #06b6d4;
+  color: #38bdf8;
+}
+
+.liveme-dual-swap-btn {
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.liveme-dual-swap-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Extra row actions */
+.liveme-studio-row-extras {
+  display: flex;
+  gap: 10px;
+}
+
+.liveme-studio-pill-action {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.liveme-studio-pill-action.active {
+  border-color: #06b6d4;
+  background: rgba(6, 182, 212, 0.15);
+}
+
+.liveme-studio-pill-action .indicator {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 800;
+  color: #06b6d4;
+}
+
+.liveme-studio-pill-action .mod-count {
+  margin-left: auto;
+  background: #ef4444;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
+/* Dual Camera Live Video PIP on Screen */
+.liveme-dual-pip-box {
+  position: absolute;
+  z-index: 40;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  background: #0f172a;
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.liveme-dual-pip-box.top-right {
+  top: 110px;
+  right: 14px;
+  width: 120px;
+  height: 180px;
+}
+
+.liveme-dual-pip-box.top-left {
+  top: 110px;
+  left: 14px;
+  width: 120px;
+  height: 180px;
+}
+
+.liveme-dual-pip-box.bottom-right {
+  bottom: 220px;
+  right: 14px;
+  width: 120px;
+  height: 180px;
+}
+
+.liveme-dual-pip-box.split {
+  top: 0;
+  right: 0;
+  width: 50%;
+  height: 100%;
+  border-radius: 0;
+  border-left: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.liveme-dual-pip-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.liveme-dual-pip-label {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* ========================================================================= */
+/* 11. STREAM GIFT GOAL MODAL                                                */
+/* ========================================================================= */
+.liveme-goal-preview-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.2), rgba(168, 85, 247, 0.2));
+  border: 1px solid rgba(236, 72, 153, 0.4);
+  border-radius: 14px;
+}
+
+.liveme-goal-preview-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.liveme-goal-preview-icon {
+  font-size: 32px;
+}
+
+.liveme-goal-preview-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.liveme-goal-preview-cost {
+  font-size: 11px;
+  color: #f472b6;
+}
+
+.liveme-goal-preview-badge {
+  font-size: 14px;
+  font-weight: 800;
+  font-family: monospace;
+  color: #fff;
+  background: rgba(236, 72, 153, 0.4);
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.liveme-goal-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 8px;
+}
+
+.liveme-goal-count-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.liveme-goal-count-chip {
+  flex: 1;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.liveme-goal-count-chip.active {
+  background: #ec4899;
+  border-color: #f472b6;
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.5);
+}
+
+.liveme-goal-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.liveme-goal-item-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.liveme-goal-item-btn.active {
+  border-color: #ec4899;
+  background: rgba(236, 72, 153, 0.25);
+  box-shadow: 0 0 12px rgba(236, 72, 153, 0.4);
+}
+
+.liveme-goal-item-icon {
+  font-size: 24px;
+}
+
+.liveme-goal-item-name {
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60px;
+}
+
+.liveme-goal-item-cost {
+  font-size: 9px;
+  color: #f472b6;
+}
+
+.liveme-goal-modal-footer {
+  display: flex;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.liveme-goal-cancel-btn {
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ========================================================================= */
+/* 12. DAILY LEADERBOARD MODAL                                               */
+/* ========================================================================= */
+.liveme-leaderboard-my-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.18), rgba(249, 115, 22, 0.18));
+  border: 1.5px solid rgba(234, 179, 8, 0.4);
+  border-radius: 14px;
+}
+
+.liveme-leaderboard-my-card .avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #eab308;
+}
+
+.liveme-leaderboard-my-card .info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.liveme-leaderboard-my-card .name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.liveme-leaderboard-my-card .handle {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.liveme-leaderboard-my-card .score {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.liveme-leaderboard-my-card .score .label {
+  font-size: 9px;
+  font-weight: 800;
+  color: #eab308;
+}
+
+.liveme-leaderboard-my-card .score .val {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.liveme-leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.liveme-leaderboard-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.liveme-leaderboard-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.liveme-leaderboard-item.rank-1 {
+  border-color: rgba(234, 179, 8, 0.5);
+  background: rgba(234, 179, 8, 0.08);
+}
+
+.liveme-leaderboard-item.rank-2 {
+  border-color: rgba(148, 163, 184, 0.5);
+}
+
+.liveme-leaderboard-item.rank-3 {
+  border-color: rgba(180, 83, 9, 0.5);
+}
+
+.liveme-leaderboard-item .rank-badge {
+  font-size: 16px;
+  font-weight: 800;
+  width: 24px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.liveme-leaderboard-item .leader-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.liveme-leaderboard-item .leader-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.liveme-leaderboard-item .leader-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.liveme-leaderboard-item .leader-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.liveme-leaderboard-item .leader-badge-pill {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(234, 179, 8, 0.2);
+  color: #facc15;
+}
+
+.liveme-leaderboard-item .leader-handle {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.liveme-leaderboard-item .leader-diamonds {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #38bdf8;
+}
+
+.liveme-leaderboard-footer {
+  text-align: center;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 4px 0;
+}
+
+/* ========================================================================= */
+/* 13. BIG CHAT MODE / LARGE MESSAGES READER STYLING                         */
+/* ========================================================================= */
+.liveme-chat-stream-layer.is-large-reader {
+  bottom: 80px;
+  height: 60vh;
+  max-height: 520px;
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 20px;
+  padding: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+}
+
+.liveme-reader-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.liveme-reader-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.liveme-reader-badge {
+  font-size: 11px;
+  font-weight: 800;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.18);
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.5px;
+}
+
+.liveme-reader-hint {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.liveme-reader-font-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.liveme-reader-font-controls .font-control-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-right: 2px;
+}
+
+.liveme-font-size-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.liveme-font-size-btn.active {
+  background: #38bdf8;
+  color: #000;
+  border-color: #38bdf8;
+}
+
+.liveme-chat-row.is-reader-row {
+  font-size: var(--chat-reader-font-size, 22px);
+  line-height: 1.4;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  word-break: break-word;
+}
+
+.liveme-reader-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+}
+
+.liveme-chat-row.is-reader-row .liveme-chat-user {
+  font-weight: 800;
+  color: #38bdf8;
+  font-size: inherit;
+}
+
+.liveme-chat-row.is-reader-row .liveme-chat-text {
+  font-weight: 500;
+  color: #ffffff;
+  font-size: inherit;
+}
+
+.liveme-chat-row.is-reader-row.gift-notice {
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.25), rgba(168, 85, 247, 0.25));
+  border: 1px solid rgba(244, 114, 182, 0.4);
+}
+
+.liveme-chat-row.is-reader-row.join-notice {
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+/* PK Modal Guest Additions */
+.liveme-pk-section-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 10px 0 6px 0;
+}
+
+.liveme-pk-challenge-btn.guest {
+  background: linear-gradient(135deg, #0284c7, #2563eb);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+}
+
+.liveme-guest-on-stage-badge {
+  font-size: 11px;
+  font-weight: 800;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.18);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.liveme-pk-empty-viewers {
+  text-align: center;
+  padding: 24px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+.liveme-pk-empty-viewers .icon {
+  font-size: 32px;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.liveme-pk-empty-viewers p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.liveme-pk-empty-viewers .sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.4;
+}
+
+.liveme-roster-level-tag {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 3px;
+  border-radius: 4px;
+}
+
+.liveme-roster-pulse-dot.guest {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.liveme-pk-roster-item.active-guest {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+/* Dual Camera PIP Overlay */
+.liveme-dual-pip-box {
+  position: absolute;
+  z-index: 25;
+  width: 116px;
+  height: 168px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 2px solid rgba(56, 189, 248, 0.7);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 16px rgba(56, 189, 248, 0.35);
+  background: #000;
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: auto;
+}
+
+.liveme-dual-pip-box.top-right {
+  top: 120px;
+  right: 14px;
+}
+
+.liveme-dual-pip-box.top-left {
+  top: 120px;
+  left: 14px;
+}
+
+.liveme-dual-pip-box.bottom-right {
+  bottom: 180px;
+  right: 14px;
+}
+
+.liveme-dual-pip-box.split {
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  width: 140px;
+  height: 200px;
+}
+
+.liveme-dual-pip-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.liveme-dual-pip-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: linear-gradient(135deg, #0284c7, #2563eb);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 6px;
+  letter-spacing: 0.05em;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Reader Mode Join & Gift Enhancements */
+.liveme-chat-join-row.is-reader-row {
+  font-size: var(--chat-reader-font-size, 22px);
+  line-height: 1.4;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: rgba(56, 189, 248, 0.16);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.liveme-gift-tag {
+  background: linear-gradient(135deg, #ec4899, #f43f5e);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 6px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+
 
 

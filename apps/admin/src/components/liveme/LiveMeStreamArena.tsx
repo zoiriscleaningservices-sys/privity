@@ -19,6 +19,11 @@ import { getUserLiveProfile, UserLiveProfile, getDeterministicLevel } from './us
 import { GiftAnimationPlayer, globalGiftQueue, DEFAULT_GIFTS, GiftEvent } from '../../gifts';
 import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSyncService';
 import { authService } from '../../services/authService';
+import { LiveBeautyEnhancementsModal, BEAUTY_FILTERS } from './LiveBeautyEnhancementsModal';
+import { LiveStudioControlsModal } from './LiveStudioControlsModal';
+import { LiveGiftGoalModal, StreamGiftGoal } from './LiveGiftGoalModal';
+import { LiveDailyLeaderboardModal } from './LiveDailyLeaderboardModal';
+import { broadcastViaSupabase, onSupabaseBroadcast } from '../../services/supabaseClient';
 import './liveme.css';
 
 export interface LiveBroadcastSummaryData {
@@ -506,6 +511,195 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
   // Real-time room audience roster (Accurate, dynamic tracking of viewers)
   const [activeAudience, setActiveAudience] = useState<RoomViewer[]>([]);
+
+  // Fly-in Viewer Join Animation State (Banner flies in from left, stops, holds for 3.5s, then flies out)
+  const [activeJoinBanner, setActiveJoinBanner] = useState<{
+    id: string;
+    name: string;
+    handle: string;
+    avatar: string;
+    level: number;
+    badge?: string;
+    isExiting?: boolean;
+  } | null>(null);
+  const joinBannerQueueRef = useRef<Array<{
+    id: string;
+    name: string;
+    handle: string;
+    avatar: string;
+    level: number;
+    badge?: string;
+  }>>([]);
+  const joinBannerTimeoutRef = useRef<any>(null);
+
+  const triggerJoinFlyIn = useCallback((user: { name: string; handle: string; avatar?: string; level?: number; badge?: string }) => {
+    const entry = {
+      id: `join-${Date.now()}-${Math.random()}`,
+      name: user.name,
+      handle: user.handle,
+      avatar: user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
+      level: user.level || getDeterministicLevel(user.handle),
+      badge: user.badge || 'Fan ⭐',
+    };
+    joinBannerQueueRef.current.push(entry);
+  }, []);
+
+  // Process join banner queue
+  useEffect(() => {
+    const processQueue = () => {
+      if (activeJoinBanner || joinBannerQueueRef.current.length === 0) return;
+      const next = joinBannerQueueRef.current.shift();
+      if (!next) return;
+      setActiveJoinBanner(next);
+
+      if (joinBannerTimeoutRef.current) clearTimeout(joinBannerTimeoutRef.current);
+      joinBannerTimeoutRef.current = setTimeout(() => {
+        setActiveJoinBanner((prev) => (prev ? { ...prev, isExiting: true } : null));
+        setTimeout(() => {
+          setActiveJoinBanner(null);
+        }, 400);
+      }, 3400);
+    };
+
+    const interval = setInterval(processQueue, 350);
+    return () => clearInterval(interval);
+  }, [activeJoinBanner]);
+
+  // Beauty & Skin Enhancements State (Controlled via Bubble 2)
+  const [isBeautyModalOpen, setIsBeautyModalOpen] = useState(false);
+  const [skinSmoothing, setSkinSmoothing] = useState(30);
+  const [skinLightening, setSkinLightening] = useState(20);
+  const [skinTone, setSkinTone] = useState<'natural' | 'porcelain' | 'rosy' | 'golden'>('natural');
+  const [activeBeautyFilter, setActiveBeautyFilter] = useState('normal');
+  const [activeLighting, setActiveLighting] = useState('none');
+
+  const computedVideoFilter = useMemo(() => {
+    const b = 1 + (skinLightening / 100) * 0.35;
+    const c = 1 - (skinSmoothing / 100) * 0.08;
+    const s = 1 + (skinSmoothing / 100) * 0.15;
+
+    let toneFilter = '';
+    if (skinTone === 'porcelain') toneFilter = 'brightness(1.06) saturate(0.96)';
+    else if (skinTone === 'rosy') toneFilter = 'hue-rotate(-5deg) saturate(1.1)';
+    else if (skinTone === 'golden') toneFilter = 'sepia(0.12) saturate(1.18) hue-rotate(-6deg)';
+
+    const filterObj = BEAUTY_FILTERS.find((f) => f.id === activeBeautyFilter);
+    const presetFilter = filterObj && filterObj.cssFilter !== 'none' ? filterObj.cssFilter : '';
+
+    return `brightness(${b.toFixed(2)}) contrast(${c.toFixed(2)}) saturate(${s.toFixed(2)}) ${toneFilter} ${presetFilter}`.trim();
+  }, [skinLightening, skinSmoothing, skinTone, activeBeautyFilter]);
+
+  const handleResetBeauty = useCallback(() => {
+    setSkinSmoothing(0);
+    setSkinLightening(0);
+    setSkinTone('natural');
+    setActiveBeautyFilter('normal');
+    setActiveLighting('none');
+  }, []);
+
+  // Host Studio & Dual Camera State (Controlled via Bubble 3)
+  const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
+  const [isDualCameraActive, setIsDualCameraActive] = useState(false);
+  const [dualCameraPosition, setDualCameraPosition] = useState<'top-right' | 'top-left' | 'bottom-right' | 'split'>('top-right');
+  const [secondaryMediaStream, setSecondaryMediaStream] = useState<MediaStream | null>(null);
+  const [isDualSwapped, setIsDualSwapped] = useState(false);
+  const secondaryVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Toggle Dual Camera Hardware Activation
+  const handleToggleDualCamera = useCallback(async () => {
+    if (isDualCameraActive) {
+      if (secondaryMediaStream) {
+        secondaryMediaStream.getTracks().forEach((t) => t.stop());
+        setSecondaryMediaStream(null);
+      }
+      setIsDualCameraActive(false);
+    } else {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          const secondFacing = cameraFacing === 'user' ? 'environment' : 'user';
+          const secondStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: secondFacing } },
+            audio: false,
+          });
+          setSecondaryMediaStream(secondStream);
+          setIsDualCameraActive(true);
+        } catch {
+          // Fallback: If hardware can only run 1 camera at once, create virtual PIP canvas stream
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 360;
+            canvas.height = 640;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.fillStyle = '#0f172a';
+              ctx.fillRect(0, 0, 360, 640);
+              ctx.font = 'bold 22px sans-serif';
+              ctx.fillStyle = '#38bdf8';
+              ctx.fillText('📷 Dual Camera', 40, 280);
+              ctx.font = '14px sans-serif';
+              ctx.fillStyle = '#ffffff';
+              ctx.fillText('Secondary Stream Active', 40, 320);
+            }
+            const virtStream = canvas.captureStream(15);
+            setSecondaryMediaStream(virtStream);
+            setIsDualCameraActive(true);
+          } catch {}
+        }
+      }
+    }
+  }, [isDualCameraActive, cameraFacing, secondaryMediaStream]);
+
+  // Bind secondary video
+  useEffect(() => {
+    if (isDualCameraActive && secondaryMediaStream && secondaryVideoRef.current) {
+      secondaryVideoRef.current.srcObject = secondaryMediaStream;
+      secondaryVideoRef.current.play().catch(() => {});
+    }
+  }, [isDualCameraActive, secondaryMediaStream]);
+
+  // Host Target Stream Gift Goal State (Row 2 Goal Sub-Pill)
+  const [isGiftGoalModalOpen, setIsGiftGoalModalOpen] = useState(false);
+  const [streamGoal, setStreamGoal] = useState<StreamGiftGoal>({
+    giftId: 'rose',
+    giftName: 'Rose',
+    giftIcon: '🌹',
+    targetCount: 10,
+    currentCount: 0,
+  });
+
+  // Daily Creator Leaderboard Modal State
+  const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
+
+  // Active Co-Host Guests
+  const [activeGuests, setActiveGuests] = useState<RoomViewer[]>([]);
+
+  const handleInviteGuest = useCallback((viewer: RoomViewer) => {
+    setActiveGuests((prev) => {
+      if (prev.some((g) => g.handle === viewer.handle)) return prev;
+      return [...prev, viewer];
+    });
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    liveStreamSync.sendRoomEvent(roomId, {
+      type: 'GUEST_INVITED',
+      targetHandle: viewer.handle,
+      guest: viewer,
+    });
+    broadcastViaSupabase({
+      action: 'LIVE_GUEST_INVITED',
+      roomId,
+      targetHandle: viewer.handle,
+      guest: viewer,
+    });
+  }, [currentStreamer.handle, currentStreamer.id]);
+
+  const handleRemoveGuest = useCallback((handle: string) => {
+    setActiveGuests((prev) => prev.filter((g) => g.handle !== handle));
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    liveStreamSync.sendRoomEvent(roomId, {
+      type: 'GUEST_DISCONNECTED',
+      handle,
+    });
+  }, [currentStreamer.handle, currentStreamer.id]);
 
   // Open User Profile Mini-Card ("Little Tab" that does not disrupt the live stream)
   const handleOpenUserProfile = (
@@ -1083,6 +1277,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         y: posY,
         color: heart.color,
       });
+      broadcastViaSupabase({
+        action: 'LIVE_LIKE',
+        roomId,
+        streamerId: currentStreamer.id,
+        x: posX,
+        y: posY,
+        color: heart.color,
+      });
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_LIKE', streamerId: currentStreamer.id, x: posX, y: posY, color: heart.color });
       bus.close();
@@ -1130,6 +1332,15 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       } else if (evt.type === 'LIVE_JOIN' && evt.user) {
         const userHandle = evt.user.handle || evt.user.name;
         const userLevel = evt.user.level || getDeterministicLevel(userHandle);
+
+        // Trigger specular fly-in banner from left
+        triggerJoinFlyIn({
+          name: evt.user.name,
+          handle: userHandle,
+          avatar: evt.user.avatar,
+          level: userLevel,
+          badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
+        });
 
         const joinMsg: LiveMeChatMessage = {
           id: `join-${Date.now()}-${Math.random()}`,
@@ -1324,6 +1535,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         const diamonds = evt.diamonds || evt.giftEvent?.coinValue || 10;
         setDiamondsEarned((prev) => prev + diamonds);
 
+        // Update target stream goal if sent gift matches
+        const gName = (evt.giftEvent?.giftName || '').toLowerCase();
+        const gId = (evt.giftEvent?.giftId || '').toLowerCase();
+        setStreamGoal((prev) => {
+          if (gName.includes(prev.giftName.toLowerCase()) || gId === prev.giftId.toLowerCase()) {
+            return {
+              ...prev,
+              currentCount: prev.currentCount + (evt.giftEvent?.quantity || 1),
+            };
+          }
+          return prev;
+        });
+
         // If in PK battle, add score
         if (isPkBattleActiveRef.current) {
           const dmg = diamonds * 2;
@@ -1400,9 +1624,65 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         }
 
         showToastRef.current(`🎁 ${evt.sender?.name || 'Viewer'} sent ${evt.giftEvent?.giftName || 'Gift'}! (+${diamonds} 💎)`);
+      } else if (evt.type === 'STREAM_GOAL_UPDATE' && evt.goal) {
+        setStreamGoal(evt.goal);
+      } else if (evt.type === 'GUEST_INVITED' && evt.guest) {
+        setActiveGuests((prev) => {
+          if (prev.some((g) => g.handle === evt.guest.handle)) return prev;
+          return [...prev, evt.guest];
+        });
+        showToastRef.current(`🎤 @${evt.guest.name} joined as Co-Host Guest!`);
+      } else if (evt.type === 'GUEST_DISCONNECTED' && evt.handle) {
+        setActiveGuests((prev) => prev.filter((g) => g.handle !== evt.handle));
       }
     });
   }, [currentStreamer.id, currentStreamer.handle, isHost]);
+
+  // Redundant Sub-100ms Cross-Device Realtime via Supabase Broadcast
+  useEffect(() => {
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    const unsub = onSupabaseBroadcast((payload) => {
+      if (!payload || payload.roomId !== roomId) return;
+      if (payload.action === 'LIVE_LIKE') {
+        const sid = currentStreamer.id;
+        setStreamerLikesMap((prev) => {
+          const current = prev[sid] ?? 0;
+          return { ...prev, [sid]: current + 1 };
+        });
+        setLikesReceived((prev) => prev + 1);
+
+        const stageWidth = stageRef.current ? stageRef.current.clientWidth : 440;
+        const stageHeight = stageRef.current ? stageRef.current.clientHeight : 700;
+        const posX = payload.x !== undefined ? payload.x : stageWidth / 2 + (Math.random() * 80 - 40);
+        const posY = payload.y !== undefined ? payload.y : stageHeight - 160;
+        const heart = {
+          id: Date.now() + Math.random(),
+          x: posX,
+          y: posY,
+          color: payload.color || '#f43f5e',
+        };
+        setFloatingHearts((prev) => [...prev.slice(-15), heart]);
+        setTimeout(() => {
+          setFloatingHearts((prev) => prev.filter((h) => h.id !== heart.id));
+        }, 2200);
+      } else if (payload.action === 'LIVE_JOIN' && payload.user) {
+        triggerJoinFlyIn({
+          name: payload.user.name,
+          handle: payload.user.handle,
+          avatar: payload.user.avatar,
+          level: payload.user.level,
+        });
+      } else if (payload.action === 'LIVE_GIFT' && payload.giftEvent) {
+        if (payload.giftEvent && payload.animGift) {
+          globalGiftQueue.enqueue(payload.giftEvent, payload.animGift);
+        }
+        if (payload.diamonds) {
+          setDiamondsEarned((prev) => prev + payload.diamonds);
+        }
+      }
+    });
+    return unsub;
+  }, [currentStreamer.handle, currentStreamer.id, triggerJoinFlyIn]);
 
   // Trigger floating PK Hit Damage text
   const triggerPkHit = (text: string, color = '#fbbf24') => {
@@ -1703,6 +1983,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
     // Network & Cross-tab broadcast gift
     try {
+      const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
       liveStreamSync.sendRoomEvent(currentStreamer.id, {
         type: 'LIVE_GIFT',
         streamerId: currentStreamer.id,
@@ -1717,10 +1998,36 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           level: userLevel,
         },
       });
+      broadcastViaSupabase({
+        action: 'LIVE_GIFT',
+        roomId,
+        giftEvent,
+        animGift,
+        diamonds: totalCost,
+        sender: {
+          name: currentUser.name,
+          handle: currentUser.handle,
+          avatar: currentUser.avatar,
+          level: userLevel,
+        },
+      });
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_GIFT', event: giftEvent, animGift, senderLevel: userLevel });
       bus.close();
     } catch {}
+
+    // Update local stream goal if matched
+    const sentGiftName = gift.name.toLowerCase();
+    const sentGiftId = gift.id.toLowerCase();
+    setStreamGoal((prev) => {
+      if (sentGiftName.includes(prev.giftName.toLowerCase()) || sentGiftId === prev.giftId.toLowerCase()) {
+        return {
+          ...prev,
+          currentCount: prev.currentCount + selectedCombo,
+        };
+      }
+      return prev;
+    });
 
     // In PK battle, add huge points and trigger damage burst
     if (isPkBattleActive) {
@@ -2003,19 +2310,38 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {/* Solo Video Feed (Active when PK Battle is toggled off) */}
         {!isPkBattleActive && (
           isHost ? (
-            <video
-              ref={bindHostVideoRef}
-              autoPlay
-              playsInline
-              muted={true}
-              poster={currentUser.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900'}
-              onLoadedMetadata={() => {
-                if (videoRef.current) {
-                  videoRef.current.play().catch(() => {});
-                }
-              }}
-              className={`liveme-video-canvas ${isMirrored ? 'mirrored' : ''}`}
-            />
+            <>
+              <video
+                ref={bindHostVideoRef}
+                autoPlay
+                playsInline
+                muted={true}
+                poster={currentUser.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=900'}
+                onLoadedMetadata={() => {
+                  if (videoRef.current) {
+                    videoRef.current.play().catch(() => {});
+                  }
+                }}
+                style={{ filter: computedVideoFilter }}
+                className={`liveme-video-canvas ${isMirrored ? 'mirrored' : ''}`}
+              />
+
+              {/* Dual Camera Mode PIP Overlay */}
+              {isDualCameraActive && (
+                <div className={`liveme-dual-pip-box ${dualCameraPosition} ${isDualSwapped ? 'swapped' : ''}`}>
+                  <video
+                    ref={secondaryVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="liveme-dual-pip-video"
+                  />
+                  <div className="liveme-dual-pip-badge">
+                    <span>CAM 2</span>
+                  </div>
+                </div>
+              )}
+            </>
           ) : remoteP2PStream ? (
             <video
               ref={(node) => {
@@ -2156,6 +2482,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                         videoRef.current.play().catch(() => {});
                       }
                     }}
+                    style={{ filter: computedVideoFilter }}
                     className={`liveme-pk-video-layer ${isMirrored ? 'mirrored' : ''}`}
                   />
                 ) : remoteP2PStream ? (
@@ -2515,28 +2842,27 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           <div className="liveme-sub-pills-row">
             <div
               className="liveme-sub-pill ranking"
-              onClick={() => showToast(`🔥 Daily Creator Ranking: #1 in Privity LIVE (${diamondsEarned > 0 ? diamondsEarned.toLocaleString() : '12.4K'} pts)`)}
+              onClick={() => setIsLeaderboardOpen(true)}
               style={{ cursor: 'pointer' }}
-              title="Click to view Daily Ranking details"
+              title="Click to view Daily Leaderboard"
             >
               <span>🔥</span>
-              <span>Daily Ranking #1</span>
+              <span>Daily Ranking #{diamondsEarned > 1000 ? '1' : diamondsEarned > 500 ? '2' : diamondsEarned > 100 ? '3' : '1'}</span>
             </div>
             <div
-              className={`liveme-sub-pill goal ${chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0) >= 10 ? 'completed' : ''}`}
+              className={`liveme-sub-pill goal ${streamGoal.currentCount >= streamGoal.targetCount ? 'completed' : ''}`}
               onClick={() => {
-                const giftCount = chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0);
-                if (giftCount >= 10) {
-                  showToast(`🎉 Live Goal Achieved! ${giftCount}/10 gifts sent!`);
+                if (isHost) {
+                  setIsGiftGoalModalOpen(true);
                 } else {
-                  showToast(`🎯 Live Stream Goal: ${giftCount}/10 gifts sent to reach the creator milestone!`);
+                  showToast(`🎯 Host Goal: ${streamGoal.currentCount}/${streamGoal.targetCount} ${streamGoal.giftName}s! Send ${streamGoal.giftIcon} to support!`);
                 }
               }}
               style={{ cursor: 'pointer' }}
-              title="Live Gift Goal Progress"
+              title={isHost ? "Host: Click to customize Goal" : "Live Gift Goal Progress"}
             >
-              <span>{chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0) >= 10 ? '🏆' : '🎯'}</span>
-              <span>{Math.min(10, chatMessages.filter((m) => m.isSystem && m.giftInfo).reduce((acc, m) => acc + (m.giftInfo?.count || 1), 0))}/10</span>
+              <span>{streamGoal.currentCount >= streamGoal.targetCount ? '🏆' : streamGoal.giftIcon}</span>
+              <span>{streamGoal.giftName} {Math.min(streamGoal.targetCount, streamGoal.currentCount)}/{streamGoal.targetCount}</span>
             </div>
             <div
               className="liveme-sub-pill gallery"
@@ -2546,6 +2872,39 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             >
               <span>Gift Gallery</span>
               <span>🎁</span>
+            </div>
+          </div>
+        )}
+
+        {/* Fly-In Viewer Join Animated Specular Banner */}
+        {activeJoinBanner && (
+          <div className="liveme-join-flyin-container" key={activeJoinBanner.id}>
+            <div
+              className={`liveme-join-flyin-card ${activeJoinBanner.isExiting ? 'exiting' : ''}`}
+              onClick={() =>
+                handleOpenUserProfile(activeJoinBanner.handle, {
+                  name: activeJoinBanner.name,
+                  avatar: activeJoinBanner.avatar,
+                  level: activeJoinBanner.level,
+                })
+              }
+            >
+              <div className="liveme-join-flyin-avatar-box">
+                <img
+                  src={activeJoinBanner.avatar}
+                  alt={activeJoinBanner.name}
+                  className="liveme-join-flyin-avatar"
+                />
+                <span className="liveme-join-flyin-badge">{activeJoinBanner.badge || 'VIP'}</span>
+              </div>
+              <div className="liveme-join-flyin-meta">
+                <div className="liveme-join-flyin-name-row">
+                  <span className="liveme-join-flyin-name">{activeJoinBanner.name}</span>
+                  <span className="liveme-join-flyin-star">★{activeJoinBanner.level}</span>
+                </div>
+                <span className="liveme-join-flyin-action">joined the LIVE</span>
+              </div>
+              <span className="liveme-join-flyin-wave">👋</span>
             </div>
           </div>
         )}
@@ -2603,7 +2962,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               )}
 
               <div
-                className="liveme-chat-join-row"
+                className={`liveme-chat-join-row ${arenaMode === 'chat_reader' ? 'is-reader-row' : ''}`}
                 onClick={() =>
                   handleOpenUserProfile(currentUser.handle, {
                     name: currentUser.name,
@@ -2613,44 +2972,117 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 style={{ cursor: 'pointer' }}
                 title="Click to view profile"
               >
+                {arenaMode === 'chat_reader' && (
+                  <img src={currentUser.avatar} alt={currentUser.name} className="liveme-reader-avatar" />
+                )}
                 <span className="liveme-join-hand">👋</span>
                 <span className="liveme-join-gem">💎{getDeterministicLevel(currentUser.handle)}</span>
                 <span className="liveme-join-name">{currentUser.name} 🇨🇺</span>
                 <span className="liveme-join-text">joined</span>
               </div>
 
-              {chatMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`liveme-chat-row ${arenaMode === 'chat_reader' ? 'is-reader-row' : ''} ${msg.isSystem ? 'gift-notice' : ''} ${msg.isJoin ? 'join-notice' : ''}`}
-                  onClick={() => {
-                    if (msg.user) {
-                      handleOpenUserProfile(msg.handle || msg.user, {
-                        name: msg.user,
-                        avatar: msg.avatar,
-                        level: msg.level,
-                      });
-                    }
-                  }}
-                  style={{ cursor: msg.user ? 'pointer' : 'default' }}
-                  title={msg.user ? `Click @${msg.user}'s profile` : undefined}
-                >
-                  {arenaMode === 'chat_reader' && msg.avatar && (
-                    <img src={msg.avatar} alt={msg.user || 'User'} className="liveme-reader-avatar" />
-                  )}
-                  {msg.level && (
-                    <span
-                      className={`liveme-level-badge ${
-                        msg.level > 40 ? 'cyan' : msg.level > 25 ? 'blue' : 'green'
-                      }`}
+              {chatMessages.map((msg) => {
+                if (msg.isJoin) {
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`liveme-chat-join-row ${arenaMode === 'chat_reader' ? 'is-reader-row' : ''}`}
+                      onClick={() => {
+                        if (msg.handle || msg.user) {
+                          handleOpenUserProfile(msg.handle || msg.user, {
+                            name: msg.user,
+                            avatar: msg.avatar,
+                            level: msg.level,
+                          });
+                        }
+                      }}
+                      style={{ cursor: 'pointer' }}
+                      title="Click to view profile"
                     >
-                      ⭐ {msg.level}
-                    </span>
-                  )}
-                  <span className="liveme-chat-user">@{msg.user}:</span>
-                  <span className="liveme-chat-text">{msg.text}</span>
-                </div>
-              ))}
+                      {arenaMode === 'chat_reader' && (
+                        <img
+                          src={msg.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120'}
+                          alt={msg.user || 'Viewer'}
+                          className="liveme-reader-avatar"
+                        />
+                      )}
+                      <span className="liveme-join-hand">👋</span>
+                      <span className="liveme-join-gem">⭐{msg.level || getDeterministicLevel(msg.handle || msg.user)}</span>
+                      <span className="liveme-join-name">{msg.user}</span>
+                      <span className="liveme-join-text">joined the LIVE</span>
+                    </div>
+                  );
+                }
+
+                if (msg.isSystem && msg.giftInfo) {
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`liveme-chat-row gift-notice ${arenaMode === 'chat_reader' ? 'is-reader-row' : ''}`}
+                      onClick={() => {
+                        if (msg.handle || msg.user) {
+                          handleOpenUserProfile(msg.handle || msg.user, {
+                            name: msg.user,
+                            avatar: msg.avatar,
+                            level: msg.level,
+                          });
+                        }
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {arenaMode === 'chat_reader' && (
+                        <img
+                          src={msg.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'}
+                          alt={msg.user || 'Viewer'}
+                          className="liveme-reader-avatar"
+                        />
+                      )}
+                      <span className="liveme-gift-tag">🎁 GIFT</span>
+                      <span className="liveme-chat-user">@{msg.user}:</span>
+                      <span className="liveme-chat-text" style={{ color: '#ec4899', fontWeight: 800 }}>
+                        {msg.text}
+                      </span>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={msg.id}
+                    className={`liveme-chat-row ${arenaMode === 'chat_reader' ? 'is-reader-row' : ''} ${msg.isSystem ? 'gift-notice' : ''}`}
+                    onClick={() => {
+                      if (msg.user) {
+                        handleOpenUserProfile(msg.handle || msg.user, {
+                          name: msg.user,
+                          avatar: msg.avatar,
+                          level: msg.level,
+                        });
+                      }
+                    }}
+                    style={{ cursor: msg.user ? 'pointer' : 'default' }}
+                    title={msg.user ? `Click @${msg.user}'s profile` : undefined}
+                  >
+                    {arenaMode === 'chat_reader' && (
+                      <img
+                        src={msg.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'}
+                        alt={msg.user || 'User'}
+                        className="liveme-reader-avatar"
+                      />
+                    )}
+                    {msg.level && (
+                      <span
+                        className={`liveme-level-badge ${
+                          msg.level > 40 ? 'cyan' : msg.level > 25 ? 'blue' : 'green'
+                        }`}
+                      >
+                        ⭐ {msg.level}
+                      </span>
+                    )}
+                    <span className="liveme-chat-user">@{msg.user}:</span>
+                    <span className="liveme-chat-text">{msg.text}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -2883,87 +3315,54 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           {/* Right Toolbar Action Icons */}
           <div className="liveme-toolbar-actions">
             {isHost ? (
-              <>
-                {/* 1. PK Battle Matchmaker Trigger */}
+              <div className="liveme-host-bubbles-dock">
+                {/* Bubble 1: Battle & Guests */}
                 <button
                   type="button"
-                  className={`liveme-tool-btn liveme-match-trigger ${isPkBattleActive ? 'active' : ''}`}
+                  className={`liveme-host-bubble-btn battle ${isPkBattleActive ? 'active' : ''}`}
                   onClick={() => setIsPkMatchModalOpen(true)}
-                  title={isPkBattleActive ? "Manage PK Battle" : "Find PK Battle Match"}
+                  title="Battle Matchmaker & Co-Host Guests"
                 >
-                  ⚔️
+                  <img
+                    src="/live-bubbles/bubble-battle.jpg"
+                    alt="Battle & Guests"
+                    className="liveme-host-bubble-img"
+                  />
+                  {isPkBattleActive && <span className="liveme-host-bubble-badge">PK</span>}
+                  {activeGuests.length > 0 && <span className="liveme-host-bubble-badge">{activeGuests.length}</span>}
                 </button>
 
-                {/* 2. Voice Monitor ("Hear Myself" in headphones) */}
+                {/* Bubble 2: Beauty & Enhancements */}
                 <button
                   type="button"
-                  className={`liveme-tool-btn liveme-hear-myself-btn ${isAudioMonitoring ? 'active' : ''}`}
-                  onClick={() => {
-                    setIsAudioMonitoring((prev) => {
-                      const next = !prev;
-                      showToast(next ? '🎧 Voice Monitoring ON: You can now hear yourself in headphones.' : '🎧 Voice Monitoring OFF.');
-                      return next;
-                    });
-                  }}
-                  title={isAudioMonitoring ? "Hear Myself (Voice Monitoring ON 🎧)" : "Hear Myself (Voice Monitor 🎧)"}
+                  className="liveme-host-bubble-btn beauty"
+                  onClick={() => setIsBeautyModalOpen(true)}
+                  title="Beauty Filters & Skin Enhancements"
                 >
-                  🎧
-                  {micAudioLevel > 10 && <span className="liveme-mic-vu-dot" />}
+                  <img
+                    src="/live-bubbles/bubble-beauty.jpg"
+                    alt="Beauty & Filters"
+                    className="liveme-host-bubble-img"
+                  />
                 </button>
 
-                {/* 3. Moderation Management Panel */}
+                {/* Bubble 3: Studio & Dual Camera Controls */}
                 <button
                   type="button"
-                  className="liveme-tool-btn liveme-mod-btn"
-                  onClick={() => setIsModerationModalOpen(true)}
-                  title={`Moderation Panel (${mutedUsers.length + kickedUsers.length + blockedUsers.length} restricted)`}
+                  className="liveme-host-bubble-btn studio"
+                  onClick={() => setIsStudioModalOpen(true)}
+                  title="Studio Controls, Mirror, Mic & Dual Camera"
                 >
-                  🛡️
-                  {(mutedUsers.length + kickedUsers.length + blockedUsers.length) > 0 && (
-                    <span className="liveme-mod-badge">{mutedUsers.length + kickedUsers.length + blockedUsers.length}</span>
-                  )}
+                  <img
+                    src="/live-bubbles/bubble-studio.jpg"
+                    alt="Studio Tools"
+                    className="liveme-host-bubble-img"
+                  />
+                  {micAudioLevel > 15 && !isMicMuted && <span className="liveme-host-bubble-vu-ring" />}
+                  {isDualCameraActive && <span className="liveme-host-bubble-badge">2</span>}
+                  {isMicMuted && <span className="liveme-host-bubble-badge">🔇</span>}
                 </button>
-
-                {/* 4. Flip Camera Front/Back */}
-                <button
-                  type="button"
-                  className="liveme-tool-btn"
-                  onClick={handleFlipCamera}
-                  title="Flip Camera (Front/Back)"
-                >
-                  🔄
-                </button>
-
-                {/* 5. Mirror Angle Reflection */}
-                <button
-                  type="button"
-                  className={`liveme-tool-btn ${isMirrored ? 'active' : ''}`}
-                  onClick={handleToggleMirror}
-                  title="Toggle Mirror Reflection for Best Angle"
-                >
-                  🪞
-                </button>
-
-                {/* 6. Mute Microphone */}
-                <button
-                  type="button"
-                  className={`liveme-tool-btn ${isMicMuted ? 'danger' : ''}`}
-                  onClick={handleToggleMic}
-                  title={isMicMuted ? "Unmute Mic" : `Mute Mic (Mic Level: ${micAudioLevel}%)`}
-                >
-                  {isMicMuted ? '🔇' : '🎙️'}
-                </button>
-
-                {/* 7. Toggle Video Camera */}
-                <button
-                  type="button"
-                  className={`liveme-tool-btn ${isVideoOff ? 'danger' : ''}`}
-                  onClick={handleToggleVideo}
-                  title={isVideoOff ? "Enable Video" : "Pause Video"}
-                >
-                  {isVideoOff ? '🚫' : '📹'}
-                </button>
-              </>
+              </div>
             ) : (
               <>
                 {/* Share Button */}
@@ -3281,6 +3680,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           });
         }}
         showToast={showToast}
+        activeAudience={activeAudience}
+        activeGuests={activeGuests}
+        onInviteGuest={handleInviteGuest}
+        onRemoveGuest={handleRemoveGuest}
       />
 
       {/* ================================================================ */}
@@ -3468,6 +3871,88 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           if (u) handleBlockUser(u);
         }}
         showToast={showToast}
+      />
+
+      {/* ================================================================ */}
+      {/* 14B. BEAUTY & ENHANCEMENTS MODAL (BUBBLE 2)                     */}
+      {/* ================================================================ */}
+      <LiveBeautyEnhancementsModal
+        isOpen={isBeautyModalOpen}
+        onClose={() => setIsBeautyModalOpen(false)}
+        skinSmoothing={skinSmoothing}
+        setSkinSmoothing={setSkinSmoothing}
+        skinLightening={skinLightening}
+        setSkinLightening={setSkinLightening}
+        skinTone={skinTone}
+        setSkinTone={setSkinTone}
+        activeBeautyFilter={activeBeautyFilter}
+        setActiveBeautyFilter={setActiveBeautyFilter}
+        activeLighting={activeLighting}
+        setActiveLighting={setActiveLighting}
+        onResetAll={handleResetBeauty}
+      />
+
+      {/* ================================================================ */}
+      {/* 14C. HOST STUDIO & DUAL CAMERA CONTROLS MODAL (BUBBLE 3)         */}
+      {/* ================================================================ */}
+      <LiveStudioControlsModal
+        isOpen={isStudioModalOpen}
+        onClose={() => setIsStudioModalOpen(false)}
+        cameraFacing={cameraFacing}
+        isMirrored={isMirrored}
+        isMicMuted={isMicMuted}
+        isVideoOff={isVideoOff}
+        isAudioMonitoring={isAudioMonitoring}
+        micAudioLevel={micAudioLevel}
+        isDualCameraActive={isDualCameraActive}
+        dualCameraPosition={dualCameraPosition}
+        isDualSwapped={isDualSwapped}
+        onFlipCamera={handleFlipCamera}
+        onToggleMirror={handleToggleMirror}
+        onToggleMic={handleToggleMic}
+        onToggleVideo={handleToggleVideo}
+        onToggleAudioMonitoring={() => {
+          setIsAudioMonitoring((prev) => {
+            const next = !prev;
+            showToast(next ? '🎧 Voice Monitoring ON: You can now hear yourself in headphones.' : '🎧 Voice Monitoring OFF.');
+            return next;
+          });
+        }}
+        onToggleDualCamera={handleToggleDualCamera}
+        onChangeDualPosition={setDualCameraPosition}
+        onSwapDualCameras={() => setIsDualSwapped((prev) => !prev)}
+        onOpenModeration={() => setIsModerationModalOpen(true)}
+        moderationCount={mutedUsers.length + kickedUsers.length + blockedUsers.length}
+      />
+
+      {/* ================================================================ */}
+      {/* 14D. HOST STREAM TARGET GIFT GOAL MODAL                          */}
+      {/* ================================================================ */}
+      <LiveGiftGoalModal
+        isOpen={isGiftGoalModalOpen}
+        onClose={() => setIsGiftGoalModalOpen(false)}
+        goal={streamGoal}
+        onSaveGoal={(newGoal) => {
+          setStreamGoal(newGoal);
+          showToast(`🎯 Stream Goal set to ${newGoal.targetCount}x ${newGoal.giftName}!`);
+          const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+          liveStreamSync.sendRoomEvent(roomId, {
+            type: 'STREAM_GOAL_UPDATE',
+            goal: newGoal,
+          });
+        }}
+        isHost={isHost}
+      />
+
+      {/* ================================================================ */}
+      {/* 14E. DAILY CREATOR LEADERBOARD MODAL                             */}
+      {/* ================================================================ */}
+      <LiveDailyLeaderboardModal
+        isOpen={isLeaderboardOpen}
+        onClose={() => setIsLeaderboardOpen(false)}
+        hostDiamonds={diamondsEarned}
+        hostName={currentUser.name}
+        hostAvatar={currentUser.avatar}
       />
 
       {/* ================================================================ */}
