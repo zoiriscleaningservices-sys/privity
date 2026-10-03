@@ -31,11 +31,13 @@ export interface PostComment {
 }
 
 export const isUserLiked = (targetLikers?: string[], userHandle?: string | null, postIsLiked?: boolean): boolean => {
-  if (postIsLiked) return true;
   if (!userHandle) return false;
   const clean = userHandle.replace(/^@/, '').toLowerCase().trim();
-  if (!clean || !Array.isArray(targetLikers)) return !!postIsLiked;
-  return targetLikers.some((h) => (h || '').replace(/^@/, '').toLowerCase().trim() === clean);
+  if (!clean) return false;
+  if (Array.isArray(targetLikers)) {
+    return targetLikers.some((h) => (h || '').replace(/^@/, '').toLowerCase().trim() === clean);
+  }
+  return !!postIsLiked;
 };
 
 export interface PostItem {
@@ -257,6 +259,7 @@ export interface TikTokSlideFeedProps {
   followingMap?: Record<string, boolean>;
   closeFriendsList?: string[];
   deletedPostIds?: Set<string>;
+  savedPostIds?: string[];
   onLike: (postId: string, photoUrl?: string) => void;
   onSave: (postId: string) => void;
   onAddComment: (postId: string, text: string) => void;
@@ -316,6 +319,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   followingMap = {},
   closeFriendsList = [],
   deletedPostIds,
+  savedPostIds = [],
   onLike,
   onSave,
   onAddComment,
@@ -1480,8 +1484,8 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             </div>
           ) : (
             displayPosts.map((post) => {
-            const isLiked = isUserLiked(post.likersList, currentUser?.handle);
-            const isSaved = !!post.isSaved;
+            const isLiked = isUserLiked(post.likersList, currentUser?.handle, post.isLiked);
+            const isSaved = (savedPostIds && savedPostIds.includes(post.id)) || !!post.isSaved;
             const replyText = inlineReplyTexts[post.id] || '';
 
             return (
@@ -1597,7 +1601,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? '#fe2c55' : 'none'} stroke={isLiked ? '#fe2c55' : 'currentColor'} strokeWidth="2">
                       <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
                     </svg>
-                    <span>{post.likesCount}</span>
+                    <span>{Array.isArray(post.likersList) ? post.likersList.length : (post.likesCount || 0)}</span>
                   </button>
 
                   {/* Comment Button */}
@@ -1845,7 +1849,9 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   {/* 2. Heart / Like Button */}
                   {(() => {
                     const isPostLiked = isUserLiked(post.likersList, currentUser?.handle, post.isLiked);
-                    const rawLikes = Math.max(post.likesCount || 0, (post.likersList || []).length);
+                    const rawLikes = Array.isArray(post.likersList)
+                      ? post.likersList.length
+                      : (typeof post.likesCount === 'number' && !isNaN(post.likesCount) ? post.likesCount : 0);
                     const likesDisplay = rawLikes >= 1000 ? `${(rawLikes / 1000).toFixed(1)}k` : rawLikes;
                     return (
                       <button
@@ -1889,22 +1895,27 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   </button>
 
                   {/* 4. Bookmark / Favorite Button */}
-                  <button
-                    type="button"
-                    className={`tiktok-rail-btn bookmark ${post.isSaved ? 'saved' : ''}`}
-                    onClick={() => onSave(post.id)}
-                    title={post.isSaved ? 'Remove from favorites' : 'Add to favorites'}
-                    aria-label="Bookmark"
-                  >
-                    <div className="tiktok-icon-wrap">
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill={post.isSaved ? "#face15" : "#ffffff"} className="tiktok-rail-icon">
-                        <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
-                      </svg>
-                    </div>
-                    <span className="tiktok-rail-count">
-                      {post.savesCount >= 1000 ? `${(post.savesCount / 1000).toFixed(1)}k` : post.savesCount}
-                    </span>
-                  </button>
+                  {(() => {
+                    const isPostSaved = (savedPostIds && savedPostIds.includes(post.id)) || !!post.isSaved;
+                    return (
+                      <button
+                        type="button"
+                        className={`tiktok-rail-btn bookmark ${isPostSaved ? 'saved' : ''}`}
+                        onClick={() => onSave(post.id)}
+                        title={isPostSaved ? 'Remove from favorites' : 'Add to favorites'}
+                        aria-label="Bookmark"
+                      >
+                        <div className="tiktok-icon-wrap">
+                          <svg width="32" height="32" viewBox="0 0 24 24" fill={isPostSaved ? "#face15" : "#ffffff"} className="tiktok-rail-icon">
+                            <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
+                          </svg>
+                        </div>
+                        <span className="tiktok-rail-count">
+                          {post.savesCount >= 1000 ? `${(post.savesCount / 1000).toFixed(1)}k` : (post.savesCount || 0)}
+                        </span>
+                      </button>
+                    );
+                  })()}
 
                   {/* 5. Curved Share Arrow Button */}
                   <button
@@ -2440,7 +2451,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             </div>
             <div className="privity-action-sheet-options">
               {/* If user's own post, show Delete Dispatch */}
-              {(activePostMenu.authorHandle === currentUser.handle || (currentUser.id && activePostMenu.authorId === currentUser.id)) && (
+              {(((activePostMenu.authorHandle && currentUser.handle && activePostMenu.authorHandle.replace(/^@+/, '').toLowerCase() === currentUser.handle.replace(/^@+/, '').toLowerCase()) || (currentUser.id && activePostMenu.authorId === currentUser.id))) && (
                 <button
                   type="button"
                   className="privity-sheet-btn danger"
@@ -2497,20 +2508,25 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
               </button>
 
               {/* Save / Bookmark Dispatch */}
-              <button
-                type="button"
-                className="privity-sheet-btn"
-                onClick={() => {
-                  const id = activePostMenu.id;
-                  setActivePostMenu(null);
-                  onSave(id);
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                </svg>
-                <span>{activePostMenu.isSaved ? 'Remove Bookmark' : 'Bookmark Dispatch'}</span>
-              </button>
+              {(() => {
+                const isMenuSaved = (savedPostIds && savedPostIds.includes(activePostMenu.id)) || !!activePostMenu.isSaved;
+                return (
+                  <button
+                    type="button"
+                    className="privity-sheet-btn"
+                    onClick={() => {
+                      const id = activePostMenu.id;
+                      setActivePostMenu(null);
+                      onSave(id);
+                    }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill={isMenuSaved ? "#face15" : "none"} stroke={isMenuSaved ? "#face15" : "currentColor"} strokeWidth="2">
+                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <span>{isMenuSaved ? 'Remove Bookmark' : 'Bookmark Dispatch'}</span>
+                  </button>
+                );
+              })()}
 
               {/* Mute Creator */}
               <button

@@ -303,10 +303,16 @@ export const isSameHandle = (h1?: string | null, h2?: string | null): boolean =>
 export const isPostLikedByUser = (post?: PostItem | null, handle?: string | null): boolean => {
   if (!post) return false;
   const clean = normalizeHandle(handle);
-  if (clean && Array.isArray(post.likersList) && post.likersList.some((h) => normalizeHandle(h) === clean)) {
-    return true;
+  if (!clean) return false;
+  if (Array.isArray(post.likersList)) {
+    return post.likersList.some((h) => normalizeHandle(h) === clean);
   }
   return !!post.isLiked;
+};
+
+export const calcCommentsCount = (comments?: PostComment[]): number => {
+  if (!Array.isArray(comments)) return 0;
+  return comments.reduce((acc, c) => acc + 1 + (c.replies?.length || 0), 0);
 };
 
 export const isCommentLikedByUser = (comment?: { likersList?: string[] } | null, handle?: string | null): boolean => {
@@ -318,7 +324,7 @@ export const isCommentLikedByUser = (comment?: { likersList?: string[] } | null,
 
 export interface AppNotification {
   id: string;
-  type: 'like' | 'comment' | 'follow' | 'mention' | 'gift';
+  type: 'like' | 'comment' | 'follow' | 'mention' | 'gift' | 'save' | 'share';
   actorHandle: string;
   actorName: string;
   actorAvatar: string;
@@ -1242,10 +1248,30 @@ export function App() {
   const profilesRef = React.useRef(profiles);
   profilesRef.current = profiles;
 
-  // 2. Persistent Posts State (strictly filters out any mock posts)
+  // Deleted Posts Registry (persists across sessions to permanently eliminate "ghost" resurrected posts)
+  const [deletedPostIds, setDeletedPostIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('privity_deleted_post_ids_v1');
+      return saved ? new Set<string>(JSON.parse(saved)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const deletedPostIdsRef = React.useRef(deletedPostIds);
+  deletedPostIdsRef.current = deletedPostIds;
+
+  // 2. Persistent Posts State (strictly filters out any mock posts and deleted posts)
   const [posts, setPosts] = useState<PostItem[]>(() => {
+    const deleted = (() => {
+      try {
+        const saved = localStorage.getItem('privity_deleted_post_ids_v1');
+        return saved ? new Set<string>(JSON.parse(saved)) : new Set<string>();
+      } catch {
+        return new Set<string>();
+      }
+    })();
     const loaded = readStorage<PostItem[]>('privity_posts_v5', []);
-    return Array.isArray(loaded) ? loaded.filter((p) => !isMockPost(p)) : [];
+    return Array.isArray(loaded) ? loaded.filter((p) => !isMockPost(p) && !deleted.has(p.id)) : [];
   });
   const postsRef = React.useRef(posts);
   postsRef.current = posts;
@@ -1901,15 +1927,15 @@ export function App() {
 
                 const count = typeof likesCount === 'number'
                   ? likesCount
-                  : Math.max(
-                      isLiked ? (p.likesCount || 0) + 1 : Math.max(0, (p.likesCount || 0) - 1),
-                      updatedLikers.length
-                    );
+                  : updatedLikers.length;
+
+                const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
 
                 return {
                   ...p,
                   likersList: updatedLikers,
                   likesCount: Math.max(0, count),
+                  isLiked: myClean ? updatedLikers.includes(myClean) : p.isLiked,
                 };
               }
               return p;
@@ -1947,13 +1973,16 @@ export function App() {
         }
 
         case 'SAVE_POST': {
-          const { postId, isSaved } = event;
+          const { postId, isSaved, savesCount, saverHandle, saverName, saverAvatar, postAuthorHandle, postCaptionSnippet, postThumbnail } = event;
           setPosts((prev) => {
             const nextPosts = prev.map((p) => {
               if (p.id === postId) {
+                const count = typeof savesCount === 'number'
+                  ? savesCount
+                  : isSaved ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1);
                 return {
                   ...p,
-                  savesCount: isSaved ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1),
+                  savesCount: count,
                 };
               }
               return p;
@@ -1961,6 +1990,75 @@ export function App() {
             safeSaveStorage('privity_posts_v5', nextPosts);
             return nextPosts;
           });
+
+          // Accurate Notification: When another user saves current user's dispatch
+          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          const cleanSaver = normalizeHandle(saverHandle);
+          let targetAuthor = normalizeHandle(postAuthorHandle);
+          if (!targetAuthor) {
+            targetAuthor = normalizeHandle(postsRef.current.find((p) => p.id === postId)?.authorHandle);
+          }
+          if (isSaved && cleanSaver && myClean && cleanSaver !== myClean && targetAuthor === myClean) {
+            const notif: AppNotification = {
+              id: `notif-save-${postId}-${cleanSaver}-${Date.now()}`,
+              type: 'save',
+              actorHandle: cleanSaver,
+              actorName: saverName || cleanSaver,
+              actorAvatar: saverAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanSaver}`,
+              targetPostId: postId,
+              postCaptionSnippet: postCaptionSnippet || 'your dispatch',
+              postThumbnail: postThumbnail,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myClean);
+            triggerToast(`🔖 @${cleanSaver} saved your dispatch`);
+          }
+          break;
+        }
+
+        case 'SHARE_POST': {
+          const { postId, sharesCount, sharerHandle, sharerName, sharerAvatar, postAuthorHandle, postCaptionSnippet, postThumbnail } = event;
+          if (!postId) break;
+          setPosts((prev) => {
+            const nextPosts = prev.map((p) => {
+              if (p.id === postId) {
+                return {
+                  ...p,
+                  sharesCount: typeof sharesCount === 'number' ? sharesCount : (p.sharesCount || 0) + 1,
+                };
+              }
+              return p;
+            });
+            safeSaveStorage('privity_posts_v5', nextPosts);
+            return nextPosts;
+          });
+
+          // Accurate Notification: When another user shares current user's dispatch
+          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          const cleanSharer = normalizeHandle(sharerHandle);
+          let targetAuthor = normalizeHandle(postAuthorHandle);
+          if (!targetAuthor) {
+            targetAuthor = normalizeHandle(postsRef.current.find((p) => p.id === postId)?.authorHandle);
+          }
+          if (cleanSharer && myClean && cleanSharer !== myClean && targetAuthor === myClean) {
+            const notif: AppNotification = {
+              id: `notif-share-${postId}-${cleanSharer}-${Date.now()}`,
+              type: 'share',
+              actorHandle: cleanSharer,
+              actorName: sharerName || cleanSharer,
+              actorAvatar: sharerAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanSharer}`,
+              targetPostId: postId,
+              postCaptionSnippet: postCaptionSnippet || 'your dispatch',
+              postThumbnail: postThumbnail,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myClean);
+            triggerToast(`🚀 @${cleanSharer} shared your dispatch`);
+          }
           break;
         }
 
@@ -1979,7 +2077,7 @@ export function App() {
 
         case 'NEW_POST': {
           const { post } = event;
-          if (!post || !post.id || isMockPost(post)) return;
+          if (!post || !post.id || isMockPost(post) || deletedPostIdsRef.current.has(post.id)) return;
           setPosts((prev) => {
             if (prev.some((p) => p.id === post.id)) return prev;
             const next = [post, ...prev];
@@ -2020,6 +2118,14 @@ export function App() {
 
         case 'DELETE_POST': {
           const { postId } = event;
+          if (!postId) break;
+          setDeletedPostIds((prev) => {
+            const next = new Set(prev);
+            next.add(postId);
+            safeSaveStorage('privity_deleted_post_ids_v1', Array.from(next));
+            deletedPostIdsRef.current = next;
+            return next;
+          });
           setPosts((prev) => {
             const next = prev.filter((p) => p.id !== postId);
             safeSaveStorage('privity_posts_v5', next);
@@ -2040,6 +2146,37 @@ export function App() {
             if (changed) safeSaveStorage('privity_profiles_v5', nextProfs);
             return nextProfs;
           });
+          break;
+        }
+
+        case 'SYNC_DELETED_POSTS': {
+          const { deletedIds } = event;
+          if (Array.isArray(deletedIds) && deletedIds.length > 0) {
+            setDeletedPostIds((prev) => {
+              let updated = false;
+              const next = new Set(prev);
+              for (const id of deletedIds) {
+                if (!next.has(id)) {
+                  next.add(id);
+                  updated = true;
+                }
+              }
+              if (updated) {
+                safeSaveStorage('privity_deleted_post_ids_v1', Array.from(next));
+                deletedPostIdsRef.current = next;
+              }
+              return updated ? next : prev;
+            });
+            setPosts((prev) => {
+              const delSet = new Set(deletedIds);
+              const next = prev.filter((p) => !delSet.has(p.id));
+              if (next.length !== prev.length) {
+                safeSaveStorage('privity_posts_v5', next);
+                return next;
+              }
+              return prev;
+            });
+          }
           break;
         }
 
@@ -2083,13 +2220,14 @@ export function App() {
                   }
                   return c;
                 });
-                return { ...p, commentsCount: p.commentsCount + 1, comments: updatedComments };
+                return { ...p, commentsCount: calcCommentsCount(updatedComments), comments: updatedComments };
               }
               if (p.comments.some((c) => c.id === comment.id)) return p;
+              const updated = [...p.comments, comment];
               return {
                 ...p,
-                commentsCount: p.commentsCount + 1,
-                comments: [...p.comments, comment],
+                commentsCount: calcCommentsCount(updated),
+                comments: updated,
               };
             });
             safeSaveStorage('privity_posts_v5', next);
@@ -2206,23 +2344,20 @@ export function App() {
           setPosts((prev) => {
             const next = prev.map((p) => {
               if (p.id !== postId) return p;
+              let updatedComments: PostComment[];
               if (replyId) {
-                return {
-                  ...p,
-                  commentsCount: Math.max(0, p.commentsCount - 1),
-                  comments: p.comments.map((c) =>
-                    c.id === commentId
-                      ? { ...c, replies: (c.replies || []).filter((r) => r.id !== replyId) }
-                      : c
-                  ),
-                };
+                updatedComments = p.comments.map((c) =>
+                  c.id === commentId
+                    ? { ...c, replies: (c.replies || []).filter((r) => r.id !== replyId) }
+                    : c
+                );
+              } else {
+                updatedComments = p.comments.filter((c) => c.id !== commentId);
               }
-              const target = p.comments.find((c) => c.id === commentId);
-              const repliesCount = target?.replies?.length || 0;
               return {
                 ...p,
-                commentsCount: Math.max(0, p.commentsCount - (1 + repliesCount)),
-                comments: p.comments.filter((c) => c.id !== commentId),
+                commentsCount: calcCommentsCount(updatedComments),
+                comments: updatedComments,
               };
             });
             safeSaveStorage('privity_posts_v5', next);
@@ -2892,8 +3027,14 @@ export function App() {
         }
 
         case 'QUERY_POSTS': {
+          if (deletedPostIdsRef.current.size > 0) {
+            broadcastSyncEventRef.current({
+              action: 'SYNC_DELETED_POSTS',
+              deletedIds: Array.from(deletedPostIdsRef.current),
+            });
+          }
           if (postsRef.current && postsRef.current.length > 0) {
-            const validPosts = postsRef.current.filter((p) => !isMockPost(p));
+            const validPosts = postsRef.current.filter((p) => !isMockPost(p) && !deletedPostIdsRef.current.has(p.id));
             for (let i = 0; i < Math.min(validPosts.length, 15); i += 3) {
               const chunk = validPosts.slice(i, i + 3);
               setTimeout(() => {
@@ -2914,7 +3055,7 @@ export function App() {
               const map = new Map(prev.map((p) => [p.id, p]));
               let changed = false;
               for (const rp of remotePosts) {
-                if (!rp || !rp.id || isMockPost(rp)) continue;
+                if (!rp || !rp.id || isMockPost(rp) || deletedPostIdsRef.current.has(rp.id)) continue;
                 if (!map.has(rp.id)) {
                   map.set(rp.id, rp);
                   changed = true;
@@ -3684,22 +3825,13 @@ export function App() {
   // Post Actions Menu & Caption Editing State
   const [postMenuModal, setPostMenuModal] = useState<{ post: PostItem; isOwn: boolean } | null>(null);
   const [editingPostCaption, setEditingPostCaption] = useState<{ id: string; caption: string } | null>(null);
-  const [deletedPostIds, setDeletedPostIds] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem('privity_deleted_post_ids_v1');
-    if (saved) {
-      try {
-        return new Set(JSON.parse(saved));
-      } catch (e) {}
-    }
-    return new Set<string>();
-  });
-
   // Delete post permanently and synchronize with Media & Studio
   const handleDeletePost = (postId: string) => {
     setDeletedPostIds((prev) => {
       const next = new Set(prev);
       next.add(postId);
       safeSaveStorage('privity_deleted_post_ids_v1', Array.from(next));
+      deletedPostIdsRef.current = next;
       return next;
     });
 
@@ -3714,25 +3846,23 @@ export function App() {
     });
 
     // 2. Remove corresponding visual from Media & Studio
-    if (targetPhotoUrl) {
-      setProfiles((prevProfs) => {
-        let changed = false;
-        const nextProfs = { ...prevProfs };
-        for (const [h, prof] of Object.entries(nextProfs)) {
-          if (prof.mediaItems?.some((m) => isSameMedia(m.url, targetPhotoUrl))) {
-            changed = true;
-            nextProfs[h] = {
-              ...prof,
-              mediaItems: prof.mediaItems.filter((m) => !isSameMedia(m.url, targetPhotoUrl)),
-            };
-          }
+    setProfiles((prevProfs) => {
+      let changed = false;
+      const nextProfs = { ...prevProfs };
+      for (const [h, prof] of Object.entries(nextProfs)) {
+        if (prof.mediaItems?.some((m) => m.id === postId || (targetPhotoUrl && isSameMedia(m.url, targetPhotoUrl)))) {
+          changed = true;
+          nextProfs[h] = {
+            ...prof,
+            mediaItems: prof.mediaItems.filter((m) => m.id !== postId && (!targetPhotoUrl || !isSameMedia(m.url, targetPhotoUrl))),
+          };
         }
-        if (changed) {
-          safeSaveStorage('privity_profiles_v5', nextProfs);
-        }
-        return nextProfs;
-      });
-    }
+      }
+      if (changed) {
+        safeSaveStorage('privity_profiles_v5', nextProfs);
+      }
+      return nextProfs;
+    });
 
     setPostMenuModal(null);
     broadcastSyncEvent({
@@ -4795,7 +4925,7 @@ export function App() {
 
     const photoUrl = targetPost.contentUrl || targetPost.thumbnailUrl;
     const currentLikers = (targetPost.likersList || []).map(normalizeHandle).filter(Boolean);
-    const isCurrentlyLiked = currentLikers.includes(myClean);
+    const isCurrentlyLiked = isPostLikedByUser(targetPost, myClean);
     if (fromDoubleTap && isCurrentlyLiked) return;
 
     const nextLiked = fromDoubleTap ? true : !isCurrentlyLiked;
@@ -4803,11 +4933,7 @@ export function App() {
       ? Array.from(new Set([...currentLikers, myClean]))
       : currentLikers.filter((h) => h !== myClean);
 
-    const nextCount = Math.max(
-      0,
-      nextLiked ? (targetPost.likesCount || 0) + 1 : Math.max(0, (targetPost.likesCount || 0) - 1),
-      nextLikers.length
-    );
+    const nextCount = nextLikers.length;
 
     // 1. Update photoLikesMap immediately for media
     if (photoUrl) {
@@ -4857,6 +4983,7 @@ export function App() {
               ...p,
               likersList: nextLikers,
               likesCount: nextCount,
+              isLiked: nextLiked,
             };
           }
           return p;
@@ -4866,6 +4993,7 @@ export function App() {
           ...targetPost!,
           likersList: nextLikers,
           likesCount: nextCount,
+          isLiked: nextLiked,
         };
         nextPosts = [newP, ...prevPosts];
       }
@@ -4897,27 +5025,29 @@ export function App() {
   // Bookmark / Save
   const handleSave = (postId: string) => {
     let nextSavedState = false;
+    let nextSavesCount = 0;
     const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
     const savedKey = myClean ? `privity_saved_posts_${myClean}` : 'privity_saved_posts_default';
     const currentSaved = readStorage<string[]>(savedKey, []);
 
+    let targetPost = posts.find((p) => p.id === postId);
+    if (!targetPost) {
+      targetPost = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
+    }
+
     setPosts((prev) => {
       let currentList = prev;
-      let targetPost = currentList.find((p) => p.id === postId);
-      if (!targetPost) {
-        const template = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
-        if (template) {
-          targetPost = { ...template };
-          currentList = [...currentList, targetPost];
-        }
+      if (!currentList.some((p) => p.id === postId) && targetPost) {
+        currentList = [...currentList, targetPost];
       }
-      if (!targetPost) return prev;
       nextSavedState = !currentSaved.includes(postId);
       const nextPosts = currentList.map((p) => {
         if (p.id === postId) {
+          nextSavesCount = nextSavedState ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1);
           return {
             ...p,
-            savesCount: nextSavedState ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1),
+            savesCount: nextSavesCount,
+            isSaved: nextSavedState,
           };
         }
         return p;
@@ -4937,15 +5067,57 @@ export function App() {
       action: 'SAVE_POST',
       postId,
       isSaved: nextSavedState,
+      savesCount: nextSavesCount,
+      saverHandle: myClean,
+      saverName: currentAuthUser?.name || myProfile.name || myClean,
+      saverAvatar: currentAuthUser?.avatar || myProfile.avatar,
+      postAuthorHandle: normalizeHandle(targetPost?.authorHandle),
+      postCaptionSnippet: targetPost?.caption ? targetPost.caption.slice(0, 60) : 'your dispatch',
+      postThumbnail: targetPost?.contentUrl || targetPost?.thumbnailUrl,
     });
     triggerToast(nextSavedState ? 'Saved to collection! 🔖' : 'Removed from collection');
   };
 
   // Share
   const handleShare = (postId: string) => {
+    let targetPost = posts.find((p) => p.id === postId);
+    if (!targetPost) {
+      targetPost = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
+    }
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+
+    let nextSharesCount = 1;
+    setPosts((prev) => {
+      const nextPosts = prev.map((p) => {
+        if (p.id === postId) {
+          nextSharesCount = (p.sharesCount || 0) + 1;
+          return {
+            ...p,
+            sharesCount: nextSharesCount,
+          };
+        }
+        return p;
+      });
+      safeSaveStorage('privity_posts_v5', nextPosts);
+      return nextPosts;
+    });
+
     const url = `https://privity.app/p/${postId}`;
     navigator.clipboard?.writeText(url);
-    triggerToast(`External share link copied: ${url}`);
+
+    broadcastSyncEvent({
+      action: 'SHARE_POST',
+      postId,
+      sharesCount: nextSharesCount,
+      sharerHandle: myClean,
+      sharerName: currentAuthUser?.name || myProfile.name || myClean,
+      sharerAvatar: currentAuthUser?.avatar || myProfile.avatar,
+      postAuthorHandle: normalizeHandle(targetPost?.authorHandle),
+      postCaptionSnippet: targetPost?.caption ? targetPost.caption.slice(0, 60) : 'your dispatch',
+      postThumbnail: targetPost?.contentUrl || targetPost?.thumbnailUrl,
+    });
+
+    triggerToast(`Shared! External link copied: ${url}`);
   };
 
   // Add Comment with 1-level reply nesting & cross-profile media item synchronization
@@ -4987,7 +5159,7 @@ export function App() {
               }
               return c;
             });
-            return { ...p, commentsCount: p.commentsCount + 1, comments: updated };
+            return { ...p, commentsCount: calcCommentsCount(updated), comments: updated };
           } else {
             const comment: PostComment = {
               id: `c-${Date.now()}`,
@@ -5000,7 +5172,8 @@ export function App() {
               likesCount: 0,
             };
             createdItem = comment;
-            return { ...p, commentsCount: p.commentsCount + 1, comments: [...p.comments, comment] };
+            const updated = [...p.comments, comment];
+            return { ...p, commentsCount: calcCommentsCount(updated), comments: updated };
           }
         }
         return p;
@@ -5068,29 +5241,23 @@ export function App() {
     setPosts((prev) => {
       const nextPosts = prev.map((p) => {
         if (p.id !== postId) return p;
+        let updatedComments: PostComment[];
         if (replyId) {
-          const updated = p.comments.map((c) => {
+          updatedComments = p.comments.map((c) => {
             if (c.id !== commentId) return c;
             return {
               ...c,
               replies: (c.replies || []).filter((r) => r.id !== replyId),
             };
           });
-          return {
-            ...p,
-            commentsCount: Math.max(0, p.commentsCount - 1),
-            comments: updated,
-          };
         } else {
-          const targetComment = p.comments.find((c) => c.id === commentId);
-          const repliesTotal = targetComment?.replies?.length || 0;
-          const updated = p.comments.filter((c) => c.id !== commentId);
-          return {
-            ...p,
-            commentsCount: Math.max(0, p.commentsCount - (1 + repliesTotal)),
-            comments: updated,
-          };
+          updatedComments = p.comments.filter((c) => c.id !== commentId);
         }
+        return {
+          ...p,
+          commentsCount: calcCommentsCount(updatedComments),
+          comments: updatedComments,
+        };
       });
       safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
@@ -6677,6 +6844,7 @@ export function App() {
                 followingMap={followingMap}
                 closeFriendsList={closeFriendsList}
                 deletedPostIds={deletedPostIds}
+                savedPostIds={savedPostIds}
                 onLike={(postId) => handleLike(postId)}
                 onSave={(postId) => handleSave(postId)}
                 onAddComment={(postId, text) => handleAddComment(postId, text)}
@@ -7292,7 +7460,7 @@ export function App() {
                         const effectiveLiked = isPostLikedByUser(post, viewerHandle);
                         const effectiveLikers = (post.likersList || []).map(normalizeHandle).filter(Boolean);
                         const rawLikesCount = typeof post.likesCount === 'number' && !isNaN(post.likesCount) ? post.likesCount : 0;
-                        const effectiveLikesCount = Math.max(rawLikesCount, effectiveLikers.length);
+                        const effectiveLikesCount = Array.isArray(post.likersList) ? post.likersList.length : rawLikesCount;
                         const isSaved = savedPostIds.includes(post.id);
 
                         return (
@@ -8292,6 +8460,8 @@ export function App() {
                                     {notif.type === 'comment' && '💬'}
                                     {notif.type === 'follow' && '👤'}
                                     {notif.type === 'gift' && '🎁'}
+                                    {notif.type === 'save' && '🔖'}
+                                    {notif.type === 'share' && '🚀'}
                                   </span>
                                 </div>
 
@@ -8312,6 +8482,8 @@ export function App() {
                                     {notif.type === 'comment' && 'commented on your dispatch'}
                                     {notif.type === 'follow' && 'started following you'}
                                     {notif.type === 'gift' && `sent you a gift: ${notif.giftName || 'Virtual Gift'}`}
+                                    {notif.type === 'save' && 'saved your dispatch to their bookmarks'}
+                                    {notif.type === 'share' && 'shared your dispatch'}
                                   </div>
 
                                   {notif.commentText && (
@@ -9354,6 +9526,8 @@ export function App() {
                               {notif.type === 'comment' && '💬'}
                               {notif.type === 'follow' && '👤'}
                               {notif.type === 'gift' && '🎁'}
+                              {notif.type === 'save' && '🔖'}
+                              {notif.type === 'share' && '🚀'}
                             </span>
                           </div>
 
@@ -9374,6 +9548,8 @@ export function App() {
                               {notif.type === 'comment' && 'commented on your dispatch'}
                               {notif.type === 'follow' && 'started following you'}
                               {notif.type === 'gift' && `sent you a gift: ${notif.giftName || 'Virtual Gift'}`}
+                              {notif.type === 'save' && 'saved your dispatch to their bookmarks'}
+                              {notif.type === 'share' && 'shared your dispatch'}
                             </div>
 
                             {notif.commentText && (
@@ -9423,29 +9599,28 @@ export function App() {
              viewedUserHandle.toLowerCase() === myProfile.handle.toLowerCase());
           const isFollowingThisUser = isUserFollowed(profile.handle);
           const isInCloseFriends = closeFriendsList.includes(profile.handle);
+          const targetClean = normalizeHandle(profile.handle);
+          const myClean = normalizeHandle(myProfile.handle);
+
           const userDispatches = posts.filter(
             (p) =>
-              p.authorHandle.toLowerCase() === profile.handle.toLowerCase() ||
+              normalizeHandle(p.authorHandle) === targetClean ||
               (isOwnProfile &&
                 ((myProfile.id && p.authorId === myProfile.id) ||
-                  p.authorHandle.toLowerCase() === myProfile.handle.toLowerCase()))
+                  normalizeHandle(p.authorHandle) === myClean))
           );
 
           const userLikedPosts = posts.filter((p) => {
-            if (isOwnProfile) {
-              return (
-                p.isLiked ||
-                (Boolean(myProfile.handle) && (p.likersList || []).some(
-                  (h) => h.toLowerCase() === myProfile.handle.toLowerCase()
-                ))
-              );
-            }
-            return (p.likersList || []).some(
-              (h) => h.toLowerCase() === profile.handle.toLowerCase()
-            );
+            const cleanTarget = isOwnProfile ? myClean : targetClean;
+            return isPostLikedByUser(p, cleanTarget);
           });
 
-          const userSavedPosts = posts.filter((p) => p.isSaved);
+          const userSavedPosts = posts.filter((p) => {
+            if (isOwnProfile) {
+              return savedPostIds.includes(p.id) || !!p.isSaved;
+            }
+            return !!p.isSaved;
+          });
 
           const userRepliesPosts = posts.filter((p) => {
             const checkAuthor = (handle: string) => {
@@ -9693,14 +9868,26 @@ export function App() {
                       ? closeFriendsList.length
                       : (profile.trustCirclesList || []).length;
 
-                    const totalLikesReceived = userDispatches.reduce(
-                      (sum, p) => sum + Math.max(p.likesCount || 0, (p.likersList || []).length),
-                      0
-                    ) + (profile.mediaItems || []).reduce((sum, m) => {
+                    // Deduplicate post visuals from profile.mediaItems to avoid double counting likes
+                    const dispatchMediaUrls = new Set<string>();
+                    let dispatchesLikes = 0;
+                    for (const p of userDispatches) {
+                      dispatchesLikes += Array.isArray(p.likersList) ? p.likersList.length : (p.likesCount || 0);
+                      if (p.contentUrl) dispatchMediaUrls.add(extractMediaBaseKey(p.contentUrl) || p.contentUrl);
+                      if (p.thumbnailUrl) dispatchMediaUrls.add(extractMediaBaseKey(p.thumbnailUrl) || p.thumbnailUrl);
+                    }
+
+                    let standaloneMediaLikes = 0;
+                    for (const m of (profile.mediaItems || [])) {
                       const baseKey = extractMediaBaseKey(m.url);
+                      if ((baseKey && dispatchMediaUrls.has(baseKey)) || dispatchMediaUrls.has(m.url) || userDispatches.some(p => p.id === m.id)) {
+                        continue; // Already counted in dispatches
+                      }
                       const photoRec = photoLikesMap[m.url] || (baseKey ? photoLikesMap[baseKey] : undefined);
-                      return sum + (photoRec ? photoRec.count : (m.likes || 0));
-                    }, 0);
+                      standaloneMediaLikes += photoRec ? photoRec.count : (m.likes || 0);
+                    }
+
+                    const totalLikesReceived = dispatchesLikes + standaloneMediaLikes;
 
                     return (
                       <div className="profile-hero-stats-shelf">
@@ -10055,7 +10242,7 @@ export function App() {
                               const effectiveLiked = isPostLikedByUser(post, viewerHandle);
                               const effectiveLikers = (post.likersList || []).map(normalizeHandle).filter(Boolean);
                               const rawLikesCount = typeof post.likesCount === 'number' && !isNaN(post.likesCount) ? post.likesCount : 0;
-                              const effectiveLikesCount = Math.max(rawLikesCount, effectiveLikers.length);
+                              const effectiveLikesCount = Array.isArray(post.likersList) ? post.likersList.length : rawLikesCount;
                               const isSaved = savedPostIds.includes(post.id);
 
                               return (
