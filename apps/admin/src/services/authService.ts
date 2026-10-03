@@ -10,7 +10,9 @@ export interface UserAccount {
   handle: string;
   email: string;
   avatar: string;
+  avatarPoster?: string;
   coverUrl?: string;
+  coverPoster?: string;
   bio?: string;
   level: number;
   xp: number;

@@ -5,8 +5,18 @@ import { storeMediaBlob } from './mediaDb';
 
 export const knownVideoBlobUrls = new Set<string>();
 
+export function fileToDataUrl(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 export function isKnownVideoUrl(url?: string): boolean {
   if (!url) return false;
+  if (url.startsWith('data:video/')) return true;
   const clean = url.split('#')[0];
   return knownVideoBlobUrls.has(clean) || knownVideoBlobUrls.has(url);
 }
@@ -16,19 +26,12 @@ export async function convertVideoToAnimatedLoop(
   mode: 'avatar' | 'banner' | 'studio' = 'avatar',
   userHandle?: string
 ): Promise<string> {
-  // 1. Create immediate live Blob URL in 0ms so user interface never stalls or waits
-  let immediateBlobUrl = '';
-  try {
-    immediateBlobUrl = URL.createObjectURL(file);
-    knownVideoBlobUrls.add(immediateBlobUrl);
-  } catch {}
-
   const cleanUser = userHandle ? userHandle.replace(/^@/, '').toLowerCase().trim() : '';
   const mediaId = cleanUser
     ? `privity_${mode}_${cleanUser}_${Date.now()}`
     : `privity_${mode}_loop_${Date.now()}`;
 
-  // 2. Persist media key in localStorage immediately
+  // 1. Persist media key in localStorage immediately
   try {
     localStorage.setItem(`privity_user_${mode}_media_key`, mediaId);
     if (cleanUser) {
@@ -36,10 +39,30 @@ export async function convertVideoToAnimatedLoop(
     }
   } catch {}
 
-  // 3. Store in IndexedDB asynchronously in background (without blocking UI return)
+  // 2. Store in IndexedDB asynchronously in background
   storeMediaBlob(mediaId, file).catch((err) => {
     console.warn('[videoMediaHelper] background storeMediaBlob error:', err);
   });
+
+  // 3. For video files under 8MB, generate a portable Base64 Data URL so all remote devices can play it in real time
+  if (file.size <= 8 * 1024 * 1024) {
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      if (dataUrl && dataUrl.startsWith('data:')) {
+        knownVideoBlobUrls.add(dataUrl);
+        return dataUrl;
+      }
+    } catch (e) {
+      console.warn('[videoMediaHelper] fileToDataUrl fallback:', e);
+    }
+  }
+
+  // 4. Fallback for larger files: create local object URL
+  let immediateBlobUrl = '';
+  try {
+    immediateBlobUrl = URL.createObjectURL(file);
+    knownVideoBlobUrls.add(immediateBlobUrl);
+  } catch {}
 
   const finalUrl = immediateBlobUrl
     ? `${immediateBlobUrl}#video.mp4`

@@ -68,10 +68,10 @@ import {
   StoryItem,
 } from './components/feed/TikTokSlideFeed';
 import { authService, UserAccount } from './services/authService';
-import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnectSupabaseRealtime } from './services/supabaseClient';
+import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnectSupabaseRealtime, isSupabaseRealtimeConnected } from './services/supabaseClient';
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
-import { convertVideoToAnimatedLoop, isKnownVideoUrl } from './services/videoMediaHelper';
+import { convertVideoToAnimatedLoop, isKnownVideoUrl, extractVideoThumbnail } from './services/videoMediaHelper';
 import { storePostMedia, getFreshMediaUrl, clearAllMediaBlobs } from './services/mediaDb';
 
 export const BANNED_MOCK_HANDLES = new Set([
@@ -377,7 +377,9 @@ interface UserProfile {
   name: string;
   handle: string;
   avatar: string;
+  avatarPoster?: string;
   coverUrl: string;
+  coverPoster?: string;
   isVerified: boolean;
   verifiedCategory?: string;
   verifiedSince?: string;
@@ -660,6 +662,7 @@ const isSameMedia = (url1?: string, url2?: string): boolean => {
 
 export const cleanMediaUrl = (url?: string): string => {
   if (!url) return '';
+  if (url.startsWith('data:')) return url;
   return url.split('#')[0];
 };
 
@@ -715,13 +718,43 @@ export const MediaAvatar: React.FC<{
               el.play().catch(() => {});
             }
           }}
+          onError={(e) => {
+            const vid = e.currentTarget;
+            if (vid) {
+              vid.style.display = 'none';
+              const imgFallback = vid.nextElementSibling as HTMLElement;
+              if (imgFallback) imgFallback.style.display = 'block';
+            }
+          }}
           className={`media-avatar-video ${className}`}
           style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
+        />
+        <img
+          src={`https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(alt || 'user')}`}
+          alt={alt}
+          className={`media-avatar-img ${className}`}
+          style={{ display: 'none', width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
         />
       </div>
     );
   }
-  return <img src={cleanMediaUrl(src)} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
+  return (
+    <img
+      src={cleanMediaUrl(src)}
+      alt={alt}
+      className={className}
+      style={style}
+      onClick={onClick}
+      title={title}
+      onError={(e) => {
+        const target = e.currentTarget;
+        const fallback = `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(alt || 'user')}`;
+        if (target.src !== fallback) {
+          target.src = fallback;
+        }
+      }}
+    />
+  );
 };
 
 import { PrivityVideoPlayer } from './components/feed/PrivityVideoPlayer';
@@ -816,11 +849,11 @@ export function App() {
         for (const [k, prof] of Object.entries(data as Record<string, any>)) {
           if (!prof) continue;
           let cleanProf = { ...prof };
-          if (cleanProf.avatar && cleanProf.avatar.length > 380000 && cleanProf.avatar.startsWith('data:')) {
-            cleanProf.avatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400';
+          if (cleanProf.avatar && cleanProf.avatar.length > 800000 && cleanProf.avatar.startsWith('data:')) {
+            cleanProf.avatar = cleanProf.avatarPoster || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400';
           }
-          if (cleanProf.coverUrl && cleanProf.coverUrl.length > 380000 && cleanProf.coverUrl.startsWith('data:')) {
-            cleanProf.coverUrl = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200';
+          if (cleanProf.coverUrl && cleanProf.coverUrl.length > 1200000 && cleanProf.coverUrl.startsWith('data:')) {
+            cleanProf.coverUrl = cleanProf.coverPoster || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200';
           }
           (sanitized as any)[k] = cleanProf;
         }
@@ -1762,7 +1795,9 @@ export function App() {
           name: fromProf.name || currentAuthUser?.name || activeAuthHandle,
           handle: activeAuthHandle,
           avatar: fromProf.avatar || currentAuthUser?.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${activeAuthHandle}`,
+          avatarPoster: fromProf.avatarPoster || currentAuthUser?.avatarPoster,
           coverUrl: fromProf.coverUrl || currentAuthUser?.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+          coverPoster: fromProf.coverPoster || currentAuthUser?.coverPoster,
           bio: fromProf.bio || currentAuthUser?.bio || '',
           isVerified: Boolean(fromProf.isVerified || currentAuthUser?.isVerified),
         };
@@ -1774,7 +1809,9 @@ export function App() {
         name: currentAuthUser.name,
         handle: activeAuthHandle,
         avatar: currentAuthUser.avatar,
+        avatarPoster: currentAuthUser.avatarPoster,
         coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+        coverPoster: currentAuthUser.coverPoster,
         isVerified: currentAuthUser.isVerified || false,
         bio: currentAuthUser.bio || 'Privity creator sharing private-first moments and authentic updates.',
         location: 'Global',
@@ -2495,7 +2532,7 @@ export function App() {
           });
 
           // Accurate Notification: When another user comments on current user's dispatch
-          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          const myClean = cleanMyHandle;
           let targetAuthor = normalizeHandle(postAuthorHandle);
           if (!targetAuthor) {
             targetAuthor = normalizeHandle(postsRef.current.find(p => p.id === postId)?.authorHandle);
@@ -2970,10 +3007,16 @@ export function App() {
           // 1. Update profiles dictionary
           setProfiles((prev) => {
             const existing = prev[clean] || prev[cleanLower] || {};
+            const merged = {
+              ...existing,
+              ...profile,
+              ...(account?.coverPoster || profile.coverPoster ? { coverPoster: account?.coverPoster || profile.coverPoster } : {}),
+              ...(account?.avatarPoster || profile.avatarPoster ? { avatarPoster: account?.avatarPoster || profile.avatarPoster } : {}),
+            };
             const next = {
               ...prev,
-              [clean]: { ...existing, ...profile },
-              [cleanLower]: { ...existing, ...profile },
+              [clean]: merged,
+              [cleanLower]: merged,
             };
             safeSaveStorage('privity_profiles_v5', next);
             return next;
@@ -3278,6 +3321,8 @@ export function App() {
                     next[cleanK].avatar !== prof.avatar ||
                     next[cleanK].bio !== prof.bio ||
                     next[cleanK].coverUrl !== prof.coverUrl ||
+                    (prof as any).coverPoster !== next[cleanK].coverPoster ||
+                    (prof as any).avatarPoster !== next[cleanK].avatarPoster ||
                     (prof.mediaItems && prof.mediaItems.length !== (next[cleanK].mediaItems || []).length)
                   ) {
                     next[cleanK] = { ...(next[cleanK] || {}), ...prof };
@@ -3298,9 +3343,20 @@ export function App() {
               const currentAccounts = authService.getAllAccounts();
               let changedAccs = false;
               for (const [k, acc] of Object.entries(accounts as Record<string, any>)) {
-                if (acc && acc.handle && !currentAccounts[k.toLowerCase()]) {
-                  currentAccounts[k.toLowerCase()] = acc;
-                  changedAccs = true;
+                if (acc && acc.handle) {
+                  const accKey = k.toLowerCase();
+                  const existingAcc = currentAccounts[accKey];
+                  if (
+                    !existingAcc ||
+                    existingAcc.avatar !== acc.avatar ||
+                    existingAcc.coverUrl !== acc.coverUrl ||
+                    existingAcc.name !== acc.name ||
+                    existingAcc.coverPoster !== acc.coverPoster ||
+                    existingAcc.avatarPoster !== acc.avatarPoster
+                  ) {
+                    currentAccounts[accKey] = { ...(existingAcc || {}), ...acc };
+                    changedAccs = true;
+                  }
                 }
               }
               if (changedAccs) {
@@ -3450,6 +3506,12 @@ export function App() {
                   const rpLikers = (rp.likersList || []).map(normalizeHandle).filter(Boolean);
                   const mergedLikers = Array.from(new Set([...curLikers, ...rpLikers]));
                   const mergedLikesCount = Math.max(cur.likesCount || 0, rp.likesCount || 0, mergedLikers.length);
+
+                  const curSavers = (cur.saversList || []).map(normalizeHandle).filter(Boolean);
+                  const rpSavers = (rp.saversList || []).map(normalizeHandle).filter(Boolean);
+                  const mergedSavers = Array.from(new Set([...curSavers, ...rpSavers]));
+                  const mergedSavesCount = Math.max(cur.savesCount || 0, rp.savesCount || 0, mergedSavers.length);
+
                   const curComments = cur.comments || [];
                   const rpComments = rp.comments || [];
                   const mergedComments = rpComments.length > curComments.length ? rpComments : curComments;
@@ -3458,6 +3520,8 @@ export function App() {
                   if (
                     mergedLikers.length !== curLikers.length ||
                     mergedLikesCount !== cur.likesCount ||
+                    mergedSavers.length !== curSavers.length ||
+                    mergedSavesCount !== cur.savesCount ||
                     mergedCommentsCount !== cur.commentsCount ||
                     mergedComments.length !== curComments.length
                   ) {
@@ -3465,6 +3529,8 @@ export function App() {
                       ...cur,
                       likersList: mergedLikers,
                       likesCount: mergedLikesCount,
+                      saversList: mergedSavers,
+                      savesCount: mergedSavesCount,
                       comments: mergedComments,
                       commentsCount: mergedCommentsCount,
                     });
@@ -3752,13 +3818,27 @@ export function App() {
     };
     window.addEventListener('storage', handleStorageEvent);
 
-    // 6. 3-second heartbeat poll to ensure guaranteed sync even if mobile OS sleeps SSE
+    // 6. Active Realtime Health Check & Background Heartbeat
+    let lastQueryTime = 0;
     const pollInterval = setInterval(() => {
+      // Auto-heal Supabase Realtime channel if mobile OS closed or errored it
+      if (!isSupabaseRealtimeConnected()) {
+        reconnectSupabaseRealtime(true);
+      }
+
+      // Proactive query sync every 6s so idle/resumed devices catch up 100% in real time
+      const now = Date.now();
+      if (now - lastQueryTime >= 6000) {
+        lastQueryTime = now;
+        broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
+        broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
+      }
+
       quickCatchUp();
       if (!es || es.readyState === EventSource.CLOSED) {
         connectSSE();
       }
-    }, 3000);
+    }, 2000);
 
     // 7. On window/document visibility, mobile pageshow, focus, or network return
     const handleWake = () => {
@@ -3977,7 +4057,7 @@ export function App() {
   };
 
   // Direct cover banner change with instant network synchronization
-  const handleDirectBannerChange = (bannerUrl: string) => {
+  const handleDirectBannerChange = (bannerUrl: string, posterUrl?: string) => {
     let cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
     if (!cleanHandle) {
       cleanHandle = 'creator';
@@ -3987,6 +4067,7 @@ export function App() {
       ...myProfile,
       handle: cleanHandle,
       coverUrl: bannerUrl,
+      ...(posterUrl ? { coverPoster: posterUrl } : {}),
     };
 
     setProfiles((prev) => {
@@ -4003,7 +4084,11 @@ export function App() {
       authService.updateProfile({ coverUrl: bannerUrl });
     } catch {}
 
-    setCurrentAuthUser((prev) => (prev ? { ...prev, coverUrl: bannerUrl } : {
+    setCurrentAuthUser((prev) => (prev ? {
+      ...prev,
+      coverUrl: bannerUrl,
+      ...(posterUrl ? { coverPoster: posterUrl } : {}),
+    } : {
       id: 'usr_' + cleanHandle,
       name: myProfile.name || 'Creator',
       handle: cleanHandle,
@@ -4020,7 +4105,11 @@ export function App() {
       provider: 'guest',
     }));
 
-    setEditForm((prev) => ({ ...prev, coverUrl: bannerUrl }));
+    setEditForm((prev) => ({
+      ...prev,
+      coverUrl: bannerUrl,
+      ...(posterUrl ? { coverPoster: posterUrl } : {}),
+    }));
 
     broadcastSyncEvent({
       action: 'UPDATE_PROFILE',
@@ -4031,6 +4120,7 @@ export function App() {
         handle: cleanHandle,
         avatar: updated.avatar,
         coverUrl: bannerUrl,
+        coverPoster: posterUrl,
         bio: updated.bio,
       },
     });
@@ -4039,7 +4129,7 @@ export function App() {
   };
 
   // Direct profile avatar photo change with instant network synchronization
-  const handleDirectAvatarChange = (avatarUrl: string) => {
+  const handleDirectAvatarChange = (avatarUrl: string, posterUrl?: string) => {
     let cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
     if (!cleanHandle) {
       cleanHandle = 'creator';
@@ -4049,6 +4139,7 @@ export function App() {
       ...myProfile,
       handle: cleanHandle,
       avatar: avatarUrl,
+      ...(posterUrl ? { avatarPoster: posterUrl } : {}),
     };
 
     setProfiles((prev) => {
@@ -4065,7 +4156,11 @@ export function App() {
       authService.updateProfile({ avatar: avatarUrl });
     } catch {}
 
-    setCurrentAuthUser((prev) => (prev ? { ...prev, avatar: avatarUrl } : {
+    setCurrentAuthUser((prev) => (prev ? {
+      ...prev,
+      avatar: avatarUrl,
+      ...(posterUrl ? { avatarPoster: posterUrl } : {}),
+    } : {
       id: 'usr_' + cleanHandle,
       name: myProfile.name || 'Creator',
       handle: cleanHandle,
@@ -4082,7 +4177,11 @@ export function App() {
       provider: 'guest',
     }));
 
-    setEditForm((prev) => ({ ...prev, avatar: avatarUrl }));
+    setEditForm((prev) => ({
+      ...prev,
+      avatar: avatarUrl,
+      ...(posterUrl ? { avatarPoster: posterUrl } : {}),
+    }));
 
     setPosts((prev) => {
       let changed = false;
@@ -4108,6 +4207,7 @@ export function App() {
         name: updated.name,
         handle: cleanHandle,
         avatar: avatarUrl,
+        avatarPoster: posterUrl,
         coverUrl: updated.coverUrl,
         bio: updated.bio,
       },
@@ -6959,6 +7059,7 @@ export function App() {
       isLiked: false,
       isSaved: false,
       likersList: [],
+      saversList: [],
       timeAgo: 'Just now',
       comments: [],
     };
@@ -11045,33 +11146,58 @@ export function App() {
                 style={{ position: 'relative', overflow: 'hidden' }}
               >
                 {isVideoMedia(profile.coverUrl) ? (
-                  <video
-                    key={cleanMediaUrl(profile.coverUrl)}
-                    src={cleanMediaUrl(profile.coverUrl)}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    // @ts-ignore
-                    webkit-playsinline="true"
-                    ref={(el) => {
-                      if (el) {
-                        el.muted = true;
-                        el.defaultMuted = true;
-                        el.playsInline = true;
-                        el.play().catch(() => {});
-                      }
-                    }}
-                    className="profile-cover-video"
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                      display: 'block',
-                    }}
-                  />
+                  <>
+                    <video
+                      key={cleanMediaUrl(profile.coverUrl)}
+                      src={cleanMediaUrl(profile.coverUrl)}
+                      poster={(profile as any).coverPoster || (profile as any).cover_poster || undefined}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      // @ts-ignore
+                      webkit-playsinline="true"
+                      ref={(el) => {
+                        if (el) {
+                          el.muted = true;
+                          el.defaultMuted = true;
+                          el.playsInline = true;
+                          el.play().catch(() => {});
+                        }
+                      }}
+                      onError={(e) => {
+                        const vid = e.currentTarget;
+                        if (vid) {
+                          vid.style.display = 'none';
+                          const fallback = vid.parentElement?.querySelector('.profile-cover-fallback') as HTMLElement;
+                          if (fallback) fallback.style.display = 'block';
+                        }
+                      }}
+                      className="profile-cover-video"
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        display: 'block',
+                      }}
+                    />
+                    <img
+                      src={(profile as any).coverPoster || (profile as any).cover_poster || (profile.mediaItems && profile.mediaItems[0]?.url) || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1600'}
+                      alt={`${profile.name} Cover`}
+                      className="profile-cover-img profile-cover-fallback"
+                      style={{
+                        display: 'none',
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        objectPosition: 'center',
+                      }}
+                    />
+                  </>
                 ) : (
                   <img
                     src={cleanMediaUrl(profile.coverUrl)}
@@ -11121,8 +11247,11 @@ export function App() {
                             const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle) || 'creator';
                             if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
                               triggerToast('Updating banner video...');
-                              const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner', cleanH);
-                              handleDirectBannerChange(animatedUrl);
+                              const [animatedUrl, posterUrl] = await Promise.all([
+                                convertVideoToAnimatedLoop(file, 'banner', cleanH),
+                                extractVideoThumbnail(file).catch(() => ''),
+                              ]);
+                              handleDirectBannerChange(animatedUrl, posterUrl);
                             } else {
                               compressImageFile(file, 1600, 0.86, (dataUrl) => {
                                 handleDirectBannerChange(dataUrl);
@@ -11157,26 +11286,43 @@ export function App() {
                         title={hasActiveStory ? `Tap to view @${profile.handle}'s story` : profile.name}
                       >
                         {isVideoMedia(profile.avatar) ? (
-                          <video
-                            key={cleanMediaUrl(profile.avatar)}
-                            src={cleanMediaUrl(profile.avatar)}
-                            autoPlay
-                            loop
-                            muted
-                            playsInline
-                            // @ts-ignore
-                            webkit-playsinline="true"
-                            ref={(el) => {
-                              if (el) {
-                                el.muted = true;
-                                el.defaultMuted = true;
-                                el.playsInline = true;
-                                el.play().catch(() => {});
-                              }
-                            }}
-                            className={`profile-avatar-squircle is-video-avatar ${hasActiveStory ? 'has-active-story-ring' : ''}`}
-                            style={{ objectFit: 'cover' }}
-                          />
+                          <>
+                            <video
+                              key={cleanMediaUrl(profile.avatar)}
+                              src={cleanMediaUrl(profile.avatar)}
+                              poster={(profile as any).avatarPoster || (profile as any).avatar_poster || undefined}
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                              // @ts-ignore
+                              webkit-playsinline="true"
+                              ref={(el) => {
+                                if (el) {
+                                  el.muted = true;
+                                  el.defaultMuted = true;
+                                  el.playsInline = true;
+                                  el.play().catch(() => {});
+                                }
+                              }}
+                              onError={(e) => {
+                                const vid = e.currentTarget;
+                                if (vid) {
+                                  vid.style.display = 'none';
+                                  const fallback = vid.parentElement?.querySelector('.profile-avatar-fallback') as HTMLElement;
+                                  if (fallback) fallback.style.display = 'block';
+                                }
+                              }}
+                              className={`profile-avatar-squircle is-video-avatar ${hasActiveStory ? 'has-active-story-ring' : ''}`}
+                              style={{ objectFit: 'cover' }}
+                            />
+                            <img
+                              src={(profile as any).avatarPoster || (profile as any).avatar_poster || cleanMediaUrl(profile.avatar)}
+                              alt={profile.name}
+                              className={`profile-avatar-squircle profile-avatar-fallback ${hasActiveStory ? 'has-active-story-ring' : ''}`}
+                              style={{ display: 'none', objectFit: 'cover' }}
+                            />
+                          </>
                         ) : (
                           <img
                             src={cleanMediaUrl(profile.avatar)}
@@ -11208,8 +11354,11 @@ export function App() {
                                   const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle) || 'creator';
                                   if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
                                     triggerToast('Updating profile video...');
-                                    const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar', cleanH);
-                                    handleDirectAvatarChange(animatedUrl);
+                                    const [animatedUrl, posterUrl] = await Promise.all([
+                                      convertVideoToAnimatedLoop(file, 'avatar', cleanH),
+                                      extractVideoThumbnail(file).catch(() => ''),
+                                    ]);
+                                    handleDirectAvatarChange(animatedUrl, posterUrl);
                                   } else {
                                     compressImageFile(file, 280, 0.65, (dataUrl) => {
                                       handleDirectAvatarChange(dataUrl);
@@ -13354,12 +13503,17 @@ export function App() {
                             const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle) || 'creator';
                             if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
                               triggerToast('Updating banner video...');
-                              const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner', cleanH);
-                              setEditForm((prev) => ({ ...prev, coverUrl: animatedUrl }));
+                              const [animatedUrl, posterUrl] = await Promise.all([
+                                convertVideoToAnimatedLoop(file, 'banner', cleanH),
+                                extractVideoThumbnail(file).catch(() => ''),
+                              ]);
+                              setEditForm((prev) => ({ ...prev, coverUrl: animatedUrl, coverPoster: posterUrl }));
+                              handleDirectBannerChange(animatedUrl, posterUrl);
                               triggerToast('Cover banner video updated!');
                             } else {
                               compressImageFile(file, 1600, 0.86, (dataUrl) => {
                                 setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
+                                handleDirectBannerChange(dataUrl);
                                 triggerToast('Cover banner updated!');
                               });
                             }
@@ -13455,12 +13609,17 @@ export function App() {
                                 const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle) || 'creator';
                                 if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
                                   triggerToast('Updating profile video...');
-                                  const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar', cleanH);
-                                  setEditForm((prev) => ({ ...prev, avatar: animatedUrl }));
+                                  const [animatedUrl, posterUrl] = await Promise.all([
+                                    convertVideoToAnimatedLoop(file, 'avatar', cleanH),
+                                    extractVideoThumbnail(file).catch(() => ''),
+                                  ]);
+                                  setEditForm((prev) => ({ ...prev, avatar: animatedUrl, avatarPoster: posterUrl }));
+                                  handleDirectAvatarChange(animatedUrl, posterUrl);
                                   triggerToast('Profile video updated!');
                                 } else {
                                   compressImageFile(file, 280, 0.65, (dataUrl) => {
                                     setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
+                                    handleDirectAvatarChange(dataUrl);
                                     triggerToast('Profile picture updated!');
                                   });
                                 }

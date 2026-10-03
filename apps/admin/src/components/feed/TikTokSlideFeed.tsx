@@ -95,6 +95,7 @@ export const INITIAL_STORIES_V3: StoryItem[] = [];
 
 export const cleanMediaUrl = (url?: string): string => {
   if (!url) return '';
+  if (url.startsWith('data:')) return url;
   return url.split('#')[0];
 };
 
@@ -149,13 +150,43 @@ export const MediaAvatar: React.FC<{
               el.play().catch(() => {});
             }
           }}
+          onError={(e) => {
+            const vid = e.currentTarget;
+            if (vid) {
+              vid.style.display = 'none';
+              const imgFallback = vid.nextElementSibling as HTMLElement;
+              if (imgFallback) imgFallback.style.display = 'block';
+            }
+          }}
           className={`media-avatar-video ${className}`}
           style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
+        />
+        <img
+          src={`https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(alt || 'user')}`}
+          alt={alt}
+          className={`media-avatar-img ${className}`}
+          style={{ display: 'none', width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
         />
       </div>
     );
   }
-  return <img src={cleanMediaUrl(src)} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
+  return (
+    <img
+      src={cleanMediaUrl(src)}
+      alt={alt}
+      className={className}
+      style={style}
+      onClick={onClick}
+      title={title}
+      onError={(e) => {
+        const target = e.currentTarget;
+        const fallback = `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(alt || 'user')}`;
+        if (target.src !== fallback) {
+          target.src = fallback;
+        }
+      }}
+    />
+  );
 };
 
 export const TikTokSlideVideo: React.FC<{
