@@ -160,12 +160,18 @@ export function getUserLiveProfile(
       const parsed = JSON.parse(rawFollowing);
       if (Array.isArray(parsed)) {
         parsed.forEach((h: string) => {
-          followingMap[h.replace(/^@/, '').toLowerCase().trim()] = true;
+          const c = (h || '').replace(/^@/, '').toLowerCase().trim();
+          if (c && !c.startsWith('google_') && !c.startsWith('usr-') && !c.startsWith('sc-')) {
+            followingMap[c] = true;
+          }
         });
       } else if (typeof parsed === 'object') {
         Object.keys(parsed).forEach((k) => {
           if (parsed[k]) {
-            followingMap[k.replace(/^@/, '').toLowerCase().trim()] = true;
+            const c = (k || '').replace(/^@/, '').toLowerCase().trim();
+            if (c && !c.startsWith('google_') && !c.startsWith('usr-') && !c.startsWith('sc-')) {
+              followingMap[c] = true;
+            }
           }
         });
       }
@@ -181,26 +187,16 @@ export function getUserLiveProfile(
   if (partial?.followers !== undefined) {
     followers = partial.followers;
   } else if (isSelf) {
-    if (Array.isArray(prof?.followersList)) {
-      followers = prof.followersList.length;
-    } else if (typeof prof?.followers === 'number') {
-      followers = prof.followers;
-    } else if (typeof prof?.followersCount === 'number') {
-      followers = prof.followersCount;
-    } else {
-      followers = 0;
-    }
+    const rawList = Array.isArray(prof?.followersList) ? prof.followersList : [];
+    const validFollowers = Array.from(new Set(rawList.map((h: string) => (h || '').toLowerCase().replace(/^@/, '').trim()).filter((h: string) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-'))));
+    followers = validFollowers.length;
   } else {
     const isFollowedByMe = !!(followingMap[cleanHandle] || followingMap[handle]);
     const followersList = Array.isArray(prof?.followersList) ? prof.followersList : [];
-    const filteredList = followersList.filter((h: string) => (h || '').toLowerCase().replace(/^@/, '').trim() !== myCleanHandle);
+    const filteredList = Array.from(new Set(followersList
+      .map((h: string) => (h || '').toLowerCase().replace(/^@/, '').trim())
+      .filter((h: string) => h && h !== myCleanHandle && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-'))));
     followers = filteredList.length + (isFollowedByMe ? 1 : 0);
-
-    if (typeof prof?.followersCount === 'number' && prof.followersCount > followers) {
-      followers = prof.followersCount;
-    } else if (typeof prof?.followers === 'number' && prof.followers > followers) {
-      followers = prof.followers;
-    }
   }
 
   // 6. Accurate Real Following Count (Strictly 100% accurate)
@@ -209,15 +205,12 @@ export function getUserLiveProfile(
     following = partial.following;
   } else if (isSelf) {
     const activeFollowings = Object.keys(followingMap).filter(
-      (k) => followingMap[k] && !k.startsWith('sc-') && k.toLowerCase() !== myCleanHandle
+      (k) => followingMap[k] && !k.startsWith('sc-') && !k.startsWith('google_') && !k.startsWith('usr-') && k.toLowerCase() !== myCleanHandle
     );
-    following = activeFollowings.length;
+    following = Array.from(new Set(activeFollowings.map(h => h.toLowerCase().replace(/^@/, '').trim()))).length;
   } else if (Array.isArray(prof?.followingList)) {
-    following = prof.followingList.length;
-  } else if (typeof prof?.following === 'number') {
-    following = prof.following;
-  } else if (typeof prof?.followingCount === 'number') {
-    following = prof.followingCount;
+    const validFollowing = Array.from(new Set(prof.followingList.map((h: string) => (h || '').toLowerCase().replace(/^@/, '').trim()).filter((h: string) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-'))));
+    following = validFollowing.length;
   } else {
     following = 0;
   }

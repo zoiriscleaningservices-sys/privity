@@ -98,7 +98,24 @@ export const BANNED_MOCK_HANDLES = new Set([
 export const isMockHandle = (handle?: string): boolean => {
   if (!handle) return false;
   const clean = handle.replace(/^@/, '').toLowerCase().trim();
+  if (clean.startsWith('google_') || clean.startsWith('usr-') || clean.startsWith('sc-')) return true;
   return BANNED_MOCK_HANDLES.has(clean);
+};
+
+export const getCleanFollowingHandles = (map: Record<string, boolean>, excludeHandle?: string): string[] => {
+  if (!map || typeof map !== 'object') return [];
+  const ex = (excludeHandle || '').toLowerCase().replace(/^@/, '').trim();
+  const set = new Set<string>();
+  Object.keys(map).forEach((k) => {
+    if (!map[k]) return;
+    const clean = k.toLowerCase().replace(/^@/, '').trim();
+    if (!clean) return;
+    if (clean.startsWith('google_') || clean.startsWith('usr-') || clean.startsWith('sc-')) return;
+    if (isMockHandle(clean)) return;
+    if (ex && clean === ex) return;
+    set.add(clean);
+  });
+  return Array.from(set);
 };
 
 export const isMockPost = (p: any): boolean => {
@@ -120,40 +137,20 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset: Wipes legacy cached data & accounts to start completely from zero
-if (typeof window !== 'undefined' && localStorage.getItem('privity_ground_zero_v200') !== 'done') {
+// Guaranteed Absolute Zero Reset v300: Wipes all legacy cached data, users, and accounts to start completely from scratch zero
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v300';
+if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
-    const keysToRemove = [
-      'privity_accounts_v1',
-      'privity_auth_session_v1',
-      'privity_tab_auth_session_v1',
-      'privity_posts_v5',
-      'privity_profiles_v5',
-      'privity_following_v5',
-      'privity_close_friends_v5',
-      'privity_stories_v3',
-      'privity_direct_messages_v5',
-      'privity_photo_likes_v5',
-      'privity_live_streams_v2',
-      'privity_ended_streams_v1',
-      'privity_ended_streams_v2',
-      'privity_remote_active_streams',
-      'privity_current_live_host',
-      'privity_is_host_broadcasting',
-      'privity_active_live_session',
-      'privity_follow_requests_v5',
-      'privity_viewed_handle_v5',
-      'privity_zero_reset_v1',
-      'privity_zero_reset_v2',
-      'privity_zero_reset_v3',
-      'privity_zero_reset_v4',
-      'privity_feed_posts_cache',
-      'privity_explore_streams',
-      'privity_absolute_wipe_zero_v105',
-    ];
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('privity_') && k !== GROUND_ZERO_FLAG && k !== 'privity_anon_key') {
+        keysToRemove.push(k);
+      }
+    }
     keysToRemove.forEach((k) => localStorage.removeItem(k));
     sessionStorage.clear();
-    localStorage.setItem('privity_ground_zero_v200', 'done');
+    localStorage.setItem(GROUND_ZERO_FLAG, 'done');
   } catch (e) {}
 }
 
@@ -1156,13 +1153,16 @@ export function App() {
   const postsRef = React.useRef(posts);
   postsRef.current = posts;
 
-  // 3. Persistent Following Map (filters out following any mock handles)
+  // 3. Persistent Following Map (strictly filters out any mock handles, IDs, and false values)
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>(() => {
     const loaded = readStorage<Record<string, boolean>>('privity_following_v5', {});
     const cleaned: Record<string, boolean> = {};
     if (loaded && typeof loaded === 'object') {
       for (const [k, v] of Object.entries(loaded)) {
-        if (!isMockHandle(k)) cleaned[k] = v;
+        if (!v) continue;
+        const clean = k.toLowerCase().replace(/^@/, '').trim();
+        if (!clean || clean.startsWith('google_') || clean.startsWith('usr-') || clean.startsWith('sc-') || isMockHandle(clean)) continue;
+        cleaned[clean] = true;
       }
     }
     return cleaned;
@@ -1372,7 +1372,7 @@ export function App() {
 
   // Synchronized Profile Fetcher
   const getUserProfile = (handle: string, defaultName?: string, defaultAvatar?: string): UserProfile => {
-    const clean = (handle || '').replace(/^@/, '').trim().toLowerCase();
+    let clean = (handle || '').replace(/^@/, '').trim().toLowerCase();
     if (!clean) {
       return {
         id: 'anon',
@@ -1391,6 +1391,18 @@ export function App() {
         trustCirclesList: [],
         mediaItems: [],
       };
+    }
+    // If an internal ID is passed, resolve it to the genuine user profile instead of generating a fake profile
+    if (clean.startsWith('google_') || clean.startsWith('usr-')) {
+      const match = Object.values(profiles).find((p) => p.id === handle || p.id === clean);
+      if (match) return match;
+      try {
+        const allAccs = authService.getAllAccounts();
+        const accById = Object.values(allAccs).find((a) => a.id === handle || a.id === clean);
+        if (accById) {
+          clean = accById.handle.toLowerCase().replace(/^@/, '').trim();
+        }
+      } catch {}
     }
     if (profiles[clean]) {
       return profiles[clean];
@@ -2191,19 +2203,25 @@ export function App() {
         }
 
         case 'TOGGLE_FOLLOW': {
-          const { targetHandle, targetId, followerHandle, followerName, isFollowing } = event;
+          const { targetHandle, followerHandle, followerName, isFollowing } = event;
           if (!targetHandle) return;
-          const cleanTarget = targetHandle.replace(/^@/, '').toLowerCase();
-          const cleanFollower = (followerHandle || '').replace(/^@/, '').toLowerCase();
+          const cleanTarget = targetHandle.replace(/^@/, '').toLowerCase().trim();
+          const cleanFollower = (followerHandle || '').replace(/^@/, '').toLowerCase().trim();
 
           // 1. If this device is the follower (e.g. user logged in on 2 devices/tabs)
           if (cleanFollower && cleanFollower === cleanMyHandle.toLowerCase()) {
             setFollowingMap((prev) => {
-              const next: Record<string, boolean> = {
-                ...prev,
-                [cleanTarget]: isFollowing,
-              };
-              if (targetId) next[targetId] = isFollowing;
+              const next: Record<string, boolean> = { ...prev };
+              if (isFollowing) {
+                next[cleanTarget] = true;
+              } else {
+                delete next[cleanTarget];
+              }
+              Object.keys(next).forEach((k) => {
+                if (k.startsWith('google_') || k.startsWith('usr-') || k.startsWith('sc-') || !next[k]) {
+                  delete next[k];
+                }
+              });
               safeSaveStorage('privity_following_v5', next);
               return next;
             });
@@ -2217,10 +2235,12 @@ export function App() {
             // Update Target's followers list
             const targetProf = nextProfs[cleanTarget] || getUserProfile(cleanTarget);
             if (targetProf && cleanFollower) {
-              const curFollowers = targetProf.followersList || [];
+              const curFollowers = (targetProf.followersList || [])
+                .map((h: string) => h.toLowerCase().replace(/^@/, '').trim())
+                .filter((h: string) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-'));
               const updatedFollowers = isFollowing
                 ? Array.from(new Set([...curFollowers, cleanFollower]))
-                : curFollowers.filter((h) => h.toLowerCase() !== cleanFollower);
+                : curFollowers.filter((h: string) => h !== cleanFollower);
               nextProfs[cleanTarget] = {
                 ...targetProf,
                 followersList: updatedFollowers,
@@ -2232,10 +2252,12 @@ export function App() {
             if (cleanFollower) {
               const followerProf = nextProfs[cleanFollower] || getUserProfile(cleanFollower);
               if (followerProf) {
-                const curFollowing = followerProf.followingList || [];
+                const curFollowing = (followerProf.followingList || [])
+                  .map((h: string) => h.toLowerCase().replace(/^@/, '').trim())
+                  .filter((h: string) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-'));
                 const updatedFollowing = isFollowing
                   ? Array.from(new Set([...curFollowing, cleanTarget]))
-                  : curFollowing.filter((h) => h.toLowerCase() !== cleanTarget);
+                  : curFollowing.filter((h: string) => h !== cleanTarget);
                 nextProfs[cleanFollower] = {
                   ...followerProf,
                   followingList: updatedFollowing,
@@ -2272,7 +2294,7 @@ export function App() {
         case 'TOGGLE_CLOSE_FRIENDS': {
           const { handle, isCloseFriend } = event;
           if (!handle) return;
-          const clean = handle.replace(/^@/, '');
+          const clean = handle.replace(/^@/, '').toLowerCase().trim();
           setCloseFriendsList((prev) => {
             const next = isCloseFriend
               ? Array.from(new Set([...prev, clean]))
@@ -2284,25 +2306,48 @@ export function App() {
         }
 
         case 'REMOVE_FOLLOWER': {
-          const { handle } = event;
-          if (!handle) return;
-          const clean = handle.replace(/^@/, '');
-          const myHandle = (myProfile.handle || '').toLowerCase();
+          const { handle, targetHandle, removedFollower } = event;
+          const cleanTarget = (targetHandle || '').replace(/^@/, '').toLowerCase().trim();
+          const cleanRemoved = (removedFollower || handle || '').replace(/^@/, '').toLowerCase().trim();
+          const myHandle = (myProfile.handle || '').toLowerCase().trim();
           if (!myHandle) return;
+
+          if (cleanRemoved === myHandle && cleanTarget) {
+            setFollowingMap((prev) => {
+              const next = { ...prev };
+              delete next[cleanTarget];
+              safeSaveStorage('privity_following_v5', next);
+              return next;
+            });
+          }
+
           setProfiles((prev) => {
-            const myProf = prev[myHandle];
-            if (!myProf) return prev;
-            const nextProfs = {
-              ...prev,
-              [myHandle]: {
-                ...myProf,
-                followersList: (myProf.followersList || []).filter(
-                  (h) => h.toLowerCase() !== clean.toLowerCase()
+            const nextProfs = { ...prev };
+            let changed = false;
+            const targetKey = cleanTarget || myHandle;
+            if (targetKey && nextProfs[targetKey]) {
+              nextProfs[targetKey] = {
+                ...nextProfs[targetKey],
+                followersList: (nextProfs[targetKey].followersList || []).filter(
+                  (h) => h.toLowerCase().replace(/^@/, '').trim() !== cleanRemoved
                 ),
-              },
-            };
-            safeSaveStorage('privity_profiles_v5', nextProfs);
-            return nextProfs;
+              };
+              changed = true;
+            }
+            if (cleanRemoved && nextProfs[cleanRemoved]) {
+              nextProfs[cleanRemoved] = {
+                ...nextProfs[cleanRemoved],
+                followingList: (nextProfs[cleanRemoved].followingList || []).filter(
+                  (h) => h.toLowerCase().replace(/^@/, '').trim() !== targetKey
+                ),
+              };
+              changed = true;
+            }
+            if (changed) {
+              safeSaveStorage('privity_profiles_v5', nextProfs);
+              return nextProfs;
+            }
+            return prev;
           });
           break;
         }
@@ -4161,70 +4206,81 @@ export function App() {
   };
 
   const isUserFollowed = (handleOrId: string): boolean => {
-    const clean = handleOrId.replace(/^@/, '').toLowerCase();
+    if (!handleOrId) return false;
+    let clean = handleOrId.replace(/^@/, '').toLowerCase().trim();
+    if (clean.startsWith('google_') || clean.startsWith('usr-')) {
+      const match = Object.values(profiles).find((p) => p.id === handleOrId || p.id === clean);
+      if (match) clean = (match.handle || '').replace(/^@/, '').toLowerCase().trim();
+    }
     return !!(
       followingMap[clean] ||
-      followingMap[`usr-${clean}`] ||
-      followingMap[handleOrId] ||
-      (myProfile.followingList || []).some((h) => h.toLowerCase() === clean)
+      (myProfile.followingList || []).some((h) => h.toLowerCase().replace(/^@/, '').trim() === clean)
     );
   };
 
   const toggleFollow = (handleOrId: string, name?: string) => {
-    const clean = handleOrId.replace(/^@/, '').replace(/^usr-/, '');
-    const targetProf = profiles[clean] || Object.values(profiles).find((p) => p.handle.toLowerCase() === clean.toLowerCase() || p.id === handleOrId);
-    const resolvedHandle = targetProf ? targetProf.handle.replace(/^@/, '') : clean;
-    const resolvedId = targetProf ? targetProf.id : `usr-${clean}`;
+    let clean = (handleOrId || '').replace(/^@/, '').toLowerCase().trim();
+    if (!clean) return;
+
+    // Resolve target profile
+    const targetProf = profiles[clean] || Object.values(profiles).find((p) => (p.handle || '').toLowerCase().replace(/^@/, '').trim() === clean || p.id === handleOrId);
+    const resolvedHandle = targetProf ? targetProf.handle.replace(/^@/, '').toLowerCase().trim() : clean;
 
     const current = isUserFollowed(resolvedHandle);
     const next = !current;
-    const myHandle = (myProfile.handle || '').toLowerCase();
+    const myHandle = (myProfile.handle || '').toLowerCase().replace(/^@/, '').trim();
     if (!myHandle) return;
 
+    // 1. Update local followingMap (STRICTLY handles only, zero ID keys!)
     setFollowingMap((prev) => {
-      const nextMap = {
-        ...prev,
-        [clean]: next,
-        [clean.toLowerCase()]: next,
-        [resolvedHandle]: next,
-        [resolvedHandle.toLowerCase()]: next,
-        [resolvedId]: next,
-      };
+      const nextMap = { ...prev };
+      if (next) {
+        nextMap[resolvedHandle] = true;
+      } else {
+        delete nextMap[resolvedHandle];
+        delete nextMap[clean];
+      }
+      // Purge any legacy IDs or false entries
+      Object.keys(nextMap).forEach((k) => {
+        if (k.startsWith('google_') || k.startsWith('usr-') || k.startsWith('sc-') || !nextMap[k]) {
+          delete nextMap[k];
+        }
+      });
       safeSaveStorage('privity_following_v5', nextMap);
       return nextMap;
     });
 
+    // 2. Synchronize target's followersList & my followingList
     setProfiles((prev) => {
       const target = prev[resolvedHandle] || prev[clean] || getUserProfile(resolvedHandle);
-      let targetFollowers = [...(target.followersList || [])];
+      let targetFollowers = (target.followersList || [])
+        .map((h) => h.toLowerCase().replace(/^@/, '').trim())
+        .filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-'));
       if (next) {
-        if (!targetFollowers.some((h) => h.toLowerCase() === myHandle)) {
+        if (!targetFollowers.includes(myHandle)) {
           targetFollowers.push(myHandle);
         }
       } else {
-        targetFollowers = targetFollowers.filter(
-          (h) => h.toLowerCase() !== myHandle
-        );
+        targetFollowers = targetFollowers.filter((h) => h !== myHandle);
       }
-      const nextTarget = { ...target, followersList: targetFollowers };
+      const nextTarget = { ...target, followersList: Array.from(new Set(targetFollowers)) };
 
       const myProf = prev[myHandle] || myProfile;
-      let myFollowing = [...(myProf.followingList || [])];
+      let myFollowing = (myProf.followingList || [])
+        .map((h) => h.toLowerCase().replace(/^@/, '').trim())
+        .filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-'));
       if (next) {
-        if (!myFollowing.some((h) => h.toLowerCase() === resolvedHandle.toLowerCase())) {
+        if (!myFollowing.includes(resolvedHandle)) {
           myFollowing.push(resolvedHandle);
         }
       } else {
-        myFollowing = myFollowing.filter(
-          (h) => h.toLowerCase() !== resolvedHandle.toLowerCase() && h.toLowerCase() !== clean.toLowerCase()
-        );
+        myFollowing = myFollowing.filter((h) => h !== resolvedHandle && h !== clean);
       }
-      const nextMyProf = { ...myProf, followingList: myFollowing };
+      const nextMyProf = { ...myProf, followingList: Array.from(new Set(myFollowing)) };
 
       const nextProfiles = {
         ...prev,
-        [resolvedHandle.toLowerCase()]: nextTarget,
-        [clean.toLowerCase()]: nextTarget,
+        [resolvedHandle]: nextTarget,
         [myHandle]: nextMyProf,
       };
       safeSaveStorage('privity_profiles_v5', nextProfiles);
@@ -4234,7 +4290,6 @@ export function App() {
     broadcastSyncEvent({
       action: 'TOGGLE_FOLLOW',
       targetHandle: resolvedHandle,
-      targetId: resolvedId,
       followerHandle: myProfile.handle,
       followerName: myProfile.name,
       followerAvatar: myProfile.avatar,
@@ -4245,35 +4300,36 @@ export function App() {
   };
 
   const handleRemoveFollower = (followerHandle: string) => {
-    const clean = followerHandle.replace(/^@/, '').toLowerCase();
-    const myHandle = (myProfile.handle || '').toLowerCase();
+    const clean = followerHandle.replace(/^@/, '').toLowerCase().trim();
+    const myHandle = (myProfile.handle || '').toLowerCase().trim();
     if (!myHandle) return;
 
     setProfiles((prev) => {
       const myProf = prev[myHandle] || myProfile;
-      const updatedFollowers = (myProf.followersList || []).filter((h) => h.toLowerCase() !== clean);
-      const nextMyProf = { ...myProf, followersList: updatedFollowers };
+      const updatedFollowers = (myProf.followersList || [])
+        .map((h) => h.toLowerCase().replace(/^@/, '').trim())
+        .filter((h) => h !== clean);
+      const nextMyProf = { ...myProf, followersList: Array.from(new Set(updatedFollowers)) };
 
       const targetProf = prev[clean] || getUserProfile(clean);
-      const targetFollowing = (targetProf.followingList || []).filter((h) => h.toLowerCase() !== myHandle);
-      const nextTargetProf = { ...targetProf, followingList: targetFollowing };
+      const targetFollowing = (targetProf.followingList || [])
+        .map((h) => h.toLowerCase().replace(/^@/, '').trim())
+        .filter((h) => h !== myHandle);
+      const nextTargetProf = { ...targetProf, followingList: Array.from(new Set(targetFollowing)) };
 
       const nextProfiles = {
         ...prev,
         [myHandle]: nextMyProf,
         [clean]: nextTargetProf,
       };
-      try {
-        localStorage.setItem('privity_profiles_v5', JSON.stringify(nextProfiles));
-      } catch (err) {
-        console.warn(err);
-      }
+      safeSaveStorage('privity_profiles_v5', nextProfiles);
       return nextProfiles;
     });
 
     broadcastSyncEvent({
       action: 'REMOVE_FOLLOWER',
-      handle: clean,
+      targetHandle: myProfile.handle,
+      removedFollower: clean,
     });
 
     triggerToast(`Removed @${clean} from your followers`);
@@ -4330,7 +4386,7 @@ export function App() {
     const profile = getUserProfile(cleanTarget);
     const isOwn = Boolean(myProfile.handle) && cleanTarget.toLowerCase() === myProfile.handle.toLowerCase();
     const effectiveIsPrivate = isOwn ? isPrivateAccount : !!profile.isPrivate;
-    const isFollowing = !!followingMap[cleanTarget] || isOwn;
+    const isFollowing = isUserFollowed(cleanTarget) || isOwn;
 
     // Enforce User Privacy Requirement:
     if (effectiveIsPrivate && !isFollowing && mode !== 'likes') {
@@ -4520,7 +4576,7 @@ export function App() {
       userProfile: myProfile,
       settings: userSettings,
       closeFriends: closeFriendsList,
-      following: Object.keys(followingMap).filter((k) => followingMap[k]),
+      following: getCleanFollowingHandles(followingMap, myProfile.handle),
       dispatches: posts.filter((p) => p.authorHandle === myProfile.handle || (myProfile.id && p.authorId === myProfile.id)),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -6622,8 +6678,7 @@ export function App() {
                 });
 
                 // Followed creators without active stories
-                Object.keys(followingMap)
-                  .filter((h) => followingMap[h] && normalizeHandle(h) !== normalizeHandle(myProfile.handle) && !h.startsWith('sc-'))
+                getCleanFollowingHandles(followingMap, myProfile.handle)
                   .forEach((handle) => {
                     const cleanH = normalizeHandle(handle);
                     if (rendered.has(cleanH)) return;
@@ -7482,7 +7537,7 @@ export function App() {
                 }
 
                 return creators.map((u) => {
-                  const isF = !!followingMap[u.handle];
+                  const isF = isUserFollowed(u.handle);
                   const isSelf = Boolean(myProfile.handle) && u.handle.toLowerCase() === myProfile.handle.toLowerCase();
                   return (
                     <div key={u.handle} className="creator-entry-row">
@@ -7991,7 +8046,7 @@ export function App() {
                           .map((notif) => {
                             const isFollowType = notif.type === 'follow';
                             const cleanActor = (notif.actorHandle || '').replace(/^@/, '');
-                            const isFollowingActor = !!followingMap[cleanActor] || !!followingMap[`@${cleanActor}`];
+                            const isFollowingActor = isUserFollowed(cleanActor);
 
                             return (
                               <div
@@ -9053,7 +9108,7 @@ export function App() {
                     .map((notif) => {
                       const isFollowType = notif.type === 'follow';
                       const cleanActor = (notif.actorHandle || '').replace(/^@/, '');
-                      const isFollowingActor = !!followingMap[cleanActor] || !!followingMap[`@${cleanActor}`];
+                      const isFollowingActor = isUserFollowed(cleanActor);
 
                       return (
                         <div
@@ -9157,7 +9212,7 @@ export function App() {
             Boolean(myProfile.handle) &&
             (profile.handle.toLowerCase() === myProfile.handle.toLowerCase() ||
              viewedUserHandle.toLowerCase() === myProfile.handle.toLowerCase());
-          const isFollowingThisUser = !!followingMap[profile.handle] || !!followingMap[profile.id];
+          const isFollowingThisUser = isUserFollowed(profile.handle);
           const isInCloseFriends = closeFriendsList.includes(profile.handle);
           const userDispatches = posts.filter(
             (p) =>
@@ -9345,11 +9400,11 @@ export function App() {
                   {/* Specular VisionOS Stats Shelf right next to profile picture */}
                   {(() => {
                     const dynamicFollowersCount = isOwnProfile
-                      ? (myProfile.followersList || profile.followersList || []).length
-                      : (profile.followersList || []).filter((h) => h.toLowerCase() !== (myProfile.handle || '').toLowerCase()).length + (isFollowingThisUser ? 1 : 0);
+                      ? Array.from(new Set((myProfile.followersList || profile.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length
+                      : Array.from(new Set((profile.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && h !== (myProfile.handle || '').toLowerCase().replace(/^@/, '').trim() && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length + (isFollowingThisUser ? 1 : 0);
                     const dynamicFollowingCount = isOwnProfile
-                      ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k.toLowerCase() !== (myProfile.handle || '').toLowerCase()).length
-                      : (profile.followingList || []).length;
+                      ? getCleanFollowingHandles(followingMap, myProfile.handle).length
+                      : Array.from(new Set((profile.followingList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length;
                     const dynamicCirclesCount = isOwnProfile
                       ? closeFriendsList.length
                       : (profile.trustCirclesList || []).length;
@@ -9556,7 +9611,7 @@ export function App() {
                     <button
                       className="btn-post-dispatch"
                       onClick={() => {
-                        setFollowingMap((prev) => ({ ...prev, [profile.handle]: true }));
+                        toggleFollow(profile.handle, profile.name);
                         triggerToast(`Follow request approved! Access granted to @${profile.handle}.`);
                       }}
                     >
@@ -10355,7 +10410,7 @@ export function App() {
             }
 
             return availableCreators.slice(0, 5).map((u) => {
-              const isF = !!followingMap[u.id] || !!followingMap[u.handle];
+              const isF = isUserFollowed(u.handle);
               return (
                 <div key={u.id || u.handle} className="creator-entry-row">
                   <div
@@ -11790,16 +11845,16 @@ export function App() {
 
             {/* Tab switchers if on followers/following/circle */}
             {rosterModal.mode !== 'likes' && (() => {
-              const cleanTarget = rosterModal.targetHandle.replace(/^@/, '');
+              const cleanTarget = rosterModal.targetHandle.replace(/^@/, '').toLowerCase().trim();
               const p = getUserProfile(cleanTarget);
-              const isTargetOwn = Boolean(myProfile.handle) && cleanTarget.toLowerCase() === myProfile.handle.toLowerCase();
-              const isTargetFollowing = !!followingMap[cleanTarget];
+              const isTargetOwn = Boolean(myProfile.handle) && cleanTarget === (myProfile.handle || '').toLowerCase().trim();
+              const isTargetFollowing = isUserFollowed(cleanTarget);
               const followersCount = isTargetOwn
-                ? (myProfile.followersList || p.followersList || []).length
-                : (p.followersList || []).filter((h) => h.toLowerCase() !== (myProfile.handle || '').toLowerCase()).length + (isTargetFollowing ? 1 : 0);
+                ? Array.from(new Set((myProfile.followersList || p.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length
+                : Array.from(new Set((p.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && h !== (myProfile.handle || '').toLowerCase().replace(/^@/, '').trim() && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length + (isTargetFollowing ? 1 : 0);
               const followingCount = isTargetOwn
-                ? Object.keys(followingMap).filter((k) => followingMap[k] && !k.startsWith('sc-') && k.toLowerCase() !== (myProfile.handle || '').toLowerCase()).length
-                : (p.followingList || []).length;
+                ? getCleanFollowingHandles(followingMap, myProfile.handle).length
+                : Array.from(new Set((p.followingList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length;
               const circlesCount = isTargetOwn
                 ? closeFriendsList.length
                 : (p.trustCirclesList || []).length;
@@ -11847,28 +11902,31 @@ export function App() {
 
             {/* People List */}
             {(() => {
-              const cleanTarget = rosterModal.targetHandle.replace(/^@/, '');
+              const cleanTarget = rosterModal.targetHandle.replace(/^@/, '').toLowerCase().trim();
               const p = getUserProfile(cleanTarget);
-              const isTargetOwn = Boolean(myProfile.handle) && cleanTarget.toLowerCase() === myProfile.handle.toLowerCase();
+              const isTargetOwn = Boolean(myProfile.handle) && cleanTarget === (myProfile.handle || '').toLowerCase().trim();
               let currentHandles: string[] = [];
 
               if (rosterModal.mode === 'likes') {
                 currentHandles = rosterModal.handles;
               } else if (rosterModal.mode === 'followers') {
                 if (isTargetOwn) {
-                  currentHandles = [...(myProfile.followersList || p.followersList || [])];
+                  const rawList = myProfile.followersList || p.followersList || [];
+                  currentHandles = Array.from(new Set(rawList.map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h))));
                 } else {
-                  const isTargetFollowing = !!followingMap[cleanTarget];
-                  const base = (p.followersList || []).filter((h) => h.toLowerCase() !== (myProfile.handle || '').toLowerCase());
-                  currentHandles = isTargetFollowing && myProfile.handle ? [myProfile.handle, ...base] : base;
+                  const isTargetFollowing = isUserFollowed(cleanTarget);
+                  const base = (p.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && h !== (myProfile.handle || '').toLowerCase().replace(/^@/, '').trim() && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h));
+                  const set = new Set(base);
+                  if (isTargetFollowing && myProfile.handle) {
+                    set.add(myProfile.handle.toLowerCase().replace(/^@/, '').trim());
+                  }
+                  currentHandles = Array.from(set);
                 }
               } else if (rosterModal.mode === 'following') {
                 if (isTargetOwn) {
-                  currentHandles = Object.keys(followingMap).filter(
-                    (k) => followingMap[k] && !k.startsWith('sc-') && k.toLowerCase() !== (myProfile.handle || '').toLowerCase()
-                  );
+                  currentHandles = getCleanFollowingHandles(followingMap, myProfile.handle);
                 } else {
-                  currentHandles = [...(p.followingList || [])];
+                  currentHandles = Array.from(new Set((p.followingList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h))));
                 }
               } else if (rosterModal.mode === 'circle') {
                 if (isTargetOwn) {
@@ -11899,7 +11957,7 @@ export function App() {
                   ) : (
                     filteredHandles.map((handle) => {
                       const user = getUserProfile(handle);
-                      const isF = !!followingMap[user.handle];
+                      const isF = isUserFollowed(user.handle);
                       const isSelf = Boolean(myProfile.handle) && user.handle.toLowerCase() === myProfile.handle.toLowerCase();
 
                       return (
@@ -11994,7 +12052,7 @@ export function App() {
                 onClick={() => {
                   const targetH = privateLockModal.handle;
                   const targetN = privateLockModal.name;
-                  setFollowingMap((prev) => ({ ...prev, [targetH]: true }));
+                  toggleFollow(targetH, targetN);
                   setPrivateLockModal(null);
                   triggerToast(`Follow request approved! Access granted to @${targetH}.`);
                   setTimeout(() => {

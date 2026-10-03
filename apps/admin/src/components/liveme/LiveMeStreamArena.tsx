@@ -1522,10 +1522,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     const handleToToggle = (targetHandle || currentStreamer.handle || '').replace(/^@/, '').toLowerCase();
     const nextState = !followedMap[handleToToggle];
     setFollowedMap((prev) => {
-      const updated = {
-        ...prev,
-        [handleToToggle]: nextState,
-      };
+      const updated = { ...prev };
+      if (nextState) {
+        updated[handleToToggle] = true;
+      } else {
+        delete updated[handleToToggle];
+      }
+      Object.keys(updated).forEach((k) => {
+        if (k.startsWith('google_') || k.startsWith('usr-') || k.startsWith('sc-') || !updated[k]) {
+          delete updated[k];
+        }
+      });
       try {
         localStorage.setItem('privity_following_v5', JSON.stringify(updated));
 
