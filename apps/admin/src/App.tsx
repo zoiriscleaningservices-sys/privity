@@ -72,7 +72,7 @@ import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnect
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
 import { convertVideoToAnimatedLoop } from './services/videoMediaHelper';
-import { storePostMedia } from './services/mediaDb';
+import { storePostMedia, getFreshMediaUrl } from './services/mediaDb';
 
 export const BANNED_MOCK_HANDLES = new Set([
   'elena_rodriguez',
@@ -660,7 +660,7 @@ export const MediaAvatar: React.FC<{
   showBadge?: boolean;
   onClick?: (e: React.MouseEvent) => void;
   title?: string;
-}> = ({ src, alt = 'Avatar', className = '', style, showBadge = true, onClick, title }) => {
+}> = ({ src, alt = 'Avatar', className = '', style, onClick, title }) => {
   const isVid = isVideoMedia(src);
   if (isVid) {
     return (
@@ -681,11 +681,6 @@ export const MediaAvatar: React.FC<{
           className={`media-avatar-video ${className}`}
           style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
         />
-        {showBadge && (
-          <span className="media-avatar-gif-tag" title="Animated GIF Sticker">
-            GIF
-          </span>
-        )}
       </div>
     );
   }
@@ -1096,6 +1091,7 @@ export function App() {
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [replyingToMessage, setReplyingToMessage] = useState<DirectChatMessage | null>(null);
   const [swipedChannelHandle, setSwipedChannelHandle] = useState<string | null>(null);
+  const [isChatHeaderMenuOpen, setIsChatHeaderMenuOpen] = useState(false);
   const [mutedChats, setMutedChats] = useState<Record<string, boolean>>(() => {
     try {
       return JSON.parse(localStorage.getItem('privity_muted_chats_v1') || '{}');
@@ -1107,6 +1103,63 @@ export function App() {
   const audioChunksRef = React.useRef<Blob[]>([]);
   const recordingTimerRef = React.useRef<any>(null);
   const activeAudioElementRef = React.useRef<HTMLAudioElement | null>(null);
+
+  // Close chat header menu when clicking anywhere outside
+  useEffect(() => {
+    if (!isChatHeaderMenuOpen) return;
+    const closeMenu = () => setIsChatHeaderMenuOpen(false);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, [isChatHeaderMenuOpen]);
+
+  // Re-hydrate persistent high-fidelity video loops for avatar & cover banner from IndexedDB
+  useEffect(() => {
+    const hydrateMediaLoops = async () => {
+      try {
+        const avatarKey = localStorage.getItem('privity_user_avatar_media_key');
+        if (avatarKey) {
+          const freshUrl = await getFreshMediaUrl(avatarKey);
+          if (freshUrl) {
+            const finalUrl = freshUrl.includes('#') ? freshUrl : `${freshUrl}#video.mp4`;
+            const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+            if (cleanHandle) {
+              setProfiles((prev) => {
+                const cur = prev[cleanHandle.toLowerCase()] || prev[cleanHandle];
+                if (!cur) return prev;
+                return {
+                  ...prev,
+                  [cleanHandle.toLowerCase()]: { ...cur, avatar: finalUrl },
+                };
+              });
+              setCurrentAuthUser((prev) => (prev ? { ...prev, avatar: finalUrl } : null));
+            }
+          }
+        }
+        const bannerKey = localStorage.getItem('privity_user_banner_media_key');
+        if (bannerKey) {
+          const freshUrl = await getFreshMediaUrl(bannerKey);
+          if (freshUrl) {
+            const finalUrl = freshUrl.includes('#') ? freshUrl : `${freshUrl}#video.mp4`;
+            const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+            if (cleanHandle) {
+              setProfiles((prev) => {
+                const cur = prev[cleanHandle.toLowerCase()] || prev[cleanHandle];
+                if (!cur) return prev;
+                return {
+                  ...prev,
+                  [cleanHandle.toLowerCase()]: { ...cur, coverUrl: finalUrl },
+                };
+              });
+              setCurrentAuthUser((prev) => (prev ? { ...prev, coverUrl: finalUrl } : null));
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Hydrate media loops error:', err);
+      }
+    };
+    hydrateMediaLoops();
+  }, [currentAuthUser?.handle]);
 
   // Take user all the way to the top of the preserved section upon page refresh / load
   useEffect(() => {
@@ -8414,58 +8467,70 @@ export function App() {
                               className="roster-swipe-wrapper"
                               onTouchStart={(e) => {
                                 (window as any)[`__swipeStartX_${handle}`] = e.touches[0].clientX;
+                                (window as any)[`__swipeStartY_${handle}`] = e.touches[0].clientY;
                               }}
                               onTouchEnd={(e) => {
                                 const startX = (window as any)[`__swipeStartX_${handle}`] || 0;
+                                const startY = (window as any)[`__swipeStartY_${handle}`] || 0;
                                 const dx = e.changedTouches[0].clientX - startX;
-                                if (dx < -40) {
-                                  setSwipedChannelHandle(handle);
-                                } else if (dx > 40) {
-                                  setSwipedChannelHandle(null);
+                                const dy = e.changedTouches[0].clientY - startY;
+                                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 35) {
+                                  if (dx < -35) {
+                                    setSwipedChannelHandle(handle);
+                                  } else if (dx > 35) {
+                                    setSwipedChannelHandle((cur) => (cur === handle ? null : cur));
+                                  }
                                 }
                               }}
                               onMouseDown={(e) => {
                                 (window as any)[`__swipeMouseStartX_${handle}`] = e.clientX;
+                                (window as any)[`__swipeMouseStartY_${handle}`] = e.clientY;
                               }}
                               onMouseUp={(e) => {
                                 const startX = (window as any)[`__swipeMouseStartX_${handle}`] || 0;
+                                const startY = (window as any)[`__swipeMouseStartY_${handle}`] || 0;
                                 const dx = e.clientX - startX;
-                                if (dx < -40) {
-                                  setSwipedChannelHandle(handle);
-                                } else if (dx > 40) {
-                                  setSwipedChannelHandle(null);
+                                const dy = e.clientY - startY;
+                                if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 35) {
+                                  if (dx < -35) {
+                                    setSwipedChannelHandle(handle);
+                                  } else if (dx > 35) {
+                                    setSwipedChannelHandle((cur) => (cur === handle ? null : cur));
+                                  }
                                 }
                               }}
                             >
-                              {/* Quick Actions Drawer revealed when swiping left */}
-                              <div className="roster-swipe-actions">
-                                <button
-                                  type="button"
-                                  className="roster-action-btn mute"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleToggleMuteChat(handle);
-                                    setSwipedChannelHandle(null);
-                                  }}
-                                  title={isMuted ? 'Unmute notifications' : 'Mute notifications'}
-                                >
-                                  <span style={{ fontSize: '15px' }}>{isMuted ? '🔔' : '🔕'}</span>
-                                  <span>{isMuted ? 'Unmute' : 'Mute'}</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  className="roster-action-btn delete"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteConversation(handle);
-                                    setSwipedChannelHandle(null);
-                                  }}
-                                  title="Delete conversation"
-                                >
-                                  <span style={{ fontSize: '15px' }}>🗑️</span>
-                                  <span>Delete</span>
-                                </button>
-                              </div>
+                              {/* Quick Actions Drawer strictly revealed ONLY when swiped on this specific user */}
+                              {isSwiped && (
+                                <div className="roster-swipe-actions visible">
+                                  <button
+                                    type="button"
+                                    className="roster-action-btn mute"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleMuteChat(handle);
+                                      setSwipedChannelHandle(null);
+                                    }}
+                                    title={isMuted ? 'Unmute notifications' : 'Mute notifications'}
+                                  >
+                                    <span style={{ fontSize: '15px' }}>{isMuted ? '🔔' : '🔕'}</span>
+                                    <span>{isMuted ? 'Unmute' : 'Mute'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="roster-action-btn delete"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteConversation(handle);
+                                      setSwipedChannelHandle(null);
+                                    }}
+                                    title="Delete conversation"
+                                  >
+                                    <span style={{ fontSize: '15px' }}>🗑️</span>
+                                    <span>Delete</span>
+                                  </button>
+                                </div>
+                              )}
 
                               <div
                                 className={`channel-card-item roster-swipe-content ${isSelected ? 'active' : ''}`}
@@ -8477,6 +8542,7 @@ export function App() {
                                     setSwipedChannelHandle(null);
                                     return;
                                   }
+                                  setSwipedChannelHandle(null);
                                   setActiveChatUser(user);
                                   setChatMediaAttachment(null);
                                 }}
@@ -8778,9 +8844,9 @@ export function App() {
                         />
                         <span className={`online-presence-dot presence-dot-${getUserPresenceState(cleanRecipientHandle)}`} />
                       </div>
-                      <div style={{ minWidth: 0 }}>
-                        <div className="messages-thread-name">
-                          <span>{currentRecipient.name}</span>
+                      <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
+                        <div className="messages-thread-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentRecipient.name}</span>
                           {currentRecipient.isVerified && (
                             <VerifiedBadge
                               authorName={currentRecipient.name}
@@ -8792,24 +8858,25 @@ export function App() {
                           {isPartnerInCloseFriends && (
                             <span
                               style={{
-                                fontSize: '11px',
+                                fontSize: '10.5px',
                                 background: 'var(--cf-glass)',
                                 border: '1px solid var(--cf-border)',
                                 color: 'var(--cf-emerald)',
-                                padding: '2px 8px',
+                                padding: '1px 6px',
                                 borderRadius: 'var(--radius-pill)',
                                 fontWeight: 700,
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '4px',
+                                gap: '3px',
+                                flexShrink: 0,
                               }}
                             >
-                              <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
-                              Circle Member
+                              <IconStarCloseFriends size={10} color="var(--cf-emerald)" />
+                              Circle
                             </span>
                           )}
                         </div>
-                        <div className="messages-thread-status">
+                        <div className="messages-thread-status" style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
                           <span
                             className="status-indicator-dot"
                             style={{
@@ -8821,9 +8888,10 @@ export function App() {
                                   : '#475569',
                               boxShadow:
                                 getUserPresenceState(cleanRecipientHandle) === 'active' ? '0 0 8px #22c55e' : 'none',
+                              flexShrink: 0,
                             }}
                           />
-                          <span style={{ color: getUserPresenceState(cleanRecipientHandle) === 'active' ? '#22c55e' : 'var(--text-muted)' }}>
+                          <span style={{ color: getUserPresenceState(cleanRecipientHandle) === 'active' ? '#22c55e' : 'var(--text-muted)', fontSize: '11.5px' }}>
                             {isRecipientTyping
                               ? `@${cleanRecipientHandle} is typing...`
                               : getUserPresenceState(cleanRecipientHandle) === 'active'
@@ -8837,38 +8905,68 @@ export function App() {
                     </div>
                   </div>
 
-                  <div className="messages-thread-tools">
+                  <div className="chat-header-actions-group">
                     <button
                       type="button"
-                      className="btn-glass-back"
-                      style={{ padding: '7px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      className="chat-header-action-btn"
                       onClick={() => {
                         setActiveChatUser(null);
                         navigateToProfile(currentRecipient.handle);
                       }}
-                      title="Inspect full creator portfolio"
+                      title={`View @${cleanRecipientHandle}'s profile`}
                     >
-                      <IconUser size={13} />
-                      <span>Profile</span>
+                      <IconUser size={16} />
                     </button>
                     <button
                       type="button"
-                      className="btn-glass-back"
-                      style={{
-                        padding: '7px 12px',
-                        fontSize: '12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        color: 'rgba(248, 113, 113, 0.9)',
-                        borderColor: 'rgba(239, 68, 68, 0.3)',
+                      className="chat-header-action-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsChatHeaderMenuOpen((prev) => !prev);
                       }}
-                      onClick={() => handleClearConversation(cleanRecipientHandle)}
-                      title="Clear messages in this channel"
+                      title="Conversation options"
                     >
-                      <IconTrash size={13} />
-                      <span>Clear Chat</span>
+                      <IconDots size={16} />
                     </button>
+
+                    {isChatHeaderMenuOpen && (
+                      <div className="chat-header-menu-popover" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="chat-header-menu-item"
+                          onClick={() => {
+                            setIsChatHeaderMenuOpen(false);
+                            setActiveChatUser(null);
+                            navigateToProfile(currentRecipient.handle);
+                          }}
+                        >
+                          <IconUser size={14} />
+                          <span>View Profile</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-header-menu-item"
+                          onClick={() => {
+                            handleToggleMuteChat(cleanRecipientHandle);
+                            setIsChatHeaderMenuOpen(false);
+                          }}
+                        >
+                          <span style={{ fontSize: '14px' }}>{mutedChats[cleanRecipientHandle] ? '🔔' : '🔕'}</span>
+                          <span>{mutedChats[cleanRecipientHandle] ? 'Unmute Notifications' : 'Mute Notifications'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-header-menu-item danger"
+                          onClick={() => {
+                            handleClearConversation(cleanRecipientHandle);
+                            setIsChatHeaderMenuOpen(false);
+                          }}
+                        >
+                          <IconTrash size={14} />
+                          <span>Clear Chat History</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -9932,19 +10030,19 @@ export function App() {
                         cursor: 'pointer',
                         boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
                       }}
-                      title="Change Banner Photo or Video"
+                      title="Change Banner"
                     >
                       <IconPhoto size={14} color="#00f0ff" />
                       <span>Change Banner</span>
                       <input
                         type="file"
-                        accept="image/*,video/*"
+                        accept="image/*,video/*,.mp4,.mov,.webm,.m4v"
                         style={{ display: 'none' }}
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            if (file.type.startsWith('video')) {
-                              triggerToast('Converting banner video to lightweight loop...');
+                            if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
+                              triggerToast('Updating banner...');
                               const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner');
                               handleDirectBannerChange(animatedUrl);
                             } else {
@@ -9980,20 +10078,17 @@ export function App() {
                         title={hasActiveStory ? `Tap to view @${profile.handle}'s story` : profile.name}
                       >
                         {isVideoMedia(profile.avatar) ? (
-                          <div style={{ position: 'relative', display: 'inline-block' }}>
-                            <video
-                              src={profile.avatar}
-                              autoPlay
-                              loop
-                              muted
-                              playsInline
-                              className={`profile-avatar-squircle is-video-avatar ${hasActiveStory ? 'has-active-story-ring' : ''}`}
-                              style={{ objectFit: 'cover' }}
-                            />
-                            <div className="profile-avatar-sticker-tag" title="Animated GIF / Sticker Profile">
-                              GIF
-                            </div>
-                          </div>
+                          <video
+                            src={profile.avatar}
+                            autoPlay
+                            loop
+                            muted
+                            playsInline
+                            // @ts-ignore
+                            webkit-playsinline="true"
+                            className={`profile-avatar-squircle is-video-avatar ${hasActiveStory ? 'has-active-story-ring' : ''}`}
+                            style={{ objectFit: 'cover' }}
+                          />
                         ) : (
                           <img
                             src={profile.avatar}
@@ -10010,20 +10105,20 @@ export function App() {
                         {isOwnProfile && (
                           <label
                             className="btn-glass-avatar-edit"
-                            title="Change Profile Photo or Video (Sticker / GIF)"
+                            title="Change Profile Picture"
                             style={{ cursor: 'pointer' }}
                             onClick={(e) => e.stopPropagation()}
                           >
                             <IconPhoto size={13} />
                             <input
                               type="file"
-                              accept="image/*,video/*"
+                              accept="image/*,video/*,.mp4,.mov,.webm,.m4v"
                               style={{ display: 'none' }}
                               onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (file) {
-                                  if (file.type.startsWith('video')) {
-                                    triggerToast('Creating animated GIF sticker...');
+                                  if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
+                                    triggerToast('Updating profile picture...');
                                     const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar');
                                     handleDirectAvatarChange(animatedUrl);
                                   } else {
@@ -12059,9 +12154,9 @@ export function App() {
 
             <form onSubmit={handleSaveProfile}>
               <div className="edit-profile-modal-body">
-                {/* Cover Photo/Video Customization */}
+                {/* Cover Banner Customization */}
                 <div className="edit-profile-section">
-                  <label className="edit-profile-label">Cover Banner Photo or Video</label>
+                  <label className="edit-profile-label">Cover Banner</label>
                   {isVideoMedia(editForm.coverUrl) ? (
                     <video
                       src={editForm.coverUrl}
@@ -12099,20 +12194,20 @@ export function App() {
                       <span>Upload Banner From Device</span>
                       <input
                         type="file"
-                        accept="image/*,video/*"
+                        accept="image/*,video/*,.mp4,.mov,.webm,.m4v"
                         style={{ display: 'none' }}
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            if (file.type.startsWith('video')) {
-                              triggerToast('Converting banner video...');
+                            if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
+                              triggerToast('Updating banner...');
                               const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner');
                               setEditForm((prev) => ({ ...prev, coverUrl: animatedUrl }));
-                              triggerToast('Cover banner video loop updated!');
+                              triggerToast('Cover banner updated!');
                             } else {
                               compressImageFile(file, 1600, 0.86, (dataUrl) => {
                                 setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
-                                triggerToast('Cover banner photo updated!');
+                                triggerToast('Cover banner updated!');
                               });
                             }
                           }
@@ -12123,7 +12218,7 @@ export function App() {
                       type="text"
                       className="edit-profile-input"
                       style={{ flex: 1, minWidth: '180px' }}
-                      placeholder="Or paste banner image/video URL..."
+                      placeholder="Or paste banner URL..."
                       value={editForm.coverUrl}
                       onChange={(e) => setEditForm({ ...editForm, coverUrl: e.target.value })}
                     />
@@ -12146,7 +12241,7 @@ export function App() {
 
                 {/* Avatar Customization */}
                 <div className="edit-profile-section">
-                  <label className="edit-profile-label">Profile Avatar (Photo or Video GIF Sticker)</label>
+                  <label className="edit-profile-label">Profile Picture</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     {isVideoMedia(editForm.avatar) ? (
                       <div style={{ position: 'relative', width: '68px', height: '68px', flexShrink: 0 }}>
@@ -12156,6 +12251,8 @@ export function App() {
                           loop
                           muted
                           playsInline
+                          // @ts-ignore
+                          webkit-playsinline="true"
                           style={{
                             width: '68px',
                             height: '68px',
@@ -12165,12 +12262,11 @@ export function App() {
                             boxShadow: 'var(--shadow-elevated)',
                           }}
                         />
-                        <span className="media-avatar-gif-tag">GIF</span>
                       </div>
                     ) : (
                       <img
                         src={editForm.avatar}
-                        alt="Avatar Preview"
+                        alt="Profile Picture Preview"
                         style={{
                           width: '68px',
                           height: '68px',
@@ -12188,20 +12284,20 @@ export function App() {
                           <span>Upload From Device</span>
                           <input
                             type="file"
-                            accept="image/*,video/*"
+                            accept="image/*,video/*,.mp4,.mov,.webm,.m4v"
                             style={{ display: 'none' }}
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                if (file.type.startsWith('video')) {
-                                  triggerToast('Creating GIF sticker...');
+                                if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
+                                  triggerToast('Updating profile picture...');
                                   const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar');
                                   setEditForm((prev) => ({ ...prev, avatar: animatedUrl }));
-                                  triggerToast('Avatar animated GIF sticker updated!');
+                                  triggerToast('Profile picture updated!');
                                 } else {
                                   compressImageFile(file, 280, 0.65, (dataUrl) => {
                                     setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
-                                    triggerToast('Avatar photo updated!');
+                                    triggerToast('Profile picture updated!');
                                   });
                                 }
                               }
@@ -12212,7 +12308,7 @@ export function App() {
                           type="text"
                           className="edit-profile-input"
                           style={{ flex: 1, minWidth: '160px' }}
-                          placeholder="Or paste avatar URL..."
+                          placeholder="Or paste profile picture URL..."
                           value={editForm.avatar}
                           onChange={(e) => setEditForm({ ...editForm, avatar: e.target.value })}
                         />
