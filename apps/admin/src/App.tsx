@@ -1897,7 +1897,7 @@ export function App() {
   // ========================================================
   // REAL-TIME MULTI-DEVICE SYNCHRONIZATION ENGINE
   // ========================================================
-  const SYNC_TOPIC = 'privity_sync_live_v360';
+  const SYNC_TOPIC = 'privity_sync_v400_universe';
   const SYNC_ENDPOINT = `https://ntfy.sh/${SYNC_TOPIC}`;
 
   // Unique Device ID generated once per browser/device
@@ -2111,15 +2111,15 @@ export function App() {
                   targetPostAuthor = normalizeHandle(p.authorHandle);
                 }
                 const currentLikers = (p.likersList || []).map(normalizeHandle).filter(Boolean);
-                const updatedLikers = Array.isArray(remoteLikers)
-                  ? Array.from(new Set(remoteLikers.map(normalizeHandle).filter(Boolean)))
-                  : isLiked
-                  ? Array.from(new Set([...currentLikers, cleanLiker]))
+                const incomingLikers = Array.isArray(remoteLikers) ? remoteLikers.map(normalizeHandle).filter(Boolean) : [];
+                const updatedLikers = isLiked
+                  ? Array.from(new Set([...currentLikers, cleanLiker, ...incomingLikers]))
                   : currentLikers.filter((h) => h !== cleanLiker);
 
-                const count = typeof likesCount === 'number'
-                  ? likesCount
-                  : updatedLikers.length;
+                const count = Math.max(
+                  updatedLikers.length,
+                  typeof likesCount === 'number' ? likesCount : updatedLikers.length
+                );
 
                 const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
 
@@ -2134,6 +2134,25 @@ export function App() {
             });
             safeSaveStorage('privity_posts_v5', nextPosts);
             return nextPosts;
+          });
+
+          // Keep photoLikesMap synchronized if post contains visual media
+          setPhotoLikesMap((prevMap) => {
+            const targetP = postsRef.current.find((p) => p.id === postId);
+            const photoUrl = targetP?.contentUrl || targetP?.thumbnailUrl;
+            if (photoUrl) {
+              const baseKey = extractMediaBaseKey(photoUrl);
+              const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
+              const targetLikers = targetP?.likersList || [];
+              const nextMap = {
+                ...prevMap,
+                ...(baseKey ? { [baseKey]: { isLiked: myClean ? targetLikers.includes(myClean) : false, count: targetLikers.length } } : {}),
+                ...(!photoUrl.startsWith('data:') ? { [photoUrl]: { isLiked: myClean ? targetLikers.includes(myClean) : false, count: targetLikers.length } } : {}),
+              };
+              safeSaveStorage('privity_photo_likes_v5', nextMap);
+              return nextMap;
+            }
+            return prevMap;
           });
 
           // Accurate Notification: When another user likes current user's dispatch
@@ -2180,22 +2199,25 @@ export function App() {
                   targetAuthor = normalizeHandle(p.authorHandle);
                 }
                 const currentSavers = (p.saversList || []).map(normalizeHandle).filter(Boolean);
-                const updatedSavers = Array.isArray(remoteSavers)
-                  ? Array.from(new Set(remoteSavers.map(normalizeHandle).filter(Boolean)))
+                const incomingSavers = Array.isArray(remoteSavers) ? remoteSavers.map(normalizeHandle).filter(Boolean) : [];
+                const updatedSavers = isSaved
+                  ? Array.from(new Set([...currentSavers, ...(cleanSaver ? [cleanSaver] : []), ...incomingSavers]))
                   : cleanSaver
-                  ? (isSaved
-                    ? Array.from(new Set([...currentSavers, cleanSaver]))
-                    : currentSavers.filter((h) => h !== cleanSaver))
+                  ? currentSavers.filter((h) => h !== cleanSaver)
                   : currentSavers;
 
-                const count = typeof savesCount === 'number'
-                  ? savesCount
-                  : updatedSavers.length;
+                const count = Math.max(
+                  updatedSavers.length,
+                  typeof savesCount === 'number' ? savesCount : updatedSavers.length
+                );
+
+                const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle || myProfile.handle);
 
                 return {
                   ...p,
                   saversList: updatedSavers,
                   savesCount: Math.max(0, count),
+                  isSaved: myClean ? updatedSavers.includes(myClean) : p.isSaved,
                 };
               }
               return p;
@@ -2521,12 +2543,13 @@ export function App() {
                       replies: (c.replies || []).map((r) => {
                         if (r.id !== replyId) return r;
                         const curLikers = (r.likersList || []).map(normalizeHandle).filter(Boolean);
-                        const updLikers = Array.isArray(remoteLikers)
-                          ? Array.from(new Set(remoteLikers.map(normalizeHandle).filter(Boolean)))
-                          : isLiked
-                          ? Array.from(new Set([...curLikers, cleanLiker].filter(Boolean)))
-                          : curLikers.filter((h) => h !== cleanLiker);
-                        const cnt = typeof likesCount === 'number' ? likesCount : updLikers.length;
+                        const incomingLikers = Array.isArray(remoteLikers) ? remoteLikers.map(normalizeHandle).filter(Boolean) : [];
+                        const updLikers = isLiked
+                          ? Array.from(new Set([...curLikers, ...(cleanLiker ? [cleanLiker] : []), ...incomingLikers]))
+                          : cleanLiker
+                          ? curLikers.filter((h) => h !== cleanLiker)
+                          : curLikers;
+                        const cnt = Math.max(updLikers.length, typeof likesCount === 'number' ? likesCount : updLikers.length);
                         return {
                           ...r,
                           likersList: updLikers,
@@ -2536,12 +2559,13 @@ export function App() {
                     };
                   }
                   const curLikers = (c.likersList || []).map(normalizeHandle).filter(Boolean);
-                  const updLikers = Array.isArray(remoteLikers)
-                    ? Array.from(new Set(remoteLikers.map(normalizeHandle).filter(Boolean)))
-                    : isLiked
-                    ? Array.from(new Set([...curLikers, cleanLiker].filter(Boolean)))
-                    : curLikers.filter((h) => h !== cleanLiker);
-                  const cnt = typeof likesCount === 'number' ? likesCount : updLikers.length;
+                  const incomingLikers = Array.isArray(remoteLikers) ? remoteLikers.map(normalizeHandle).filter(Boolean) : [];
+                  const updLikers = isLiked
+                    ? Array.from(new Set([...curLikers, ...(cleanLiker ? [cleanLiker] : []), ...incomingLikers]))
+                    : cleanLiker
+                    ? curLikers.filter((h) => h !== cleanLiker)
+                    : curLikers;
+                  const cnt = Math.max(updLikers.length, typeof likesCount === 'number' ? likesCount : updLikers.length);
                   return {
                     ...c,
                     likersList: updLikers,
@@ -2824,8 +2848,20 @@ export function App() {
               timeAgo: 'Just now',
               isRead: false,
             };
-            addNotification(notif);
+            addNotification(notif, cleanTarget);
             triggerToast(`✨ ${followerName ? `${followerName} (@${cleanFollower})` : `@${cleanFollower}`} followed you!`);
+          }
+
+          if (cleanTarget === cleanMyHandle.toLowerCase()) {
+            setCurrentAuthUser((prev) => prev ? {
+              ...prev,
+              followers: Math.max(0, (prev.followers || 0) + (isFollowing ? 1 : -1)),
+            } : prev);
+          } else if (cleanFollower === cleanMyHandle.toLowerCase()) {
+            setCurrentAuthUser((prev) => prev ? {
+              ...prev,
+              following: Math.max(0, (prev.following || 0) + (isFollowing ? 1 : -1)),
+            } : prev);
           }
           break;
         }
@@ -3637,7 +3673,7 @@ export function App() {
       }
     }
 
-    // 5. Same-device multi-tab BroadcastChannel listener
+    // 5. Same-device multi-tab BroadcastChannel listener & Storage Event listener
     if (localSyncBus) {
       localSyncBus.onmessage = (e) => {
         if (e.data) {
@@ -3645,6 +3681,76 @@ export function App() {
         }
       };
     }
+
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (!e.newValue) return;
+      const myClean = normalizeHandle(currentAuthUserRef.current?.handle || myProfileRef.current?.handle);
+      if (e.key === 'privity_posts_v5') {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setPosts((prev) => {
+              const parsedMap = new Map<string, any>(parsed.map((p: any) => [p.id, p]));
+              const next = prev.map((p) => {
+                const incoming = parsedMap.get(p.id);
+                if (!incoming) return p;
+                const likers = Array.isArray(incoming.likersList) ? incoming.likersList : p.likersList || [];
+                const savers = Array.isArray(incoming.saversList) ? incoming.saversList : p.saversList || [];
+                return {
+                  ...p,
+                  ...incoming,
+                  likersList: likers,
+                  likesCount: likers.length,
+                  saversList: savers,
+                  savesCount: savers.length,
+                  isLiked: myClean ? likers.includes(myClean) : p.isLiked,
+                  isSaved: myClean ? savers.includes(myClean) : p.isSaved,
+                };
+              });
+              const existingIds = new Set(prev.map((p) => p.id));
+              for (const p of parsed) {
+                if (!existingIds.has(p.id)) {
+                  const likers = Array.isArray(p.likersList) ? p.likersList : [];
+                  const savers = Array.isArray(p.saversList) ? p.saversList : [];
+                  next.unshift({
+                    ...p,
+                    likersList: likers,
+                    likesCount: likers.length,
+                    saversList: savers,
+                    savesCount: savers.length,
+                    isLiked: myClean ? likers.includes(myClean) : false,
+                    isSaved: myClean ? savers.includes(myClean) : false,
+                  });
+                }
+              }
+              return next;
+            });
+          }
+        } catch {}
+      } else if (e.key === 'privity_profiles_v5') {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') {
+            setProfiles((prev) => ({ ...prev, ...parsed }));
+          }
+        } catch {}
+      } else if (e.key === 'privity_following_v5') {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') {
+            setFollowingMap(parsed);
+          }
+        } catch {}
+      } else if (myClean && e.key === `privity_notifs_${myClean}`) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setNotifications(parsed);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
 
     // 6. 3-second heartbeat poll to ensure guaranteed sync even if mobile OS sleeps SSE
     const pollInterval = setInterval(() => {
@@ -3709,6 +3815,7 @@ export function App() {
       window.removeEventListener('pageshow', handleWake);
       window.removeEventListener('focus', handleWake);
       window.removeEventListener('online', fullCatchUp);
+      window.removeEventListener('storage', handleStorageEvent);
     };
   }, [handleRawNtfyItem, applyRemoteSyncEvent, localSyncBus]);
 
@@ -6566,6 +6673,7 @@ export function App() {
       isLiked: false,
       isSaved: false,
       likersList: [],
+      saversList: [],
       timeAgo: 'Just now',
       comments: [],
     };
@@ -6680,6 +6788,7 @@ export function App() {
       isLiked: false,
       isSaved: false,
       likersList: [],
+      saversList: [],
       timeAgo: 'Just now',
       comments: [],
     };
@@ -8130,7 +8239,8 @@ export function App() {
                         const effectiveLikers = (post.likersList || []).map(normalizeHandle).filter(Boolean);
                         const rawLikesCount = typeof post.likesCount === 'number' && !isNaN(post.likesCount) ? post.likesCount : 0;
                         const effectiveLikesCount = Array.isArray(post.likersList) ? post.likersList.length : rawLikesCount;
-                        const isSaved = savedPostIds.includes(post.id);
+                        const isSaved = Boolean((viewerHandle && (post.saversList || []).map(normalizeHandle).includes(viewerHandle)) || savedPostIds.includes(post.id) || post.isSaved);
+                        const effectiveSavesCount = Array.isArray(post.saversList) ? post.saversList.length : (post.savesCount || 0);
 
                         return (
                           <>
@@ -8172,6 +8282,7 @@ export function App() {
                                 title="Save"
                               >
                                 <IconBookmark size={18} filled={isSaved} color={isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
+                                <span>{effectiveSavesCount}</span>
                               </button>
 
                               {/* Options / Report Menu */}
@@ -11511,7 +11622,8 @@ export function App() {
                               const effectiveLikers = (post.likersList || []).map(normalizeHandle).filter(Boolean);
                               const rawLikesCount = typeof post.likesCount === 'number' && !isNaN(post.likesCount) ? post.likesCount : 0;
                               const effectiveLikesCount = Array.isArray(post.likersList) ? post.likersList.length : rawLikesCount;
-                              const isSaved = savedPostIds.includes(post.id);
+                              const isSaved = Boolean((viewerHandle && (post.saversList || []).map(normalizeHandle).includes(viewerHandle)) || savedPostIds.includes(post.id) || post.isSaved);
+                              const effectiveSavesCount = Array.isArray(post.saversList) ? post.saversList.length : (post.savesCount || 0);
 
                               return (
                                 <>
@@ -11546,6 +11658,7 @@ export function App() {
                                       title="Save"
                                     >
                                       <IconBookmark size={18} filled={isSaved} color={isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
+                                      <span>{effectiveSavesCount}</span>
                                     </button>
                                     <button
                                       className="btn-post-action"

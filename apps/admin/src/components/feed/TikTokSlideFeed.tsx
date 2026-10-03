@@ -534,11 +534,13 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           if (!live) return base;
           return {
             ...base,
-            likesCount: live.likesCount ?? base.likesCount,
+            likersList: live.likersList ?? base.likersList ?? [],
+            likesCount: Array.isArray(live.likersList) ? live.likersList.length : (live.likesCount ?? base.likesCount ?? 0),
+            saversList: live.saversList ?? base.saversList ?? [],
+            savesCount: Array.isArray(live.saversList) ? live.saversList.length : (live.savesCount ?? base.savesCount ?? 0),
             isLiked: live.isLiked ?? base.isLiked,
             commentsCount: live.commentsCount ?? base.commentsCount,
             comments: live.comments ?? base.comments,
-            savesCount: live.savesCount ?? base.savesCount,
             isSaved: live.isSaved ?? base.isSaved,
             sharesCount: live.sharesCount ?? base.sharesCount,
             isReposted: live.isReposted ?? (base as any).isReposted,
@@ -1815,7 +1817,10 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             const isVideo = post.type === 'video' || !!post.videoUrl;
             const mediaUrl = post.videoUrl || post.contentUrl || post.thumbnailUrl || '';
             const isPaused = !!pausedMap[post.id];
-            const isFollowed = !!followedMap[post.authorHandle];
+            const myClean = (currentUser?.handle || '').toLowerCase().replace(/^@/, '').trim();
+            const authorClean = (post.authorHandle || '').toLowerCase().replace(/^@/, '').trim();
+            const isSelf = Boolean(myClean && authorClean && myClean === authorClean);
+            const isFollowedUser = isFollowed(post.authorHandle);
 
             return (
               <div
@@ -1902,7 +1907,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                       alt={post.authorName}
                       className="tiktok-rail-avatar-img"
                     />
-                    {!isFollowed && (
+                    {!isSelf && !isFollowedUser && (
                       <button
                         type="button"
                         className="tiktok-rail-plus-btn"
@@ -1913,7 +1918,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                         <span className="tiktok-plus-sign">+</span>
                       </button>
                     )}
-                    {isFollowed && (
+                    {!isSelf && isFollowedUser && (
                       <span className="tiktok-rail-followed-badge">✓</span>
                     )}
                   </div>
