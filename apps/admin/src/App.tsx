@@ -72,7 +72,7 @@ import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnect
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
 import { convertVideoToAnimatedLoop, isKnownVideoUrl } from './services/videoMediaHelper';
-import { storePostMedia, getFreshMediaUrl } from './services/mediaDb';
+import { storePostMedia, getFreshMediaUrl, clearAllMediaBlobs } from './services/mediaDb';
 
 export const BANNED_MOCK_HANDLES = new Set([
   'elena_rodriguez',
@@ -137,8 +137,8 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset v390: Clean reset for 100% accurate real-time numbers, zero glitching, pristine fresh state
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v390_absolute_zero';
+// Guaranteed Absolute Zero Reset v395: Pure scratch start - refresh and delete all posts, all activities, all accounts so all users can register/login from scratch
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v395_pure_scratch';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -156,6 +156,7 @@ if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 
     }
     keysToRemove.forEach((k) => localStorage.removeItem(k));
     sessionStorage.clear();
+    clearAllMediaBlobs().catch(() => {});
     localStorage.setItem(GROUND_ZERO_FLAG, 'done');
   } catch (e) {}
 }
@@ -874,7 +875,7 @@ export function App() {
   const [currentAuthUser, setCurrentAuthUser] = useState<UserAccount | null>(() => authService.getCurrentUser());
   const currentAuthUserRef = React.useRef(currentAuthUser);
   currentAuthUserRef.current = currentAuthUser;
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(() => !authService.getCurrentUser());
   const [userSparksBalance, setUserSparksBalance] = useState(() => authService.getCurrentUser()?.sparks ?? 0);
   const [battleScoreHost, setBattleScoreHost] = useState(0);
   const [battleScoreOpponent, setBattleScoreOpponent] = useState(0);
@@ -5305,19 +5306,20 @@ export function App() {
     triggerToast('All account data exported to JSON archive');
   };
 
-  const handleResetData = () => {
-    if (window.confirm('Reset all demo data and profile modifications to factory defaults?')) {
-      localStorage.removeItem('privity_profiles_v5');
-      localStorage.removeItem('privity_posts_v5');
-      localStorage.removeItem('privity_following_v5');
-      localStorage.removeItem('privity_close_friends_v5');
-      localStorage.removeItem('privity_private_account_v5');
-      localStorage.removeItem('privity_user_settings_v5');
-      localStorage.removeItem('privity_follow_requests_v5');
-      localStorage.removeItem('privity_photo_likes_v5');
-      localStorage.removeItem('privity_direct_messages_v5');
-      localStorage.removeItem('privity_active_tab_v5');
-      localStorage.removeItem('privity_viewed_handle_v5');
+  const handleResetData = async () => {
+    if (window.confirm('Delete all posts, all activities, all accounts, and refresh cleanly so everyone can register or log in from scratch?')) {
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('privity_')) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+        sessionStorage.clear();
+        await clearAllMediaBlobs().catch(() => {});
+      } catch {}
       window.location.reload();
     }
   };
@@ -7187,10 +7189,16 @@ export function App() {
 
           <button
             className={`nav-link-btn ${activeTab === 'profile' && viewedUserHandle === myProfile.handle ? 'active' : ''}`}
-            onClick={() => navigateToProfile(myProfile.handle)}
+            onClick={() => {
+              if (!currentAuthUser) {
+                setIsAuthModalOpen(true);
+                return;
+              }
+              navigateToProfile(myProfile.handle);
+            }}
           >
             <span className="nav-icon-wrap"><IconUser size={21} /></span>
-            <span>Profile</span>
+            <span>{currentAuthUser ? 'Profile' : 'Log In / Sign Up'}</span>
           </button>
 
           <button
@@ -7202,7 +7210,17 @@ export function App() {
           </button>
         </nav>
 
-        <button className="btn-compose-prime" onClick={() => setIsCameraOpen(true)}>
+        <button
+          className="btn-compose-prime"
+          onClick={() => {
+            if (!currentAuthUser) {
+              setIsAuthModalOpen(true);
+              triggerToast('Please sign in or create an account to publish');
+              return;
+            }
+            setIsCameraOpen(true);
+          }}
+        >
           <IconPlus size={18} />
           <span>New Dispatch</span>
         </button>
@@ -7236,54 +7254,79 @@ export function App() {
           </div>
         )}
 
-        <div
-          className="user-identity-card"
-          onClick={() => navigateToProfile(myProfile.handle)}
-          title="Click to view profile"
-          style={{ cursor: 'pointer' }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <img
-              src={myProfile.avatar}
-              alt={myProfile.name}
-              className="user-avatar-mini"
-            />
-            <div>
-              <div style={{ fontSize: '13px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                {myProfile.name}
-                {myProfile.isVerified && (
-                  <VerifiedBadge authorName={myProfile.name} category={myProfile.verifiedCategory} since={myProfile.verifiedSince} proofId={myProfile.cryptoProofId} />
-                )}
+        {currentAuthUser ? (
+          <div
+            className="user-identity-card"
+            onClick={() => navigateToProfile(myProfile.handle)}
+            title="Click to view profile"
+            style={{ cursor: 'pointer' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <img
+                src={myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myProfile.handle || 'user'}`}
+                alt={myProfile.name}
+                className="user-avatar-mini"
+              />
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  {myProfile.name}
+                  {myProfile.isVerified && (
+                    <VerifiedBadge authorName={myProfile.name} category={myProfile.verifiedCategory} since={myProfile.verifiedSince} proofId={myProfile.cryptoProofId} />
+                  )}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{myProfile.handle}</div>
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>@{myProfile.handle}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                type="button"
+                className="settings-gear-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsSettingsOpen(true);
+                }}
+                title="Settings & System"
+              >
+                <IconSettings size={18} />
+              </button>
+              <button
+                type="button"
+                className="settings-gear-btn"
+                style={{ color: '#f87171' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleLogout();
+                }}
+                title="Sign Out / Log Out"
+              >
+                <IconLock size={16} />
+              </button>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <button
-              type="button"
-              className="settings-gear-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsSettingsOpen(true);
-              }}
-              title="Settings & System"
-            >
-              <IconSettings size={18} />
-            </button>
-            <button
-              type="button"
-              className="settings-gear-btn"
-              style={{ color: '#f87171' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleLogout();
-              }}
-              title="Sign Out / Log Out"
-            >
-              <IconLock size={16} />
-            </button>
+        ) : (
+          <div
+            className="user-identity-card"
+            onClick={() => setIsAuthModalOpen(true)}
+            title="Create an account or log in"
+            style={{
+              cursor: 'pointer',
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(168,85,247,0.12))',
+              border: '1px dashed rgba(168,85,247,0.3)',
+              padding: '10px 14px',
+              borderRadius: '16px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0 }}>
+                <IconUser size={18} />
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff' }}>Guest Mode</div>
+                <div style={{ fontSize: '11px', color: '#c084fc', fontWeight: 600 }}>Create Account / Log In</div>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </aside>
 
       {/* ======================================================== */}
@@ -10786,6 +10829,64 @@ export function App() {
                 (c.replies || []).some((r) => checkAuthor(r.authorHandle))
             );
           });
+
+          if (isOwnProfile && !currentAuthUser) {
+            return (
+              <div
+                className="profile-screen-container"
+                style={{
+                  minHeight: '75vh',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
+                  padding: '48px 24px',
+                }}
+              >
+                <div
+                  style={{
+                    width: '84px',
+                    height: '84px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.2))',
+                    border: '2px dashed rgba(168,85,247,0.5)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#c084fc',
+                    marginBottom: '20px',
+                  }}
+                >
+                  <IconUser size={40} />
+                </div>
+                <h2 style={{ fontSize: '22px', fontWeight: 800, color: '#fff', marginBottom: '10px' }}>
+                  Create an Account or Log In
+                </h2>
+                <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', maxWidth: '360px', lineHeight: 1.5, marginBottom: '24px' }}>
+                  Join Privity to customize your profile, publish encrypted moments, follow creators, and connect with your inner circle.
+                </p>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn-compose-prime"
+                    onClick={() => setIsAuthModalOpen(true)}
+                    style={{ padding: '12px 26px', fontSize: '14px', fontWeight: 700 }}
+                  >
+                    <span>Sign Up / Log In</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-glass-back"
+                    onClick={() => setActiveTab('feed')}
+                    style={{ padding: '12px 22px', fontSize: '13px' }}
+                  >
+                    <span>Browse Feed</span>
+                  </button>
+                </div>
+              </div>
+            );
+          }
 
           return (
             <div
@@ -14513,9 +14614,9 @@ export function App() {
                   <div className="settings-card-group">
                     <div className="settings-row-item">
                       <div className="settings-row-label-group">
-                        <div className="settings-item-title" style={{ color: '#f87171' }}>Reset Local Demo Data</div>
+                        <div className="settings-item-title" style={{ color: '#f87171' }}>Purge Platform & Start from Scratch</div>
                         <div className="settings-item-desc">
-                          Erase all local modifications, custom profile edits, uploaded photos, and return the application to pristine factory demo state.
+                          Erase all posts, all activities, all notifications, all accounts, and cached videos so everyone can register or log in cleanly from scratch.
                         </div>
                       </div>
                       <button
@@ -14532,7 +14633,7 @@ export function App() {
                         onClick={handleResetData}
                       >
                         <IconTrash size={15} />
-                        <span>Reset Data</span>
+                        <span>Purge & Reset All</span>
                       </button>
                     </div>
                   </div>
@@ -14665,15 +14766,25 @@ export function App() {
               type="button"
               className={`mobile-nav-item ${activeTab === 'profile' && viewedUserHandle === myProfile.handle ? 'active' : ''}`}
               onClick={() => {
+                if (!currentAuthUser) {
+                  setIsAuthModalOpen(true);
+                  return;
+                }
                 navigateToProfile(myProfile.handle);
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
               title="Your Profile"
             >
               <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === myProfile.handle ? 'active' : ''}`}>
-                <MediaAvatar src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" showBadge={false} />
+                {currentAuthUser && myProfile.avatar ? (
+                  <MediaAvatar src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" showBadge={false} />
+                ) : (
+                  <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #a855f7)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+                    <IconUser size={15} />
+                  </div>
+                )}
               </div>
-              <span className="mobile-nav-label">Profile</span>
+              <span className="mobile-nav-label">{currentAuthUser ? 'Profile' : 'Log In'}</span>
               {activeTab === 'profile' && viewedUserHandle === myProfile.handle && <span className="mobile-nav-indicator" />}
             </button>
           </nav>

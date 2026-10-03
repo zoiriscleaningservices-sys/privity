@@ -169,3 +169,31 @@ export function getCachedMediaUrl(id: string): string | null {
   return objectUrlCache.get(id) || null;
 }
 
+export async function clearAllMediaBlobs(): Promise<void> {
+  try {
+    for (const url of objectUrlCache.values()) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    }
+    objectUrlCache.clear();
+  } catch {}
+
+  try {
+    const db = await getDb();
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  } catch (err) {
+    console.warn('[MediaDB] Failed to clear media store:', err);
+  }
+}
+

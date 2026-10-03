@@ -37,8 +37,8 @@ const STORAGE_SESSION_KEY = 'privity_auth_session_v1';
 const STORAGE_TAB_SESSION_KEY = 'privity_tab_auth_session_v1';
 const STORAGE_ACCOUNTS_KEY = 'privity_accounts_v1';
 
-// Ground Zero Wipe v390: Completely erase all bloated video data, corrupted states, stale messages, activities, and reset cleanly
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v390_absolute_zero';
+// Ground Zero Wipe v395: Pure scratch start - refresh and delete all posts, all activities, all accounts so all users can register/login from scratch
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v395_pure_scratch';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -145,7 +145,10 @@ class AuthService {
     });
   }
 
+  private sessionLoaded = false;
+
   private loadSession() {
+    this.sessionLoaded = true;
     try {
       // Prioritize tab session first so different tabs in the same browser can be different users, then fall back to localStorage
       let raw = sessionStorage.getItem(STORAGE_TAB_SESSION_KEY);
@@ -157,35 +160,8 @@ class AuthService {
         if (this.currentUser) {
           this.currentUser.isVerified = false;
         }
-      }
-      if (!this.currentUser) {
-        const accounts = this.getAllAccounts();
-        const accountList = Object.values(accounts);
-        if (accountList.length > 0) {
-          this.currentUser = accountList[0];
-          this.setSession(this.currentUser);
-        } else {
-          const defaultAccount: UserAccount = {
-            id: 'usr_creator',
-            name: 'Creator',
-            handle: 'creator',
-            email: 'creator@privity.app',
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-            coverUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200',
-            bio: 'Privity creator sharing private-first moments and authentic updates.',
-            level: 0,
-            xp: 0,
-            followers: 0,
-            following: 0,
-            likes: 0,
-            sparks: 0,
-            isVerified: false,
-            createdAt: Date.now(),
-            provider: 'guest',
-          };
-          this.currentUser = defaultAccount;
-          this.setSession(defaultAccount);
-        }
+      } else {
+        this.currentUser = null;
       }
     } catch (e) {
       console.warn('Failed to load auth session:', e);
@@ -194,7 +170,7 @@ class AuthService {
   }
 
   public getCurrentUser(): UserAccount | null {
-    if (!this.currentUser) {
+    if (!this.sessionLoaded) {
       this.loadSession();
     }
     return this.currentUser;
