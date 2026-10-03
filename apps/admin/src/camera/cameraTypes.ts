@@ -18,6 +18,7 @@ export interface SoundTrack {
 export interface CapturedMedia {
   type: 'photo' | 'video';
   dataUrl: string;
+  thumbnailUrl?: string;
   blob?: Blob;
   durationSeconds?: number;
   width?: number;

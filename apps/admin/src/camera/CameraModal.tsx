@@ -41,6 +41,8 @@ import {
   IconLockManagement,
 } from './CameraIcons';
 import { IconX } from '../components/Icons';
+import { storeMediaBlob } from '../services/mediaDb';
+import { extractVideoThumbnail } from '../services/videoMediaHelper';
 
 export interface CameraModalProps {
   isOpen: boolean;
@@ -55,6 +57,7 @@ export interface CameraModalProps {
   onPublishPost: (postData: {
     caption: string;
     mediaUrl?: string | null;
+    thumbnailUrl?: string;
     mediaType?: 'photo' | 'video';
     tags: string;
     privacy: 'close_friends' | 'followers' | 'public';
@@ -398,18 +401,20 @@ export const CameraModal: React.FC<CameraModalProps> = ({
           }
         };
 
-        recorder.onstop = () => {
+        recorder.onstop = async () => {
           const blob = new Blob(recordedChunksRef.current, { type: mimeType });
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const videoDataUrl = (reader.result as string) || URL.createObjectURL(blob);
-            setCapturedMedia({
-              type: 'video',
-              dataUrl: videoDataUrl,
-              blob,
-            });
-          };
-          reader.readAsDataURL(blob);
+          const mediaId = `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          let posterThumb = '';
+          try {
+            posterThumb = await extractVideoThumbnail(blob);
+          } catch {}
+          const storedUrl = await storeMediaBlob(mediaId, blob);
+          setCapturedMedia({
+            type: 'video',
+            dataUrl: storedUrl,
+            thumbnailUrl: posterThumb,
+            blob,
+          });
         };
 
         mediaRecorderRef.current = recorder;
@@ -500,15 +505,25 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     if (file) {
       const isVideo = file.type.startsWith('video');
       if (isVideo) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const result = event.target?.result as string;
-          setCapturedMedia({
-            type: 'video',
-            dataUrl: result,
+        const mediaId = `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        extractVideoThumbnail(file)
+          .then(async (posterThumb) => {
+            const storedUrl = await storeMediaBlob(mediaId, file);
+            setCapturedMedia({
+              type: 'video',
+              dataUrl: storedUrl,
+              thumbnailUrl: posterThumb,
+              blob: file,
+            });
+          })
+          .catch(async () => {
+            const storedUrl = await storeMediaBlob(mediaId, file);
+            setCapturedMedia({
+              type: 'video',
+              dataUrl: storedUrl,
+              blob: file,
+            });
           });
-        };
-        reader.readAsDataURL(file);
       } else {
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -557,6 +572,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     onPublishPost({
       caption: reviewCaption.trim() || 'Shared via Privity Studio 📸',
       mediaUrl: capturedMedia.dataUrl,
+      thumbnailUrl: capturedMedia.thumbnailUrl,
       mediaType: capturedMedia.type,
       tags: reviewTags,
       privacy: reviewPrivacy,

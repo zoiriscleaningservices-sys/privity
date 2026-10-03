@@ -113,13 +113,13 @@ export function getSupabaseRealtimeChannel() {
 
   if (!realtimeSyncChannel) {
     try {
-      realtimeSyncChannel = sb.channel('privity_sync_v370', {
+      realtimeSyncChannel = sb.channel('privity_sync_v380', {
         config: { broadcast: { self: false } },
       });
 
       realtimeSyncChannel.subscribe((status: string) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Supabase Realtime] Connected to privity_sync_v370');
+          console.log('[Supabase Realtime] Connected to privity_sync_v380');
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn('[Supabase Realtime] Channel status:', status, 'Scheduling auto-reconnect...');
           if (!reconnectTimer) {

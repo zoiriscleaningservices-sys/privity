@@ -72,6 +72,7 @@ import { authService, UserAccount } from './services/authService';
 import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnectSupabaseRealtime } from './services/supabaseClient';
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
+import { convertVideoToAnimatedLoop } from './services/videoMediaHelper';
 
 export const BANNED_MOCK_HANDLES = new Set([
   'elena_rodriguez',
@@ -136,8 +137,8 @@ export const isMockPost = (p: any): boolean => {
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset v370: Completely erase all old mock data, stale messages, activities, charts, and reset cleanly
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v370';
+// Guaranteed Absolute Zero Reset v380: Completely erase all bloated video data, corrupted states, stale messages, activities, and reset cleanly
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v380';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -300,8 +301,10 @@ export const isSameHandle = (h1?: string | null, h2?: string | null): boolean =>
 export const isPostLikedByUser = (post?: PostItem | null, handle?: string | null): boolean => {
   if (!post) return false;
   const clean = normalizeHandle(handle);
-  if (!clean || !Array.isArray(post.likersList)) return false;
-  return post.likersList.some((h) => normalizeHandle(h) === clean);
+  if (clean && Array.isArray(post.likersList) && post.likersList.some((h) => normalizeHandle(h) === clean)) {
+    return true;
+  }
+  return !!post.isLiked;
 };
 
 export const isCommentLikedByUser = (comment?: { likersList?: string[] } | null, handle?: string | null): boolean => {
@@ -731,18 +734,45 @@ const sanitizeStoredDirectMessages = (raw: Record<string, DirectChatMessage[]>, 
 // ==================== MAIN COMPONENT ====================
 
 export function App() {
-  // Safe localStorage storage helper with quota management
+  // Safe localStorage storage helper with quota management and oversized video protection
   const safeSaveStorage = (key: string, data: any) => {
     try {
-      localStorage.setItem(key, JSON.stringify(data));
+      let sanitized = data;
+      // Protect localStorage from oversized base64 video and media strings (>100KB) to prevent iOS Safari OOM crashes
+      if (key === 'privity_posts_v5' && Array.isArray(data)) {
+        sanitized = data.map((post) => {
+          let updated = { ...post };
+          if (updated.videoUrl && updated.videoUrl.length > 100000 && updated.videoUrl.startsWith('data:')) {
+            updated.videoUrl = updated.thumbnailUrl || undefined;
+          }
+          if (updated.contentUrl && updated.contentUrl.length > 100000 && updated.contentUrl.startsWith('data:')) {
+            updated.contentUrl = updated.thumbnailUrl || undefined;
+          }
+          return updated;
+        });
+      } else if (key === 'privity_profiles_v5' && typeof data === 'object' && data !== null) {
+        sanitized = {};
+        for (const [k, prof] of Object.entries(data as Record<string, any>)) {
+          if (!prof) continue;
+          let cleanProf = { ...prof };
+          if (cleanProf.avatar && cleanProf.avatar.length > 120000 && cleanProf.avatar.startsWith('data:')) {
+            cleanProf.avatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400';
+          }
+          if (cleanProf.coverUrl && cleanProf.coverUrl.length > 120000 && cleanProf.coverUrl.startsWith('data:')) {
+            cleanProf.coverUrl = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200';
+          }
+          (sanitized as any)[k] = cleanProf;
+        }
+      }
+      localStorage.setItem(key, JSON.stringify(sanitized));
     } catch (e) {
       console.warn(`Storage quota reached for ${key}, trimming payload`, e);
       try {
         if (Array.isArray(data)) {
-          localStorage.setItem(key, JSON.stringify(data.slice(0, 15)));
+          localStorage.setItem(key, JSON.stringify(data.slice(0, 10)));
         } else if (typeof data === 'object' && data !== null) {
           const entries = Object.entries(data).filter(([k]) => !k.startsWith('data:'));
-          localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries.slice(-25))));
+          localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries.slice(-20))));
         }
       } catch (err2) {
         console.warn('Trimmed fallback failed', err2);
@@ -5948,6 +5978,7 @@ export function App() {
   const handleCameraPublishPost = ({
     caption,
     mediaUrl,
+    thumbnailUrl,
     mediaType,
     tags,
     privacy,
@@ -5956,6 +5987,7 @@ export function App() {
   }: {
     caption: string;
     mediaUrl?: string | null;
+    thumbnailUrl?: string;
     mediaType?: 'photo' | 'video';
     tags: string;
     privacy: 'close_friends' | 'followers' | 'public';
@@ -6018,7 +6050,7 @@ export function App() {
       cryptoProofId: myProfile.cryptoProofId,
       type: mediaType === 'video' ? 'video' : mediaUrl ? 'image' : 'text',
       contentUrl: mediaUrl || undefined,
-      thumbnailUrl: mediaType === 'video' ? undefined : (mediaUrl || undefined),
+      thumbnailUrl: thumbnailUrl || (mediaType === 'video' ? undefined : (mediaUrl || undefined)),
       videoUrl: mediaType === 'video' ? (mediaUrl || undefined) : undefined,
       soundName: soundName,
       caption: caption,
@@ -9523,15 +9555,13 @@ export function App() {
                         type="file"
                         accept="image/*,video/*"
                         style={{ display: 'none' }}
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
                             if (file.type.startsWith('video')) {
-                              const reader = new FileReader();
-                              reader.onload = () => {
-                                handleDirectBannerChange(reader.result as string);
-                              };
-                              reader.readAsDataURL(file);
+                              triggerToast('Converting banner video to lightweight loop...');
+                              const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner');
+                              handleDirectBannerChange(animatedUrl);
                             } else {
                               compressImageFile(file, 720, 0.58, (dataUrl) => {
                                 handleDirectBannerChange(dataUrl);
@@ -9604,15 +9634,13 @@ export function App() {
                               type="file"
                               accept="image/*,video/*"
                               style={{ display: 'none' }}
-                              onChange={(e) => {
+                              onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (file) {
                                   if (file.type.startsWith('video')) {
-                                    const reader = new FileReader();
-                                    reader.onload = () => {
-                                      handleDirectAvatarChange(reader.result as string);
-                                    };
-                                    reader.readAsDataURL(file);
+                                    triggerToast('Creating animated GIF sticker...');
+                                    const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar');
+                                    handleDirectAvatarChange(animatedUrl);
                                   } else {
                                     compressImageFile(file, 280, 0.65, (dataUrl) => {
                                       handleDirectAvatarChange(dataUrl);
@@ -9629,18 +9657,28 @@ export function App() {
 
                   {/* Specular VisionOS Stats Shelf right next to profile picture */}
                   {(() => {
-                    const dynamicFollowersCount = isOwnProfile
-                      ? Array.from(new Set((myProfile.followersList || profile.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length
-                      : Array.from(new Set((profile.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && h !== (myProfile.handle || '').toLowerCase().replace(/^@/, '').trim() && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length + (isFollowingThisUser ? 1 : 0);
+                    const myCleanHandle = (myProfile.handle || '').toLowerCase().replace(/^@/, '').trim();
+                    const rawFollowers = (isOwnProfile ? (myProfile.followersList || profile.followersList || []) : (profile.followersList || []))
+                      .map((h) => (h || '').toLowerCase().replace(/^@/, '').trim())
+                      .filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h));
+                    const uniqueFollowers = new Set(rawFollowers);
+                    if (!isOwnProfile && myCleanHandle) {
+                      if (isFollowingThisUser) {
+                        uniqueFollowers.add(myCleanHandle);
+                      } else {
+                        uniqueFollowers.delete(myCleanHandle);
+                      }
+                    }
+                    const dynamicFollowersCount = uniqueFollowers.size;
                     const dynamicFollowingCount = isOwnProfile
                       ? getCleanFollowingHandles(followingMap, myProfile.handle).length
-                      : Array.from(new Set((profile.followingList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length;
+                      : Array.from(new Set((profile.followingList || []).map((h) => (h || '').toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length;
                     const dynamicCirclesCount = isOwnProfile
                       ? closeFriendsList.length
                       : (profile.trustCirclesList || []).length;
 
                     const totalLikesReceived = userDispatches.reduce(
-                      (sum, p) => sum + (p.likesCount || (p.likersList ? p.likersList.length : 0) || 0),
+                      (sum, p) => sum + Math.max(p.likesCount || 0, (p.likersList || []).length),
                       0
                     ) + (profile.mediaItems || []).reduce((sum, m) => {
                       const baseKey = extractMediaBaseKey(m.url);
@@ -11680,16 +11718,14 @@ export function App() {
                         type="file"
                         accept="image/*,video/*"
                         style={{ display: 'none' }}
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
                             if (file.type.startsWith('video')) {
-                              const reader = new FileReader();
-                              reader.onload = () => {
-                                setEditForm((prev) => ({ ...prev, coverUrl: reader.result as string }));
-                                triggerToast('Cover banner video updated!');
-                              };
-                              reader.readAsDataURL(file);
+                              triggerToast('Converting banner video...');
+                              const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner');
+                              setEditForm((prev) => ({ ...prev, coverUrl: animatedUrl }));
+                              triggerToast('Cover banner video loop updated!');
                             } else {
                               compressImageFile(file, 720, 0.58, (dataUrl) => {
                                 setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
@@ -11771,16 +11807,14 @@ export function App() {
                             type="file"
                             accept="image/*,video/*"
                             style={{ display: 'none' }}
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
                                 if (file.type.startsWith('video')) {
-                                  const reader = new FileReader();
-                                  reader.onload = () => {
-                                    setEditForm((prev) => ({ ...prev, avatar: reader.result as string }));
-                                    triggerToast('Avatar animated GIF/sticker video updated!');
-                                  };
-                                  reader.readAsDataURL(file);
+                                  triggerToast('Creating GIF sticker...');
+                                  const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar');
+                                  setEditForm((prev) => ({ ...prev, avatar: animatedUrl }));
+                                  triggerToast('Avatar animated GIF sticker updated!');
                                 } else {
                                   compressImageFile(file, 280, 0.65, (dataUrl) => {
                                     setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
@@ -12173,12 +12207,23 @@ export function App() {
               const p = getUserProfile(cleanTarget);
               const isTargetOwn = Boolean(myProfile.handle) && cleanTarget === (myProfile.handle || '').toLowerCase().trim();
               const isTargetFollowing = isUserFollowed(cleanTarget);
-              const followersCount = isTargetOwn
-                ? Array.from(new Set((myProfile.followersList || p.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length
-                : Array.from(new Set((p.followersList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && h !== (myProfile.handle || '').toLowerCase().replace(/^@/, '').trim() && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length + (isTargetFollowing ? 1 : 0);
+              const targetFollowersSet = new Set(
+                (isTargetOwn ? (myProfile.followersList || p.followersList || []) : (p.followersList || []))
+                  .map((h) => (h || '').toLowerCase().replace(/^@/, '').trim())
+                  .filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h))
+              );
+              if (!isTargetOwn && myProfile.handle) {
+                const myClean = myProfile.handle.toLowerCase().replace(/^@/, '').trim();
+                if (isTargetFollowing) {
+                  targetFollowersSet.add(myClean);
+                } else {
+                  targetFollowersSet.delete(myClean);
+                }
+              }
+              const followersCount = targetFollowersSet.size;
               const followingCount = isTargetOwn
                 ? getCleanFollowingHandles(followingMap, myProfile.handle).length
-                : Array.from(new Set((p.followingList || []).map((h) => h.toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length;
+                : Array.from(new Set((p.followingList || []).map((h) => (h || '').toLowerCase().replace(/^@/, '').trim()).filter((h) => h && !h.startsWith('google_') && !h.startsWith('usr-') && !h.startsWith('sc-') && !isMockHandle(h)))).length;
               const circlesCount = isTargetOwn
                 ? closeFriendsList.length
                 : (p.trustCirclesList || []).length;

@@ -28,10 +28,11 @@ export interface PostComment {
   replies?: PostCommentReply[];
 }
 
-export const isUserLiked = (targetLikers?: string[], userHandle?: string | null): boolean => {
+export const isUserLiked = (targetLikers?: string[], userHandle?: string | null, postIsLiked?: boolean): boolean => {
+  if (postIsLiked) return true;
   if (!userHandle) return false;
   const clean = userHandle.replace(/^@/, '').toLowerCase().trim();
-  if (!clean || !Array.isArray(targetLikers)) return false;
+  if (!clean || !Array.isArray(targetLikers)) return !!postIsLiked;
   return targetLikers.some((h) => (h || '').replace(/^@/, '').toLowerCase().trim() === clean);
 };
 
@@ -259,7 +260,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
   posts,
   currentUser,
   followingMap = {},
-  closeFriendsList: _closeFriendsList = [],
+  closeFriendsList = [],
   deletedPostIds,
   onLike,
   onSave,
@@ -472,18 +473,29 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     const customUserPosts = nonDeletedPosts.filter((p) => !allExclusiveIds.has(p.id));
 
     if (activeChannel === 'circles') {
-      // Circles: User's visual posts + 100% exclusive circles creators
-      const userMedia = customUserPosts.filter((p) => p.type !== 'text' && !p.tags?.some((t) => t.toLowerCase().includes('birdie')));
-      return [...userMedia, ...mergeOverrides(EXCLUSIVE_CIRCLES_POSTS)];
+      // Circles (Close Friends): Visual dispatches where post.privacy === 'close_friends' OR author is in user's closeFriendsList OR author is current user
+      const myClean = (currentUser.handle || '').toLowerCase().replace(/^@/, '');
+      const closeFriendsSet = new Set((closeFriendsList || []).map((h) => (h || '').toLowerCase().replace(/^@/, '')));
+      const circlesPosts = customUserPosts.filter((p) => {
+        if (p.type === 'text' || p.tags?.some((t) => t.toLowerCase().includes('birdie'))) return false;
+        const authorClean = (p.authorHandle || '').toLowerCase().replace(/^@/, '');
+        const isSelf = authorClean === myClean;
+        const isCloseFriend = closeFriendsSet.has(authorClean);
+        const isCirclesPrivacy = p.privacy === 'close_friends';
+        return isSelf || isCloseFriend || isCirclesPrivacy;
+      });
+      return [...circlesPosts, ...mergeOverrides(EXCLUSIVE_CIRCLES_POSTS)];
     }
 
     if (activeChannel === 'following') {
       // Following: Visual posts from users the current user follows + own posts
       const myClean = (currentUser.handle || '').toLowerCase().replace(/^@/, '');
       const followingPosts = customUserPosts.filter((p) => {
+        if (p.type === 'text' || p.tags?.some((t) => t.toLowerCase().includes('birdie'))) return false;
         const authorClean = (p.authorHandle || '').toLowerCase().replace(/^@/, '');
-        const isFollowed = authorClean === myClean || !!followingMap[authorClean] || !!followingMap[p.authorHandle];
-        return isFollowed && p.type !== 'text' && !p.tags?.some((t) => t.toLowerCase().includes('birdie'));
+        const isSelf = authorClean === myClean;
+        const isFollowed = isSelf || !!followingMap[authorClean] || !!followingMap[p.authorHandle];
+        return isFollowed;
       });
       return [...followingPosts, ...mergeOverrides(EXCLUSIVE_FOLLOWING_POSTS)];
     }
@@ -494,10 +506,10 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
       return [...userText, ...mergeOverrides(EXCLUSIVE_BIRDIE_POSTS)];
     }
 
-    // For You: Universal Community Visual Feed (images and videos) for all users
+    // For You: Universal Community Visual Feed (images and videos) for all users regardless of follow status
     const forYouPosts = customUserPosts.filter((p) => p.type !== 'text' && !p.tags?.some((t) => t.toLowerCase().includes('birdie')));
     return [...forYouPosts, ...mergeOverrides(EXCLUSIVE_FORYOU_POSTS)];
-  }, [posts, activeChannel, deletedPostIds]);
+  }, [posts, activeChannel, deletedPostIds, followingMap, closeFriendsList, currentUser?.handle]);
 
   // Active slide index tracked via IntersectionObserver / scroll position
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
@@ -1790,8 +1802,9 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
                   {/* 2. Heart / Like Button */}
                   {(() => {
-                    const isPostLiked = isUserLiked(post.likersList, currentUser?.handle);
-                    const likesDisplay = (post.likesCount || 0) >= 1000 ? `${((post.likesCount || 0) / 1000).toFixed(1)}k` : (post.likesCount || 0);
+                    const isPostLiked = isUserLiked(post.likersList, currentUser?.handle, post.isLiked);
+                    const rawLikes = Math.max(post.likesCount || 0, (post.likersList || []).length);
+                    const likesDisplay = rawLikes >= 1000 ? `${(rawLikes / 1000).toFixed(1)}k` : rawLikes;
                     return (
                       <button
                         type="button"
