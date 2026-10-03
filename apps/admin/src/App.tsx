@@ -71,7 +71,7 @@ import { authService, UserAccount } from './services/authService';
 import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnectSupabaseRealtime } from './services/supabaseClient';
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
-import { convertVideoToAnimatedLoop } from './services/videoMediaHelper';
+import { convertVideoToAnimatedLoop, isKnownVideoUrl } from './services/videoMediaHelper';
 import { storePostMedia, getFreshMediaUrl } from './services/mediaDb';
 
 export const BANNED_MOCK_HANDLES = new Set([
@@ -657,11 +657,17 @@ const isSameMedia = (url1?: string, url2?: string): boolean => {
   return url1.split('?')[0].trim() === url2.split('?')[0].trim();
 };
 
+export const cleanMediaUrl = (url?: string): string => {
+  if (!url) return '';
+  return url.split('#')[0];
+};
+
 export const isVideoMedia = (url?: string): boolean => {
   if (!url) return false;
   if (url.startsWith('data:video/')) return true;
   if (url.includes('#video') || url.includes('video/')) return true;
-  const clean = url.split('?')[0].toLowerCase();
+  if (isKnownVideoUrl(url)) return true;
+  const clean = url.split('?')[0].split('#')[0].toLowerCase();
   return (
     clean.endsWith('.mp4') ||
     clean.endsWith('.webm') ||
@@ -683,6 +689,7 @@ export const MediaAvatar: React.FC<{
 }> = ({ src, alt = 'Avatar', className = '', style, onClick, title }) => {
   const isVid = isVideoMedia(src);
   if (isVid) {
+    const playUrl = cleanMediaUrl(src);
     return (
       <div
         className={`media-avatar-container ${className}`}
@@ -691,21 +698,29 @@ export const MediaAvatar: React.FC<{
         title={title}
       >
         <video
-          key={src}
-          src={src}
+          key={playUrl}
+          src={playUrl}
           autoPlay
           loop
           muted
           playsInline
           // @ts-ignore
           webkit-playsinline="true"
+          ref={(el) => {
+            if (el) {
+              el.muted = true;
+              el.defaultMuted = true;
+              el.playsInline = true;
+              el.play().catch(() => {});
+            }
+          }}
           className={`media-avatar-video ${className}`}
           style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
         />
       </div>
     );
   }
-  return <img src={src} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
+  return <img src={cleanMediaUrl(src)} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
 };
 
 import { PrivityVideoPlayer } from './components/feed/PrivityVideoPlayer';
@@ -1473,13 +1488,24 @@ export function App() {
       let updatedProf: UserProfile | null = null;
       setProfiles((prev) => {
         const existing = prev[h];
-        if (!existing || existing.name !== currentAuthUser.name || existing.avatar !== currentAuthUser.avatar || existing.coverUrl !== currentAuthUser.coverUrl) {
+        const isExistingVideoAvatar = existing?.avatar && isVideoMedia(existing.avatar);
+        const isExistingVideoCover = existing?.coverUrl && isVideoMedia(existing.coverUrl);
+
+        const nextAvatar = (isExistingVideoAvatar && !isVideoMedia(currentAuthUser.avatar))
+          ? existing.avatar
+          : (currentAuthUser.avatar || existing?.avatar);
+
+        const nextCover = (isExistingVideoCover && !isVideoMedia(currentAuthUser.coverUrl))
+          ? existing.coverUrl
+          : (currentAuthUser.coverUrl || existing?.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600');
+
+        if (!existing || existing.name !== currentAuthUser.name || existing.avatar !== nextAvatar || existing.coverUrl !== nextCover) {
           updatedProf = {
             id: currentAuthUser.id,
             name: currentAuthUser.name,
             handle: currentAuthUser.handle,
-            avatar: currentAuthUser.avatar,
-            coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+            avatar: nextAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${h}`,
+            coverUrl: nextCover,
             isVerified: false,
             bio: currentAuthUser.bio || existing?.bio || 'Privity creator sharing private-first moments and authentic updates.',
             location: 'Global',
@@ -3795,11 +3821,14 @@ export function App() {
 
   // Direct cover banner change with instant network synchronization
   const handleDirectBannerChange = (bannerUrl: string) => {
-    const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
-    if (!cleanHandle) return;
+    let cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!cleanHandle) {
+      cleanHandle = 'creator';
+    }
 
     const updated: UserProfile = {
       ...myProfile,
+      handle: cleanHandle,
       coverUrl: bannerUrl,
     };
 
@@ -3817,7 +3846,24 @@ export function App() {
       authService.updateProfile({ coverUrl: bannerUrl });
     } catch {}
 
-    setCurrentAuthUser((prev) => (prev ? { ...prev, coverUrl: bannerUrl } : null));
+    setCurrentAuthUser((prev) => (prev ? { ...prev, coverUrl: bannerUrl } : {
+      id: 'usr_' + cleanHandle,
+      name: myProfile.name || 'Creator',
+      handle: cleanHandle,
+      email: `${cleanHandle}@privity.app`,
+      avatar: myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanHandle}`,
+      coverUrl: bannerUrl,
+      level: 0,
+      xp: 0,
+      followers: 0,
+      following: 0,
+      likes: 0,
+      sparks: 0,
+      createdAt: Date.now(),
+      provider: 'guest',
+    }));
+
+    setEditForm((prev) => ({ ...prev, coverUrl: bannerUrl }));
 
     broadcastSyncEvent({
       action: 'UPDATE_PROFILE',
@@ -3837,11 +3883,14 @@ export function App() {
 
   // Direct profile avatar photo change with instant network synchronization
   const handleDirectAvatarChange = (avatarUrl: string) => {
-    const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
-    if (!cleanHandle) return;
+    let cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!cleanHandle) {
+      cleanHandle = 'creator';
+    }
 
     const updated: UserProfile = {
       ...myProfile,
+      handle: cleanHandle,
       avatar: avatarUrl,
     };
 
@@ -3859,7 +3908,24 @@ export function App() {
       authService.updateProfile({ avatar: avatarUrl });
     } catch {}
 
-    setCurrentAuthUser((prev) => (prev ? { ...prev, avatar: avatarUrl } : null));
+    setCurrentAuthUser((prev) => (prev ? { ...prev, avatar: avatarUrl } : {
+      id: 'usr_' + cleanHandle,
+      name: myProfile.name || 'Creator',
+      handle: cleanHandle,
+      email: `${cleanHandle}@privity.app`,
+      avatar: avatarUrl,
+      coverUrl: myProfile.coverUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200',
+      level: 0,
+      xp: 0,
+      followers: 0,
+      following: 0,
+      likes: 0,
+      sparks: 0,
+      createdAt: Date.now(),
+      provider: 'guest',
+    }));
+
+    setEditForm((prev) => ({ ...prev, avatar: avatarUrl }));
 
     setPosts((prev) => {
       let changed = false;
@@ -10687,14 +10753,22 @@ export function App() {
               >
                 {isVideoMedia(profile.coverUrl) ? (
                   <video
-                    key={profile.coverUrl}
-                    src={profile.coverUrl}
+                    key={cleanMediaUrl(profile.coverUrl)}
+                    src={cleanMediaUrl(profile.coverUrl)}
                     autoPlay
                     loop
                     muted
                     playsInline
                     // @ts-ignore
                     webkit-playsinline="true"
+                    ref={(el) => {
+                      if (el) {
+                        el.muted = true;
+                        el.defaultMuted = true;
+                        el.playsInline = true;
+                        el.play().catch(() => {});
+                      }
+                    }}
                     className="profile-cover-video"
                     style={{
                       position: 'absolute',
@@ -10707,7 +10781,7 @@ export function App() {
                   />
                 ) : (
                   <img
-                    src={profile.coverUrl}
+                    src={cleanMediaUrl(profile.coverUrl)}
                     alt={`${profile.name} Cover`}
                     className="profile-cover-img"
                     style={{
@@ -10751,7 +10825,7 @@ export function App() {
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+                            const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle) || 'creator';
                             if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
                               triggerToast('Updating banner video...');
                               const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner', cleanH);
@@ -10762,6 +10836,7 @@ export function App() {
                               });
                             }
                           }
+                          e.target.value = '';
                         }}
                       />
                     </label>
@@ -10790,20 +10865,28 @@ export function App() {
                       >
                         {isVideoMedia(profile.avatar) ? (
                           <video
-                            key={profile.avatar}
-                            src={profile.avatar}
+                            key={cleanMediaUrl(profile.avatar)}
+                            src={cleanMediaUrl(profile.avatar)}
                             autoPlay
                             loop
                             muted
                             playsInline
                             // @ts-ignore
                             webkit-playsinline="true"
+                            ref={(el) => {
+                              if (el) {
+                                el.muted = true;
+                                el.defaultMuted = true;
+                                el.playsInline = true;
+                                el.play().catch(() => {});
+                              }
+                            }}
                             className={`profile-avatar-squircle is-video-avatar ${hasActiveStory ? 'has-active-story-ring' : ''}`}
                             style={{ objectFit: 'cover' }}
                           />
                         ) : (
                           <img
-                            src={profile.avatar}
+                            src={cleanMediaUrl(profile.avatar)}
                             alt={profile.name}
                             className={`profile-avatar-squircle ${hasActiveStory ? 'has-active-story-ring' : ''}`}
                           />
@@ -10829,7 +10912,7 @@ export function App() {
                               onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (file) {
-                                  const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+                                  const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle) || 'creator';
                                   if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
                                     triggerToast('Updating profile video...');
                                     const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar', cleanH);
@@ -10840,6 +10923,7 @@ export function App() {
                                     });
                                   }
                                 }
+                                e.target.value = '';
                               }}
                             />
                           </label>
@@ -11629,11 +11713,22 @@ export function App() {
                               {item.type === 'video' || isVideoMedia(item.url) ? (
                                 <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                                   <video
-                                    src={item.url}
+                                    key={cleanMediaUrl(item.url)}
+                                    src={cleanMediaUrl(item.url)}
                                     muted
                                     playsInline
                                     loop
                                     autoPlay
+                                    // @ts-ignore
+                                    webkit-playsinline="true"
+                                    ref={(el) => {
+                                      if (el) {
+                                        el.muted = true;
+                                        el.defaultMuted = true;
+                                        el.playsInline = true;
+                                        el.play().catch(() => {});
+                                      }
+                                    }}
                                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                   />
                                   <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.65)', borderRadius: 10, padding: '2px 6px', fontSize: 10, color: '#fff', fontWeight: 700 }}>
@@ -11641,7 +11736,7 @@ export function App() {
                                   </div>
                                 </div>
                               ) : (
-                                <img src={item.url} alt="Studio Media" loading="lazy" />
+                                <img src={cleanMediaUrl(item.url)} alt="Studio Media" loading="lazy" />
                               )}
                               <div className="profile-media-hover-overlay">
                                 <div
@@ -12298,18 +12393,21 @@ export function App() {
             <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
               {isVideoMedia(lightboxUrl) ? (
                 <video
-                  src={lightboxUrl}
+                  key={cleanMediaUrl(lightboxUrl)}
+                  src={cleanMediaUrl(lightboxUrl)}
                   controls
                   autoPlay
                   loop
                   playsInline
+                  // @ts-ignore
+                  webkit-playsinline="true"
                   className="lightbox-hero-image"
                   style={{ maxHeight: '82vh', maxWidth: '92vw', objectFit: 'contain' }}
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
                 <img
-                  src={lightboxUrl}
+                  src={cleanMediaUrl(lightboxUrl)}
                   alt="Fullscreen View"
                   className="lightbox-hero-image"
                   onClick={(e) => e.stopPropagation()}
@@ -12880,12 +12978,22 @@ export function App() {
                   <label className="edit-profile-label">Cover Banner</label>
                   {isVideoMedia(editForm.coverUrl) ? (
                     <video
-                      key={editForm.coverUrl}
-                      src={editForm.coverUrl}
+                      key={cleanMediaUrl(editForm.coverUrl)}
+                      src={cleanMediaUrl(editForm.coverUrl)}
                       autoPlay
                       loop
                       muted
                       playsInline
+                      // @ts-ignore
+                      webkit-playsinline="true"
+                      ref={(el) => {
+                        if (el) {
+                          el.muted = true;
+                          el.defaultMuted = true;
+                          el.playsInline = true;
+                          el.play().catch(() => {});
+                        }
+                      }}
                       style={{
                         width: '100%',
                         height: '110px',
@@ -12901,7 +13009,7 @@ export function App() {
                         width: '100%',
                         height: '110px',
                         borderRadius: 'var(--radius-md)',
-                        backgroundImage: `url(${editForm.coverUrl})`,
+                        backgroundImage: `url(${cleanMediaUrl(editForm.coverUrl)})`,
                         backgroundSize: 'cover',
                         backgroundPosition: 'center',
                         position: 'relative',
@@ -12921,7 +13029,7 @@ export function App() {
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+                            const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle) || 'creator';
                             if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
                               triggerToast('Updating banner video...');
                               const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner', cleanH);
@@ -12934,6 +13042,7 @@ export function App() {
                               });
                             }
                           }
+                          e.target.value = '';
                         }}
                       />
                     </label>
@@ -12969,14 +13078,22 @@ export function App() {
                     {isVideoMedia(editForm.avatar) ? (
                       <div style={{ position: 'relative', width: '68px', height: '68px', flexShrink: 0 }}>
                         <video
-                          key={editForm.avatar}
-                          src={editForm.avatar}
+                          key={cleanMediaUrl(editForm.avatar)}
+                          src={cleanMediaUrl(editForm.avatar)}
                           autoPlay
                           loop
                           muted
                           playsInline
                           // @ts-ignore
                           webkit-playsinline="true"
+                          ref={(el) => {
+                            if (el) {
+                              el.muted = true;
+                              el.defaultMuted = true;
+                              el.playsInline = true;
+                              el.play().catch(() => {});
+                            }
+                          }}
                           style={{
                             width: '68px',
                             height: '68px',
@@ -12989,7 +13106,7 @@ export function App() {
                       </div>
                     ) : (
                       <img
-                        src={editForm.avatar}
+                        src={cleanMediaUrl(editForm.avatar)}
                         alt="Profile Picture Preview"
                         style={{
                           width: '68px',
@@ -13013,7 +13130,7 @@ export function App() {
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+                                const cleanH = normalizeHandle(currentAuthUser?.handle || myProfile.handle) || 'creator';
                                 if (file.type.startsWith('video') || file.name.match(/\.(mp4|mov|webm|m4v)$/i)) {
                                   triggerToast('Updating profile video...');
                                   const animatedUrl = await convertVideoToAnimatedLoop(file, 'avatar', cleanH);
@@ -13026,6 +13143,7 @@ export function App() {
                                   });
                                 }
                               }
+                              e.target.value = '';
                             }}
                           />
                         </label>

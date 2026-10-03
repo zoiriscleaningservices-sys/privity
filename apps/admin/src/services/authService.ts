@@ -158,6 +158,35 @@ class AuthService {
           this.currentUser.isVerified = false;
         }
       }
+      if (!this.currentUser) {
+        const accounts = this.getAllAccounts();
+        const accountList = Object.values(accounts);
+        if (accountList.length > 0) {
+          this.currentUser = accountList[0];
+          this.setSession(this.currentUser);
+        } else {
+          const defaultAccount: UserAccount = {
+            id: 'usr_creator',
+            name: 'Creator',
+            handle: 'creator',
+            email: 'creator@privity.app',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
+            coverUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200',
+            bio: 'Privity creator sharing private-first moments and authentic updates.',
+            level: 0,
+            xp: 0,
+            followers: 0,
+            following: 0,
+            likes: 0,
+            sparks: 0,
+            isVerified: false,
+            createdAt: Date.now(),
+            provider: 'guest',
+          };
+          this.currentUser = defaultAccount;
+          this.setSession(defaultAccount);
+        }
+      }
     } catch (e) {
       console.warn('Failed to load auth session:', e);
       this.currentUser = null;

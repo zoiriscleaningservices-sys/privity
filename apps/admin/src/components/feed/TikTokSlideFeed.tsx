@@ -93,11 +93,16 @@ export interface StoryItem {
 
 export const INITIAL_STORIES_V3: StoryItem[] = [];
 
+export const cleanMediaUrl = (url?: string): string => {
+  if (!url) return '';
+  return url.split('#')[0];
+};
+
 export const isVideoMedia = (url?: string): boolean => {
   if (!url) return false;
   if (url.startsWith('data:video/')) return true;
   if (url.includes('#video') || url.includes('video/')) return true;
-  const clean = url.split('?')[0].toLowerCase();
+  const clean = url.split('?')[0].split('#')[0].toLowerCase();
   return (
     clean.endsWith('.mp4') ||
     clean.endsWith('.webm') ||
@@ -116,9 +121,10 @@ export const MediaAvatar: React.FC<{
   showBadge?: boolean;
   onClick?: (e: React.MouseEvent) => void;
   title?: string;
-}> = ({ src, alt = 'Avatar', className = '', style, showBadge = true, onClick, title }) => {
+}> = ({ src, alt = 'Avatar', className = '', style, onClick, title }) => {
   const isVid = isVideoMedia(src);
   if (isVid) {
+    const playUrl = cleanMediaUrl(src);
     return (
       <div
         className={`media-avatar-container ${className}`}
@@ -127,25 +133,29 @@ export const MediaAvatar: React.FC<{
         title={title}
       >
         <video
-          src={src}
+          key={playUrl}
+          src={playUrl}
           autoPlay
           loop
           muted
           playsInline
           // @ts-ignore
           webkit-playsinline="true"
+          ref={(el) => {
+            if (el) {
+              el.muted = true;
+              el.defaultMuted = true;
+              el.playsInline = true;
+              el.play().catch(() => {});
+            }
+          }}
           className={`media-avatar-video ${className}`}
           style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
         />
-        {showBadge && (
-          <span className="media-avatar-gif-tag" title="Animated GIF Sticker">
-            GIF
-          </span>
-        )}
       </div>
     );
   }
-  return <img src={src} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
+  return <img src={cleanMediaUrl(src)} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
 };
 
 export const TikTokSlideVideo: React.FC<{

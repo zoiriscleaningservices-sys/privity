@@ -3,38 +3,50 @@ import { storeMediaBlob } from './mediaDb';
 // Video to Animated GIF/Sticker & Lightweight Media Compression Helpers
 // Guarantees zero-glitch, zero-crash, full-framerate performance on iOS Safari and Android
 
+export const knownVideoBlobUrls = new Set<string>();
+
+export function isKnownVideoUrl(url?: string): boolean {
+  if (!url) return false;
+  const clean = url.split('#')[0];
+  return knownVideoBlobUrls.has(clean) || knownVideoBlobUrls.has(url);
+}
+
 export async function convertVideoToAnimatedLoop(
   file: File | Blob,
   mode: 'avatar' | 'banner' | 'studio' = 'avatar',
   userHandle?: string
 ): Promise<string> {
+  // 1. Create immediate live Blob URL in 0ms so user interface never stalls or waits
+  let immediateBlobUrl = '';
   try {
-    const cleanUser = userHandle ? userHandle.replace(/^@/, '').toLowerCase().trim() : '';
-    const mediaId = cleanUser
-      ? `privity_${mode}_${cleanUser}_${Date.now()}`
-      : `privity_${mode}_loop_${Date.now()}`;
-    const storedUrl = await storeMediaBlob(mediaId, file);
-    try {
-      localStorage.setItem(`privity_user_${mode}_media_key`, mediaId);
-      if (cleanUser) {
-        localStorage.setItem(`privity_user_${mode}_media_key_${cleanUser}`, mediaId);
-      }
-    } catch {}
-    
-    // Ensure the returned URL is treated as native video loop by isVideoMedia
-    const videoLoopUrl = storedUrl.includes('#') ? storedUrl : `${storedUrl}#video.mp4`;
-    return videoLoopUrl;
-  } catch (err) {
-    console.warn('[videoMediaHelper] storeMediaBlob fallback to object URL:', err);
-    try {
-      const fallbackUrl = URL.createObjectURL(file);
-      return `${fallbackUrl}#video.mp4`;
-    } catch {
-      return mode === 'avatar'
-        ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400'
-        : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200';
+    immediateBlobUrl = URL.createObjectURL(file);
+    knownVideoBlobUrls.add(immediateBlobUrl);
+  } catch {}
+
+  const cleanUser = userHandle ? userHandle.replace(/^@/, '').toLowerCase().trim() : '';
+  const mediaId = cleanUser
+    ? `privity_${mode}_${cleanUser}_${Date.now()}`
+    : `privity_${mode}_loop_${Date.now()}`;
+
+  // 2. Persist media key in localStorage immediately
+  try {
+    localStorage.setItem(`privity_user_${mode}_media_key`, mediaId);
+    if (cleanUser) {
+      localStorage.setItem(`privity_user_${mode}_media_key_${cleanUser}`, mediaId);
     }
-  }
+  } catch {}
+
+  // 3. Store in IndexedDB asynchronously in background (without blocking UI return)
+  storeMediaBlob(mediaId, file).catch((err) => {
+    console.warn('[videoMediaHelper] background storeMediaBlob error:', err);
+  });
+
+  const finalUrl = immediateBlobUrl
+    ? `${immediateBlobUrl}#video.mp4`
+    : `blob:privity_${mode}_${Date.now()}#video.mp4`;
+  knownVideoBlobUrls.add(finalUrl);
+  knownVideoBlobUrls.add(finalUrl.split('#')[0]);
+  return finalUrl;
 }
 
 export async function extractVideoThumbnail(file: File | Blob): Promise<string> {
