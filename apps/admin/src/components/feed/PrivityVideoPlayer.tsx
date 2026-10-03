@@ -83,8 +83,61 @@ export const PrivityVideoPlayer: React.FC<PrivityVideoPlayerProps> = ({
     onVideoRef?.(el);
   };
 
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-play when scrolled into view and auto-pause when scrolled out of view
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const vid = videoRef.current;
+          if (!vid) return;
+
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.45) {
+            // Video is prominently in view: start playing seamlessly
+            vid.muted = true;
+            const playPromise = vid.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(() => {
+                vid.muted = true;
+                vid.play().catch(() => {});
+              });
+            }
+          } else if (!entry.isIntersecting || entry.intersectionRatio < 0.2) {
+            // Video was scrolled away: pause immediately
+            vid.pause();
+          }
+        });
+      },
+      {
+        threshold: [0, 0.2, 0.45, 0.8],
+      }
+    );
+
+    observer.observe(el);
+
+    const handleVisibility = () => {
+      if (document.hidden && videoRef.current) {
+        videoRef.current.pause();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (videoRef.current) {
+        videoRef.current.pause();
+      }
+    };
+  }, [videoUrl]);
+
   return (
     <div
+      ref={containerRef}
       className={`privity-video-stage-box ${className}`}
       style={{
         position: 'relative',

@@ -46,7 +46,6 @@ import {
   IconPlay,
   IconPause,
   IconSend,
-  IconVideo,
   IconFeedStream,
   IconUsersPlus,
   IconMenu3Lines,
@@ -641,8 +640,16 @@ const isSameMedia = (url1?: string, url2?: string): boolean => {
 export const isVideoMedia = (url?: string): boolean => {
   if (!url) return false;
   if (url.startsWith('data:video/')) return true;
+  if (url.includes('#video') || url.includes('video/')) return true;
   const clean = url.split('?')[0].toLowerCase();
-  return clean.endsWith('.mp4') || clean.endsWith('.webm') || clean.endsWith('.mov') || clean.endsWith('.ogg');
+  return (
+    clean.endsWith('.mp4') ||
+    clean.endsWith('.webm') ||
+    clean.endsWith('.mov') ||
+    clean.endsWith('.ogg') ||
+    clean.endsWith('.m4v') ||
+    clean.includes('video')
+  );
 };
 
 export const MediaAvatar: React.FC<{
@@ -669,6 +676,8 @@ export const MediaAvatar: React.FC<{
           loop
           muted
           playsInline
+          // @ts-ignore
+          webkit-playsinline="true"
           className={`media-avatar-video ${className}`}
           style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
         />
@@ -700,6 +709,13 @@ export interface DirectChatMessage {
   isVoiceMemo?: boolean;
   voiceDuration?: string;
   audioUrl?: string;
+  isRead?: boolean;
+  readAt?: number;
+  replyTo?: {
+    id: string;
+    senderHandle: string;
+    text: string;
+  };
 }
 
 const INITIAL_DIRECT_MESSAGES: Record<string, DirectChatMessage[]> = {};
@@ -1078,6 +1094,15 @@ export function App() {
   const [chatMediaType, setChatMediaType] = useState<'photo' | 'video'>('photo');
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [replyingToMessage, setReplyingToMessage] = useState<DirectChatMessage | null>(null);
+  const [swipedChannelHandle, setSwipedChannelHandle] = useState<string | null>(null);
+  const [mutedChats, setMutedChats] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('privity_muted_chats_v1') || '{}');
+    } catch {
+      return {};
+    }
+  });
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const audioChunksRef = React.useRef<Blob[]>([]);
   const recordingTimerRef = React.useRef<any>(null);
@@ -1654,6 +1679,24 @@ export function App() {
       const lastSeen = onlineUsersMap[clean];
       if (!lastSeen) return false;
       return Date.now() - lastSeen < 35000;
+    },
+    [currentAuthUser?.handle, myProfile?.handle, onlineUsersMap]
+  );
+
+  // User presence classification: 'active' (🟢 green dot), 'inactive' (🔴 red dot), 'offline' (⚫ black dot)
+  const getUserPresenceState = useCallback(
+    (handle?: string | null): 'active' | 'inactive' | 'offline' => {
+      if (!handle) return 'offline';
+      const clean = normalizeHandle(handle);
+      if (!clean) return 'offline';
+      const myClean = normalizeHandle(currentAuthUser?.handle || myProfile?.handle);
+      if (clean === myClean && myClean.length > 0) return 'active';
+      const lastSeen = onlineUsersMap[clean];
+      if (!lastSeen) return 'offline';
+      const diff = Date.now() - lastSeen;
+      if (diff < 45000) return 'active';
+      if (diff < 600000) return 'inactive';
+      return 'offline';
     },
     [currentAuthUser?.handle, myProfile?.handle, onlineUsersMap]
   );
@@ -5332,7 +5375,33 @@ export function App() {
       action: 'CLEAR_CHAT',
       recipientHandle: cleanRecipient,
     });
-    triggerToast(`Encrypted channel with @${cleanRecipient} cleared`);
+    triggerToast(`Conversation with @${cleanRecipient} cleared`);
+  };
+
+  // Delete Entire Conversation Thread (via swipe or menu)
+  const handleDeleteConversation = (recipientHandle: string) => {
+    const cleanRecipient = recipientHandle.replace(/^@/, '');
+    setDirectMessages((prev) => {
+      const updated = { ...prev };
+      delete updated[cleanRecipient];
+      safeSaveStorage('privity_direct_messages_v5', updated);
+      return updated;
+    });
+    if (activeChatUser && activeChatUser.handle.replace(/^@/, '').toLowerCase() === cleanRecipient.toLowerCase()) {
+      setActiveChatUser(null);
+    }
+    triggerToast(`Conversation with @${cleanRecipient} deleted`);
+  };
+
+  // Toggle Mute Notifications for Conversation
+  const handleToggleMuteChat = (recipientHandle: string) => {
+    const cleanRecipient = recipientHandle.replace(/^@/, '');
+    setMutedChats((prev) => {
+      const next = { ...prev, [cleanRecipient]: !prev[cleanRecipient] };
+      safeSaveStorage('privity_muted_chats_v1', next);
+      triggerToast(next[cleanRecipient] ? `Muted @${cleanRecipient}` : `Unmuted @${cleanRecipient}`);
+      return next;
+    });
   };
 
   // Real-Time Emoji Reaction Toggle (1 reaction per emoji per user, clicking again deletes it)
@@ -5577,13 +5646,6 @@ export function App() {
     }
   };
 
-  // Stage visual photo or cinema video into the composer dock
-  const handleStagePresetMedia = (mediaUrl: string, type: 'photo' | 'video' = 'photo') => {
-    setChatMediaAttachment(mediaUrl);
-    setChatMediaType(type);
-    triggerToast(`${type === 'video' ? 'Cinema video' : 'Studio visual'} staged · Add text or press Send`);
-  };
-
   // Real-Time Direct Message Dispatcher
   const handleSendMessage = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -5597,13 +5659,22 @@ export function App() {
     const mediaTypeToSend = isMedia ? chatMediaType : undefined;
     const attachedMediaUrl = chatMediaAttachment;
 
+    const replyMeta = replyingToMessage
+      ? {
+          id: replyingToMessage.id,
+          senderHandle: replyingToMessage.senderHandle,
+          text: replyingToMessage.text || (replyingToMessage.mediaUrl ? 'Attachment' : 'Voice memo'),
+        }
+      : undefined;
+
     const newMsg: DirectChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       senderHandle: cleanMyHandle,
       recipientHandle: recipientHandle,
       text: textToSend,
       mediaUrl: attachedMediaUrl || undefined,
       mediaType: mediaTypeToSend,
+      replyTo: replyMeta,
       timeAgo: 'Just now',
       timestamp: Date.now(),
       reactions: {},
@@ -5630,6 +5701,7 @@ export function App() {
     setChatDraftText('');
     setChatMediaAttachment(null);
     setChatMediaType('photo');
+    setReplyingToMessage(null);
   };
 
   // Story reaction or reply forwarded directly into Direct Messages
@@ -8184,10 +8256,10 @@ export function App() {
                         <div style={{ padding: '24px 16px', textAlign: 'center' }}>
                           <div style={{ fontSize: '36px', marginBottom: '10px' }}>💬</div>
                           <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>
-                            {chatSearchQuery ? `No chats matching "${chatSearchQuery}"` : 'Direct Sovereign Messaging'}
+                            {chatSearchQuery ? `No chats matching "${chatSearchQuery}"` : 'Messages'}
                           </div>
                           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: 1.5 }}>
-                            End-to-end encrypted direct messaging with instant real-time synchronization.
+                            Connect with friends and creators in real time. Send thoughts, photos, and voice notes.
                           </p>
                           <button
                             type="button"
@@ -8298,59 +8370,153 @@ export function App() {
                           const thread = directMessages[handle] || [];
                           const lastMsg = thread[thread.length - 1];
                           const isCF = closeFriendsList.includes(handle);
+                          const presence = getUserPresenceState(user.handle);
+                          const isSwiped = swipedChannelHandle === handle;
+                          const isMuted = !!mutedChats[handle];
 
-                          let snippet = 'Encrypted peer channel ready';
+                          let snippetNode: React.ReactNode = <span className="channel-last-text">Say hello 👋</span>;
                           if (lastMsg) {
                             const isMine = cleanMyHandle ? lastMsg.senderHandle === cleanMyHandle : false;
-                            const prefix = isMine ? 'You: ' : '';
-                            if (lastMsg.isVoiceMemo) {
-                              snippet = `${prefix}🎙️ Voice memo (${lastMsg.voiceDuration || '0:18'})`;
-                            } else if (lastMsg.mediaUrl) {
-                              snippet = `${prefix}📸 Visual dispatch`;
+                            if (isMine) {
+                              const partnerActive = presence === 'active' || presence === 'inactive';
+                              const timeSinceMsg = Date.now() - lastMsg.timestamp;
+                              const isIgnored = lastMsg.isRead || (partnerActive && timeSinceMsg > 60000) || timeSinceMsg > 180000;
+
+                              if (isIgnored) {
+                                snippetNode = (
+                                  <span className="channel-ignored-status">
+                                    <span style={{ fontSize: '10px' }}>👁️</span>
+                                    <span>Read · Ignored</span>
+                                  </span>
+                                );
+                              } else if (lastMsg.isRead) {
+                                snippetNode = <span className="channel-read-status">Read ✓✓</span>;
+                              } else {
+                                snippetNode = (
+                                  <span className="channel-last-text">
+                                    <span style={{ opacity: 0.65 }}>You: </span>
+                                    {lastMsg.isVoiceMemo ? '🎙️ Voice memo' : lastMsg.mediaUrl ? '📸 Attachment' : lastMsg.text}
+                                  </span>
+                                );
+                              }
                             } else {
-                              snippet = `${prefix}${lastMsg.text}`;
+                              snippetNode = (
+                                <span className="channel-last-text">
+                                  {lastMsg.isVoiceMemo ? '🎙️ Voice memo' : lastMsg.mediaUrl ? '📸 Attachment' : lastMsg.text}
+                                </span>
+                              );
                             }
                           }
 
                           return (
                             <div
                               key={handle}
-                              className={`channel-card-item ${isSelected ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveChatUser(user);
-                                setChatMediaAttachment(null);
+                              className="roster-swipe-wrapper"
+                              onTouchStart={(e) => {
+                                (window as any)[`__swipeStartX_${handle}`] = e.touches[0].clientX;
+                              }}
+                              onTouchEnd={(e) => {
+                                const startX = (window as any)[`__swipeStartX_${handle}`] || 0;
+                                const dx = e.changedTouches[0].clientX - startX;
+                                if (dx < -40) {
+                                  setSwipedChannelHandle(handle);
+                                } else if (dx > 40) {
+                                  setSwipedChannelHandle(null);
+                                }
+                              }}
+                              onMouseDown={(e) => {
+                                (window as any)[`__swipeMouseStartX_${handle}`] = e.clientX;
+                              }}
+                              onMouseUp={(e) => {
+                                const startX = (window as any)[`__swipeMouseStartX_${handle}`] || 0;
+                                const dx = e.clientX - startX;
+                                if (dx < -40) {
+                                  setSwipedChannelHandle(handle);
+                                } else if (dx > 40) {
+                                  setSwipedChannelHandle(null);
+                                }
                               }}
                             >
-                              <div className="channel-avatar-wrapper">
-                                <img
-                                  src={user.avatar}
-                                  alt={user.name}
-                                  className="channel-avatar-img"
-                                  style={{ borderColor: isCF ? 'var(--cf-emerald)' : undefined }}
-                                />
-                                <span className={`online-presence-dot ${isUserOnline(user.handle) ? 'online' : 'offline'}`} title={isUserOnline(user.handle) ? 'Active now' : 'Offline'} />
+                              {/* Quick Actions Drawer revealed when swiping left */}
+                              <div className="roster-swipe-actions">
+                                <button
+                                  type="button"
+                                  className="roster-action-btn mute"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleMuteChat(handle);
+                                    setSwipedChannelHandle(null);
+                                  }}
+                                  title={isMuted ? 'Unmute notifications' : 'Mute notifications'}
+                                >
+                                  <span style={{ fontSize: '15px' }}>{isMuted ? '🔔' : '🔕'}</span>
+                                  <span>{isMuted ? 'Unmute' : 'Mute'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="roster-action-btn delete"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteConversation(handle);
+                                    setSwipedChannelHandle(null);
+                                  }}
+                                  title="Delete conversation"
+                                >
+                                  <span style={{ fontSize: '15px' }}>🗑️</span>
+                                  <span>Delete</span>
+                                </button>
                               </div>
-                              <div className="channel-info-col">
-                                <div className="channel-name-row">
-                                  <span className="channel-creator-name">
-                                    {user.name}
-                                    {user.isVerified && <VerifiedBadge authorName={user.name} category={user.verifiedCategory} />}
-                                  </span>
-                                  <span className="channel-timestamp">
-                                    {isUserOnline(user.handle) ? (
-                                      <span className="channel-online-text">Active now</span>
-                                    ) : (
-                                      lastMsg ? lastMsg.timeAgo : 'Offline'
-                                    )}
-                                  </span>
+
+                              <div
+                                className={`channel-card-item roster-swipe-content ${isSelected ? 'active' : ''}`}
+                                style={{
+                                  transform: isSwiped ? 'translateX(-130px)' : 'translateX(0)',
+                                }}
+                                onClick={() => {
+                                  if (isSwiped) {
+                                    setSwipedChannelHandle(null);
+                                    return;
+                                  }
+                                  setActiveChatUser(user);
+                                  setChatMediaAttachment(null);
+                                }}
+                              >
+                                <div className="channel-avatar-wrapper">
+                                  <MediaAvatar
+                                    src={user.avatar}
+                                    alt={user.name}
+                                    className="channel-avatar-img"
+                                    style={{ borderColor: isCF ? 'var(--cf-emerald)' : undefined }}
+                                    showBadge={false}
+                                  />
+                                  <span
+                                    className={`online-presence-dot presence-dot-${presence}`}
+                                    title={presence === 'active' ? 'Active now' : presence === 'inactive' ? 'Active recently' : 'Offline'}
+                                  />
                                 </div>
-                                <div className="channel-snippet-row">
-                                  <span className="channel-last-text">{snippet}</span>
-                                  {isCF && (
-                                    <span title="Close Friends Circle">
-                                      <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
+                                <div className="channel-info-col">
+                                  <div className="channel-name-row">
+                                    <span className="channel-creator-name">
+                                      {user.name}
+                                      {user.isVerified && <VerifiedBadge authorName={user.name} category={user.verifiedCategory} />}
+                                      {isMuted && <span style={{ fontSize: '11px', opacity: 0.6 }} title="Muted">🔕</span>}
                                     </span>
-                                  )}
+                                    <span className="channel-timestamp">
+                                      {presence === 'active' ? (
+                                        <span className="channel-online-text" style={{ color: '#22c55e', fontWeight: 600 }}>Active</span>
+                                      ) : (
+                                        lastMsg ? lastMsg.timeAgo : 'Offline'
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="channel-snippet-row">
+                                    {snippetNode}
+                                    {isCF && (
+                                      <span title="Close Friends Circle">
+                                        <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -8603,60 +8769,75 @@ export function App() {
                       title={`View @${currentRecipient.handle}'s profile`}
                     >
                       <div className="messages-thread-avatar-wrap">
-                        <img
+                        <MediaAvatar
                           src={currentRecipient.avatar}
                           alt={currentRecipient.name}
                           className="messages-thread-avatar"
                           style={{ borderColor: isPartnerInCloseFriends ? 'var(--cf-emerald)' : undefined }}
+                          showBadge={false}
                         />
-                        <span className={`online-presence-dot ${isUserOnline(cleanRecipientHandle) ? 'online' : 'offline'}`} />
+                        <span className={`online-presence-dot presence-dot-${getUserPresenceState(cleanRecipientHandle)}`} />
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <div className="messages-thread-name">
-                        <span>{currentRecipient.name}</span>
-                        {currentRecipient.isVerified && (
-                          <VerifiedBadge
-                            authorName={currentRecipient.name}
-                            category={currentRecipient.verifiedCategory}
-                            since={currentRecipient.verifiedSince}
-                            proofId={currentRecipient.cryptoProofId}
-                          />
-                        )}
-                        {isPartnerInCloseFriends && (
+                          <span>{currentRecipient.name}</span>
+                          {currentRecipient.isVerified && (
+                            <VerifiedBadge
+                              authorName={currentRecipient.name}
+                              category={currentRecipient.verifiedCategory}
+                              since={currentRecipient.verifiedSince}
+                              proofId={currentRecipient.cryptoProofId}
+                            />
+                          )}
+                          {isPartnerInCloseFriends && (
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                background: 'var(--cf-glass)',
+                                border: '1px solid var(--cf-border)',
+                                color: 'var(--cf-emerald)',
+                                padding: '2px 8px',
+                                borderRadius: 'var(--radius-pill)',
+                                fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
+                              Circle Member
+                            </span>
+                          )}
+                        </div>
+                        <div className="messages-thread-status">
                           <span
+                            className="status-indicator-dot"
                             style={{
-                              fontSize: '11px',
-                              background: 'var(--cf-glass)',
-                              border: '1px solid var(--cf-border)',
-                              color: 'var(--cf-emerald)',
-                              padding: '2px 8px',
-                              borderRadius: 'var(--radius-pill)',
-                              fontWeight: 700,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
+                              background:
+                                getUserPresenceState(cleanRecipientHandle) === 'active'
+                                  ? '#22c55e'
+                                  : getUserPresenceState(cleanRecipientHandle) === 'inactive'
+                                  ? '#ef4444'
+                                  : '#475569',
+                              boxShadow:
+                                getUserPresenceState(cleanRecipientHandle) === 'active' ? '0 0 8px #22c55e' : 'none',
                             }}
-                          >
-                            <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
-                            Circle Member
+                          />
+                          <span style={{ color: getUserPresenceState(cleanRecipientHandle) === 'active' ? '#22c55e' : 'var(--text-muted)' }}>
+                            {isRecipientTyping
+                              ? `@${cleanRecipientHandle} is typing...`
+                              : getUserPresenceState(cleanRecipientHandle) === 'active'
+                              ? 'Active now'
+                              : getUserPresenceState(cleanRecipientHandle) === 'inactive'
+                              ? 'Active recently'
+                              : 'Offline'}
                           </span>
-                        )}
-                      </div>
-                      <div className="messages-thread-status">
-                        <span className={`status-indicator-dot ${isUserOnline(cleanRecipientHandle) ? 'active' : 'idle'}`} />
-                        <span>
-                          {isRecipientTyping
-                            ? `@${cleanRecipientHandle} is typing in real time...`
-                            : isUserOnline(cleanRecipientHandle)
-                            ? 'Active now · Real-Time'
-                            : 'Offline · End-to-End Encrypted'}
-                        </span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="messages-thread-tools">
+                  <div className="messages-thread-tools">
                     <button
                       type="button"
                       className="btn-glass-back"
@@ -8693,20 +8874,14 @@ export function App() {
 
                 {/* Messages Stream */}
                 <div className="messages-thread-stream">
-                  {/* Session banner */}
-                  <div className="messages-session-banner">
-                    <IconLock size={12} color="var(--cf-emerald)" />
-                    <span>Privity Zero-Knowledge Chamber · Sovereign Local Encrypted Channel</span>
-                  </div>
-
                   {currentThread.length === 0 ? (
                     <div className="messages-empty-selection">
-                      <div style={{ fontSize: '38px', marginBottom: '14px' }}>🔐</div>
+                      <div style={{ fontSize: '38px', marginBottom: '12px' }}>💬</div>
                       <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff', marginBottom: '6px' }}>
-                        Start a Private Dispatch with @{cleanRecipientHandle}
+                        {currentRecipient.name}
                       </div>
-                      <p style={{ maxWidth: '380px', fontSize: '13px', lineHeight: 1.6, color: 'var(--text-muted)' }}>
-                        All messages are signed with your client-side cryptographic keys and delivered directly in real time. Send a thought, photo, or binaural audio note below!
+                      <p style={{ maxWidth: '340px', fontSize: '13px', lineHeight: 1.5, color: 'var(--text-muted)' }}>
+                        No messages yet. Send a message, photo, or voice note below to start chatting!
                       </p>
                     </div>
                   ) : (
@@ -8716,12 +8891,46 @@ export function App() {
                       return (
                         <div
                           key={msg.id}
+                          id={`msg-${msg.id}`}
                           className={`spatial-bubble-wrapper ${isSent ? 'sent' : 'received'}`}
+                          onTouchStart={(e) => {
+                            (window as any)[`__bubbleStartX_${msg.id}`] = e.touches[0].clientX;
+                          }}
+                          onTouchEnd={(e) => {
+                            const startX = (window as any)[`__bubbleStartX_${msg.id}`] || 0;
+                            const dx = e.changedTouches[0].clientX - startX;
+                            if (dx > 45) {
+                              setReplyingToMessage(msg);
+                              triggerToast(`Replying to @${msg.senderHandle}`);
+                            }
+                          }}
+                          onMouseDown={(e) => {
+                            (window as any)[`__bubbleMouseStartX_${msg.id}`] = e.clientX;
+                          }}
+                          onMouseUp={(e) => {
+                            const startX = (window as any)[`__bubbleMouseStartX_${msg.id}`] || 0;
+                            const dx = e.clientX - startX;
+                            if (dx > 45) {
+                              setReplyingToMessage(msg);
+                              triggerToast(`Replying to @${msg.senderHandle}`);
+                            }
+                          }}
                         >
-                          {/* Floating Hover Action Pill (Delete, React, Copy) */}
+                          {/* Floating Hover Action Pill (Reply, Delete, React, Copy) */}
                           <div className="message-hover-actions">
+                            <button
+                              type="button"
+                              className="msg-action-btn"
+                              onClick={() => {
+                                setReplyingToMessage(msg);
+                                triggerToast(`Replying to @${msg.senderHandle}`);
+                              }}
+                              title="Reply to message"
+                            >
+                              ↩
+                            </button>
                             {/* Quick Emoji Reactions */}
-                            {['❤️', '🔥', '👏', '⚡', '🔒'].map((emoji) => {
+                            {['❤️', '🔥', '👏', '⚡', '✨'].map((emoji) => {
                               const hasMyReaction = (msg.userReactions?.[emoji] || []).includes(cleanMyHandle) ||
                                 (!msg.userReactions?.[emoji] && (msg.reactions?.[emoji] || 0) > 0);
                               return (
@@ -8762,6 +8971,23 @@ export function App() {
 
                           {/* Bubble Content Card */}
                           <div className="spatial-bubble-content-card">
+                            {/* Quoted Reply Block if replying to earlier message */}
+                            {msg.replyTo && (
+                              <div
+                                className="spatial-bubble-reply-quote"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const targetEl = document.getElementById(`msg-${msg.replyTo?.id}`);
+                                  if (targetEl) targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }}
+                              >
+                                <span style={{ fontWeight: 700, color: 'var(--brand-cyan)' }}>@{msg.replyTo.senderHandle}</span>
+                                <span style={{ color: 'rgba(255,255,255,0.7)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {msg.replyTo.text}
+                                </span>
+                              </div>
+                            )}
+
                             {/* Voice Memo Audio Waveform Component */}
                             {msg.isVoiceMemo ? (
                               <div className="voice-memo-player">
@@ -8791,12 +9017,7 @@ export function App() {
                                     ))}
                                   </div>
                                   <div style={{ fontSize: '10.5px', marginTop: '3px', opacity: 0.85, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <span>{playingVoiceId === msg.id ? '▶ Playing Audio...' : `Binaural Audio · ${msg.voiceDuration || '0:18'}`}</span>
-                                    {msg.audioUrl && (
-                                      <span style={{ fontSize: '9px', background: 'rgba(16, 185, 129, 0.25)', color: '#34d399', padding: '1px 5px', borderRadius: '4px' }}>
-                                        Recorded Mic
-                                      </span>
-                                    )}
+                                    <span>{playingVoiceId === msg.id ? '▶ Playing Audio...' : `Voice Memo · ${msg.voiceDuration || '0:18'}`}</span>
                                   </div>
                                 </div>
                               </div>
@@ -8822,7 +9043,7 @@ export function App() {
                                           setLightboxUrl(msg.mediaUrl || null);
                                           setLightboxIsPrivateMessage(true);
                                         }}
-                                        title="Click to view in encrypted private lightbox"
+                                        title="Click to view full image"
                                       />
                                     )}
                                   </div>
@@ -8863,7 +9084,26 @@ export function App() {
                           {/* Bubble Metadata */}
                           <div className="spatial-bubble-meta">
                             <span>{msg.timeAgo}</span>
-                            {isSent && <span style={{ color: 'var(--brand-cyan)' }}>✓✓</span>}
+                            {isSent && (
+                              <>
+                                {(() => {
+                                  const partnerPresence = getUserPresenceState(cleanRecipientHandle);
+                                  const isIgnored = msg.isRead || ((partnerPresence === 'active' || partnerPresence === 'inactive') && (Date.now() - msg.timestamp > 60000)) || (Date.now() - msg.timestamp > 180000);
+                                  if (isIgnored) {
+                                    return (
+                                      <span className="channel-ignored-status" style={{ fontSize: '10px', padding: '1px 5px' }}>
+                                        <span>✓✓</span>
+                                        <span>Read · Ignored</span>
+                                      </span>
+                                    );
+                                  } else if (msg.isRead) {
+                                    return <span className="channel-read-status" style={{ fontSize: '10px' }}>✓✓ Read</span>;
+                                  } else {
+                                    return <span style={{ color: 'var(--brand-cyan)' }}>✓✓ Delivered</span>;
+                                  }
+                                })()}
+                              </>
+                            )}
                           </div>
                         </div>
                       );
@@ -8878,13 +9118,38 @@ export function App() {
                         <span />
                         <span />
                       </div>
-                      <span>@{cleanRecipientHandle} is typing in real time...</span>
+                      <span>@{cleanRecipientHandle} is typing...</span>
                     </div>
                   )}
                 </div>
 
                 {/* Composer Dock */}
                 <form className="messages-composer-dock" onSubmit={handleSendMessage}>
+                  {/* Reply Preview Bar above Composer */}
+                  {replyingToMessage && (
+                    <div className="composer-reply-preview-bar">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                        <span style={{ color: 'var(--brand-cyan)', fontSize: '14px', fontWeight: 800 }}>↩</span>
+                        <div style={{ minWidth: 0, fontSize: '12px' }}>
+                          <span style={{ fontWeight: 700, color: '#fff' }}>
+                            Replying to {replyingToMessage.senderHandle === cleanMyHandle ? 'Yourself' : `@${replyingToMessage.senderHandle}`}:{' '}
+                          </span>
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {replyingToMessage.text || (replyingToMessage.mediaUrl ? 'Attachment' : 'Voice Memo')}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+                        onClick={() => setReplyingToMessage(null)}
+                        title="Cancel reply"
+                      >
+                        <IconX size={14} />
+                      </button>
+                    </div>
+                  )}
+
                   {/* Staged Media Attachment Preview in Composer */}
                   {chatMediaAttachment && (
                     <div className="composer-staged-media-card">
@@ -8897,7 +9162,7 @@ export function App() {
                               muted
                               playsInline
                             />
-                            <div className="composer-staged-badge">🎥 Video</div>
+                            <div className="composer-staged-badge">Video</div>
                           </>
                         ) : (
                           <>
@@ -8906,7 +9171,7 @@ export function App() {
                               alt="Attachment preview"
                               className="composer-staged-thumb"
                             />
-                            <div className="composer-staged-badge">📸 Photo</div>
+                            <div className="composer-staged-badge">Photo</div>
                           </>
                         )}
                         <button
@@ -8923,123 +9188,12 @@ export function App() {
                       </div>
                       <div className="composer-staged-info">
                         <span className="composer-staged-label">
-                          {chatMediaType === 'video' ? 'Private Video Encrypted & Ready' : 'Private Visual Encrypted & Ready'}
+                          {chatMediaType === 'video' ? 'Video Attached' : 'Photo Attached'}
                         </span>
-                        <span className="composer-staged-hint">
-                          Never published publicly · Visible only to this encrypted thread
-                        </span>
+                        <span className="composer-staged-hint">Ready to send</span>
                       </div>
                     </div>
                   )}
-
-                  {/* Quick Action Tools Bar */}
-                  <div className="composer-quick-bar">
-                    <div className="composer-attachments-group">
-                      {/* Photo Upload */}
-                      <label className="composer-tool-btn" title="Attach photo from device">
-                        <IconPhoto size={14} color="var(--brand-cyan)" />
-                        <span>Photo</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              compressImageFile(file, 800, 0.70, (dataUrl) => {
-                                setChatMediaAttachment(dataUrl);
-                                setChatMediaType('photo');
-                                triggerToast('Private photo staged · Never published publicly');
-                              });
-                            }
-                            e.target.value = '';
-                          }}
-                        />
-                      </label>
-
-                      {/* Video Upload */}
-                      <label className="composer-tool-btn" title="Attach video from device">
-                        <IconVideo size={14} color="#f59e0b" />
-                        <span>Video</span>
-                        <input
-                          type="file"
-                          accept="video/*"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const videoUrl = URL.createObjectURL(file);
-                              setChatMediaAttachment(videoUrl);
-                              setChatMediaType('video');
-                              triggerToast('Private video staged · Never published publicly');
-                            }
-                            e.target.value = '';
-                          }}
-                        />
-                      </label>
-
-                      {/* Voice Memo */}
-                      <button
-                        type="button"
-                        className={`composer-tool-btn ${isRecordingVoice ? 'recording-active' : ''}`}
-                        onClick={isRecordingVoice ? handleCancelVoiceRecording : handleStartVoiceRecording}
-                        title={isRecordingVoice ? 'Cancel recording' : 'Record spatial voice memo with microphone'}
-                      >
-                        <IconMic size={14} color={isRecordingVoice ? '#ef4444' : 'var(--cf-emerald)'} />
-                        <span>{isRecordingVoice ? 'Cancel Mic' : 'Voice Memo'}</span>
-                      </button>
-
-                      {/* Studio Presets (Distinct Private Photos) */}
-                      <button
-                        type="button"
-                        className="composer-tool-btn"
-                        onClick={() => {
-                          const presets = [
-                            'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1000',
-                            'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1000',
-                            'https://images.unsplash.com/photo-1493246507139-91e8fad9978e?w=1000',
-                            'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1000',
-                          ];
-                          const randomPreset = presets[Math.floor(Math.random() * presets.length)];
-                          handleStagePresetMedia(randomPreset, 'photo');
-                        }}
-                        title="Attach studio photo"
-                      >
-                        <span>📸 Studio Photo</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="composer-tool-btn"
-                        onClick={() => {
-                          const videoPresets = [
-                            'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-                            'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-                          ];
-                          const randomPreset = videoPresets[Math.floor(Math.random() * videoPresets.length)];
-                          handleStagePresetMedia(randomPreset, 'video');
-                        }}
-                        title="Attach cinema video"
-                      >
-                        <span>🎥 Cinema Video</span>
-                      </button>
-                    </div>
-
-                    {/* Quick Emojis */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {['✨', '🔥', '❤️', '👏', '🌿', '🔒'].map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          className="composer-tool-btn"
-                          style={{ padding: '4px 8px', fontSize: '13px' }}
-                          onClick={() => setChatDraftText((prev) => prev + emoji)}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
 
                   {/* Text Input Row OR Voice Studio Console */}
                   {isRecordingVoice ? (
@@ -9088,13 +9242,53 @@ export function App() {
                     </div>
                   ) : (
                     <div className="composer-input-row">
+                      {/* Compact + Attachment Pill Button (reorganized from old clutter ribbon) */}
+                      <label className="composer-attach-pill-btn" title="Attach Photo or Video">
+                        <IconPlus size={18} color="#fff" />
+                        <input
+                          type="file"
+                          accept="image/*,video/*"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              if (file.type.startsWith('video')) {
+                                const videoUrl = URL.createObjectURL(file);
+                                setChatMediaAttachment(videoUrl);
+                                setChatMediaType('video');
+                                triggerToast('Video attached');
+                              } else {
+                                compressImageFile(file, 1200, 0.78, (dataUrl) => {
+                                  setChatMediaAttachment(dataUrl);
+                                  setChatMediaType('photo');
+                                  triggerToast('Photo attached');
+                                });
+                              }
+                            }
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+
+                      {/* Compact Voice Memo Button */}
+                      <button
+                        type="button"
+                        className="composer-mic-pill-btn"
+                        onClick={handleStartVoiceRecording}
+                        title="Record Voice Memo"
+                      >
+                        <IconMic size={17} color="#fff" />
+                      </button>
+
                       <input
                         type="text"
                         className="composer-text-input"
                         placeholder={
                           chatMediaAttachment
-                            ? `Add encrypted note to this ${chatMediaType}... (Press Enter to Send)`
-                            : `Type encrypted dispatch to @${cleanRecipientHandle}... (Press Enter to Send)`
+                            ? 'Add a message...'
+                            : replyingToMessage
+                            ? `Reply to @${replyingToMessage.senderHandle}...`
+                            : `Message @${cleanRecipientHandle}...`
                         }
                         value={chatDraftText}
                         onChange={(e) => setChatDraftText(e.target.value)}
@@ -9104,7 +9298,7 @@ export function App() {
                         type="submit"
                         className="composer-send-btn"
                         disabled={!chatDraftText.trim() && !chatMediaAttachment}
-                        style={{ opacity: chatDraftText.trim() || chatMediaAttachment ? 1 : 0.5 }}
+                        style={{ opacity: chatDraftText.trim() || chatMediaAttachment ? 1 : 0.4 }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <IconSend size={15} />

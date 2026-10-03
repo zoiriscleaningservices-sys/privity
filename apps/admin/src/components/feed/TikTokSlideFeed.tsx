@@ -95,8 +95,16 @@ export const INITIAL_STORIES_V3: StoryItem[] = [];
 export const isVideoMedia = (url?: string): boolean => {
   if (!url) return false;
   if (url.startsWith('data:video/')) return true;
+  if (url.includes('#video') || url.includes('video/')) return true;
   const clean = url.split('?')[0].toLowerCase();
-  return clean.endsWith('.mp4') || clean.endsWith('.webm') || clean.endsWith('.mov') || clean.endsWith('.ogg');
+  return (
+    clean.endsWith('.mp4') ||
+    clean.endsWith('.webm') ||
+    clean.endsWith('.mov') ||
+    clean.endsWith('.ogg') ||
+    clean.endsWith('.m4v') ||
+    clean.includes('video')
+  );
 };
 
 export const MediaAvatar: React.FC<{
@@ -123,6 +131,8 @@ export const MediaAvatar: React.FC<{
           loop
           muted
           playsInline
+          // @ts-ignore
+          webkit-playsinline="true"
           className={`media-avatar-video ${className}`}
           style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
         />
@@ -140,7 +150,8 @@ export const MediaAvatar: React.FC<{
 export const TikTokSlideVideo: React.FC<{
   post: PostItem;
   videoRefCallback: (el: HTMLVideoElement | null) => void;
-}> = ({ post, videoRefCallback }) => {
+  isMuted?: boolean;
+}> = ({ post, videoRefCallback, isMuted = false }) => {
   const [src, setSrc] = useState<string>(post.videoUrl || post.contentUrl || '');
   const [isErr, setIsErr] = useState(false);
 
@@ -170,7 +181,7 @@ export const TikTokSlideVideo: React.FC<{
       playsInline
       // @ts-ignore
       webkit-playsinline="true"
-      muted={false}
+      muted={isMuted}
       onError={async () => {
         if (!isErr) {
           setIsErr(true);
@@ -727,7 +738,13 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             if (index !== -1) setActiveSlideIndex(index);
           }
           if (videoEl && !pausedMap[postId || '']) {
-            videoEl.play().catch(() => {});
+            const playPromise = videoEl.play();
+            if (playPromise !== undefined) {
+              playPromise.catch(() => {
+                videoEl.muted = true;
+                videoEl.play().catch(() => {});
+              });
+            }
           }
         } else {
           if (videoEl) {
@@ -1766,6 +1783,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     <TikTokSlideVideo
                       post={post}
                       videoRefCallback={(el) => { videoRefs.current[post.id] = el; }}
+                      isMuted={isMuted}
                     />
                   ) : mediaUrl ? (
                     <img
