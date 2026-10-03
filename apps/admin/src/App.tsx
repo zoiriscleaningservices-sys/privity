@@ -213,7 +213,20 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 
 // ==================== REAL DATA MODELS & ASSETS ====================
 
-interface PostComment {
+export interface PostCommentReply {
+  id: string;
+  authorName: string;
+  authorHandle: string;
+  authorAvatar: string;
+  isVerified?: boolean;
+  text: string;
+  timeAgo: string;
+  likesCount?: number;
+  isLiked?: boolean;
+  likersList?: string[];
+}
+
+export interface PostComment {
   id: string;
   authorName: string;
   authorHandle: string;
@@ -223,17 +236,8 @@ interface PostComment {
   timeAgo: string;
   likesCount: number;
   isLiked?: boolean;
-  replies?: {
-    id: string;
-    authorName: string;
-    authorHandle: string;
-    authorAvatar: string;
-    isVerified?: boolean;
-    text: string;
-    timeAgo: string;
-    likesCount?: number;
-    isLiked?: boolean;
-  }[];
+  replies?: PostCommentReply[];
+  likersList?: string[];
 }
 
 interface PostItem {
@@ -268,6 +272,48 @@ interface PostItem {
   isReposted?: boolean;
   timeAgo: string;
   comments: PostComment[];
+}
+
+export const normalizeHandle = (h?: string | null): string => {
+  if (!h) return '';
+  return String(h).replace(/^@/, '').trim().toLowerCase();
+};
+
+export const isSameHandle = (h1?: string | null, h2?: string | null): boolean => {
+  const c1 = normalizeHandle(h1);
+  const c2 = normalizeHandle(h2);
+  return c1.length > 0 && c1 === c2;
+};
+
+export const isPostLikedByUser = (post?: PostItem | null, handle?: string | null): boolean => {
+  if (!post) return false;
+  const clean = normalizeHandle(handle);
+  if (!clean || !Array.isArray(post.likersList)) return false;
+  return post.likersList.some((h) => normalizeHandle(h) === clean);
+};
+
+export const isCommentLikedByUser = (comment?: { likersList?: string[] } | null, handle?: string | null): boolean => {
+  if (!comment) return false;
+  const clean = normalizeHandle(handle);
+  if (!clean || !Array.isArray(comment.likersList)) return false;
+  return comment.likersList.some((h) => normalizeHandle(h) === clean);
+};
+
+export interface AppNotification {
+  id: string;
+  type: 'like' | 'comment' | 'follow' | 'mention' | 'gift';
+  actorHandle: string;
+  actorName: string;
+  actorAvatar: string;
+  actorVerified?: boolean;
+  targetPostId?: string;
+  postCaptionSnippet?: string;
+  postThumbnail?: string;
+  commentText?: string;
+  giftName?: string;
+  timestamp: number;
+  timeAgo: string;
+  isRead: boolean;
 }
 
 export const SAMPLE_POSTS: PostItem[] = [];
@@ -982,6 +1028,75 @@ export function App() {
     safeSaveStorage('privity_direct_messages_v5', directMessages);
   }, [directMessages]);
 
+  // User-scoped notifications store key
+  const activeUserHandle = normalizeHandle(currentAuthUser?.handle);
+  const notifStorageKey = activeUserHandle ? `privity_notifs_${activeUserHandle}` : 'privity_notifications_v1';
+
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    const key = activeUserHandle ? `privity_notifs_${activeUserHandle}` : 'privity_notifications_v1';
+    return readStorage<AppNotification[]>(key, []);
+  });
+
+  // Re-sync notifications when switching accounts
+  useEffect(() => {
+    const key = activeUserHandle ? `privity_notifs_${activeUserHandle}` : 'privity_notifications_v1';
+    setNotifications(readStorage<AppNotification[]>(key, []));
+  }, [activeUserHandle]);
+
+  // User-scoped saved posts store key & reactive state
+  const [savedPostIds, setSavedPostIds] = useState<string[]>(() => {
+    const key = activeUserHandle ? `privity_saved_posts_${activeUserHandle}` : 'privity_saved_posts_default';
+    return readStorage<string[]>(key, []);
+  });
+
+  useEffect(() => {
+    const key = activeUserHandle ? `privity_saved_posts_${activeUserHandle}` : 'privity_saved_posts_default';
+    setSavedPostIds(readStorage<string[]>(key, []));
+  }, [activeUserHandle]);
+
+  const addNotification = React.useCallback((notif: AppNotification, targetUserHandle?: string) => {
+    const target = normalizeHandle(targetUserHandle) || activeUserHandle;
+    const targetKey = target ? `privity_notifs_${target}` : 'privity_notifications_v1';
+
+    // 1. Save into target user's persistent inbox
+    const stored = readStorage<AppNotification[]>(targetKey, []);
+    if (!stored.some((n) => n.id === notif.id)) {
+      safeSaveStorage(targetKey, [notif, ...stored]);
+    }
+
+    // 2. If target is active user, update current view
+    if (!target || target === activeUserHandle) {
+      setNotifications((prev) => {
+        if (prev.some((n) => n.id === notif.id)) return prev;
+        return [notif, ...prev];
+      });
+    }
+  }, [activeUserHandle]);
+
+  const markNotificationRead = React.useCallback((notifId: string) => {
+    setNotifications((prev) => {
+      const next = prev.map((n) => (n.id === notifId ? { ...n, isRead: true } : n));
+      safeSaveStorage(notifStorageKey, next);
+      return next;
+    });
+  }, [notifStorageKey]);
+
+  const markAllNotificationsRead = React.useCallback(() => {
+    setNotifications((prev) => {
+      const next = prev.map((n) => ({ ...n, isRead: true }));
+      safeSaveStorage(notifStorageKey, next);
+      return next;
+    });
+    triggerToast('All notifications marked as read');
+  }, [notifStorageKey]);
+
+  const [messagesSubTab, setMessagesSubTab] = useState<'chats' | 'notifications'>('chats');
+  const [notificationsFilter, setNotificationsFilter] = useState<'all' | 'like' | 'comment' | 'follow'>('all');
+
+  const unreadNotifsCount = useMemo(() => {
+    return notifications.filter((n) => !n.isRead).length;
+  }, [notifications]);
+
   // 1. Persistent Profiles State (purges any mock profiles & registers all real accounts)
   const [profiles, setProfiles] = useState<Record<string, UserProfile>>(() => {
     const loaded = readStorage<Record<string, UserProfile>>('privity_profiles_v5', INITIAL_PROFILES_REGISTRY);
@@ -1247,15 +1362,43 @@ export function App() {
 
   // Synchronized Profile Fetcher
   const getUserProfile = (handle: string, defaultName?: string, defaultAvatar?: string): UserProfile => {
-    const clean = handle.replace(/^@/, '');
+    const clean = (handle || '').replace(/^@/, '').trim().toLowerCase();
+    if (!clean) {
+      return {
+        id: 'anon',
+        name: 'Anonymous',
+        handle: 'anonymous',
+        avatar: 'https://api.dicebear.com/7.x/identicon/svg?seed=anonymous',
+        coverUrl: 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
+        isVerified: false,
+        bio: '',
+        location: 'Global',
+        joinedDate: 'Joined 2026',
+        circleStatus: 'Public Connection',
+        isPrivate: false,
+        followersList: [],
+        followingList: [],
+        trustCirclesList: [],
+        mediaItems: [],
+      };
+    }
     if (profiles[clean]) {
       return profiles[clean];
     }
-    if (currentAuthUser && currentAuthUser.handle.toLowerCase() === clean.toLowerCase()) {
+    if (profiles[`@${clean}`]) {
+      return profiles[`@${clean}`];
+    }
+    const matchedKey = Object.keys(profiles).find(
+      (k) => k.replace(/^@/, '').toLowerCase() === clean
+    );
+    if (matchedKey && profiles[matchedKey]) {
+      return profiles[matchedKey];
+    }
+    if (currentAuthUser && (currentAuthUser.handle || '').replace(/^@/, '').toLowerCase() === clean) {
       return {
         id: currentAuthUser.id,
         name: currentAuthUser.name,
-        handle: currentAuthUser.handle,
+        handle: clean,
         avatar: currentAuthUser.avatar,
         coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
         isVerified: currentAuthUser.isVerified || false,
@@ -1289,16 +1432,26 @@ export function App() {
     };
   };
 
-  const activeAuthHandle = (currentAuthUser?.handle || '').toLowerCase();
+  const activeAuthHandle = (currentAuthUser?.handle || '').toLowerCase().replace(/^@/, '').trim();
   const myProfile = useMemo((): UserProfile => {
-    if (activeAuthHandle && profiles[activeAuthHandle]) {
-      return profiles[activeAuthHandle];
+    if (activeAuthHandle) {
+      const fromProf = profiles[activeAuthHandle] || profiles[`@${activeAuthHandle}`];
+      if (fromProf) {
+        return {
+          ...fromProf,
+          id: currentAuthUser?.id || fromProf.id,
+          name: currentAuthUser?.name || fromProf.name,
+          handle: activeAuthHandle,
+          avatar: currentAuthUser?.avatar || fromProf.avatar,
+          isVerified: Boolean(currentAuthUser?.isVerified || fromProf.isVerified),
+        };
+      }
     }
     if (currentAuthUser) {
       return {
         id: currentAuthUser.id,
         name: currentAuthUser.name,
-        handle: currentAuthUser.handle,
+        handle: activeAuthHandle,
         avatar: currentAuthUser.avatar,
         coverUrl: currentAuthUser.coverUrl || 'https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=1600',
         isVerified: currentAuthUser.isVerified || false,
@@ -1470,24 +1623,48 @@ export function App() {
         }
 
         case 'LIKE_POST': {
-          const { postId, isLiked, likesCount, userHandle } = event;
+          const {
+            postId,
+            isLiked,
+            likesCount,
+            likersList: remoteLikers,
+            likerHandle,
+            likerName,
+            likerAvatar,
+            userHandle,
+            postAuthorHandle,
+            postCaptionSnippet,
+            postThumbnail,
+          } = event;
+          const cleanLiker = normalizeHandle(likerHandle || userHandle);
+          if (!cleanLiker || !postId) return;
+
+          let targetPostAuthor = normalizeHandle(postAuthorHandle);
+
           setPosts((prev) => {
             const nextPosts = prev.map((p) => {
               if (p.id === postId) {
-                const currentLikers = p.likersList || [];
-                const updatedLikers = isLiked
-                  ? (userHandle ? Array.from(new Set([...currentLikers, userHandle])) : currentLikers)
-                  : (userHandle ? currentLikers.filter((h) => h !== userHandle) : currentLikers);
+                if (!targetPostAuthor && p.authorHandle) {
+                  targetPostAuthor = normalizeHandle(p.authorHandle);
+                }
+                const currentLikers = (p.likersList || []).map(normalizeHandle).filter(Boolean);
+                const updatedLikers = Array.isArray(remoteLikers)
+                  ? Array.from(new Set(remoteLikers.map(normalizeHandle).filter(Boolean)))
+                  : isLiked
+                  ? Array.from(new Set([...currentLikers, cleanLiker]))
+                  : currentLikers.filter((h) => h !== cleanLiker);
+
+                const count = typeof likesCount === 'number'
+                  ? likesCount
+                  : Math.max(
+                      isLiked ? (p.likesCount || 0) + 1 : Math.max(0, (p.likesCount || 0) - 1),
+                      updatedLikers.length
+                    );
+
                 return {
                   ...p,
-                  isLiked: userHandle === cleanMyHandle ? isLiked : p.isLiked,
-                  likesCount:
-                    typeof likesCount === 'number'
-                      ? likesCount
-                      : isLiked
-                      ? p.likesCount + 1
-                      : Math.max(0, p.likesCount - 1),
                   likersList: updatedLikers,
+                  likesCount: Math.max(0, count),
                 };
               }
               return p;
@@ -1495,6 +1672,32 @@ export function App() {
             safeSaveStorage('privity_posts_v5', nextPosts);
             return nextPosts;
           });
+
+          // Accurate Notification: When another user likes current user's dispatch
+          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          if (
+            isLiked &&
+            cleanLiker &&
+            myClean &&
+            cleanLiker !== myClean &&
+            (targetPostAuthor === myClean || (!targetPostAuthor && normalizeHandle(postsRef.current.find(p => p.id === postId)?.authorHandle) === myClean))
+          ) {
+            const notif: AppNotification = {
+              id: `notif-like-${postId}-${cleanLiker}-${Date.now()}`,
+              type: 'like',
+              actorHandle: cleanLiker,
+              actorName: likerName || cleanLiker,
+              actorAvatar: likerAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanLiker}`,
+              targetPostId: postId,
+              postCaptionSnippet: postCaptionSnippet || 'your dispatch',
+              postThumbnail: postThumbnail,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myClean);
+            triggerToast(`❤️ @${cleanLiker} liked your dispatch`);
+          }
           break;
         }
 
@@ -1505,7 +1708,6 @@ export function App() {
               if (p.id === postId) {
                 return {
                   ...p,
-                  isSaved,
                   savesCount: isSaved ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1),
                 };
               }
@@ -1607,8 +1809,20 @@ export function App() {
         }
 
         case 'ADD_COMMENT': {
-          const { postId, comment, parentCommentId } = event;
+          const {
+            postId,
+            comment,
+            parentCommentId,
+            commenterHandle,
+            commenterName,
+            commenterAvatar,
+            postAuthorHandle,
+            postCaptionSnippet,
+            postThumbnail,
+          } = event;
           if (!postId || !comment || !comment.id) return;
+          const cleanCommenter = normalizeHandle(commenterHandle || comment.authorHandle);
+
           setPosts((prev) => {
             const next = prev.map((p) => {
               if (p.id !== postId) return p;
@@ -1635,36 +1849,108 @@ export function App() {
             safeSaveStorage('privity_posts_v5', next);
             return next;
           });
+
+          // Accurate Notification: When another user comments on current user's dispatch
+          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          let targetAuthor = normalizeHandle(postAuthorHandle);
+          if (!targetAuthor) {
+            targetAuthor = normalizeHandle(postsRef.current.find(p => p.id === postId)?.authorHandle);
+          }
+          if (
+            cleanCommenter &&
+            myClean &&
+            cleanCommenter !== myClean &&
+            targetAuthor === myClean
+          ) {
+            const notif: AppNotification = {
+              id: `notif-comment-${postId}-${comment.id}`,
+              type: 'comment',
+              actorHandle: cleanCommenter,
+              actorName: commenterName || comment.authorName || cleanCommenter,
+              actorAvatar: commenterAvatar || comment.authorAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanCommenter}`,
+              actorVerified: Boolean(comment.isVerified),
+              targetPostId: postId,
+              postCaptionSnippet: postCaptionSnippet || 'your dispatch',
+              postThumbnail: postThumbnail,
+              commentText: comment.text,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myClean);
+            triggerToast(`💬 @${cleanCommenter} commented: "${comment.text.slice(0, 35)}${comment.text.length > 35 ? '...' : ''}"`);
+          }
           break;
         }
 
         case 'LIKE_COMMENT': {
-          const { postId, commentId, isLiked, likesCount } = event;
+          const { postId, commentId, replyId, isLiked, likesCount, likersList: remoteLikers, likerHandle, likerName, likerAvatar, commentAuthorHandle } = event;
+          const cleanLiker = normalizeHandle(likerHandle);
           setPosts((prev) => {
             const next = prev.map((p) => {
               if (p.id !== postId) return p;
               return {
                 ...p,
                 comments: p.comments.map((c) => {
-                  if (c.id === commentId) {
+                  if (c.id !== commentId) return c;
+                  if (replyId) {
                     return {
                       ...c,
-                      isLiked,
-                      likesCount:
-                        typeof likesCount === 'number'
-                          ? likesCount
+                      replies: (c.replies || []).map((r) => {
+                        if (r.id !== replyId) return r;
+                        const curLikers = (r.likersList || []).map(normalizeHandle).filter(Boolean);
+                        const updLikers = Array.isArray(remoteLikers)
+                          ? Array.from(new Set(remoteLikers.map(normalizeHandle).filter(Boolean)))
                           : isLiked
-                          ? (c.likesCount || 0) + 1
-                          : Math.max(0, (c.likesCount || 0) - 1),
+                          ? Array.from(new Set([...curLikers, cleanLiker].filter(Boolean)))
+                          : curLikers.filter((h) => h !== cleanLiker);
+                        const cnt = typeof likesCount === 'number' ? likesCount : updLikers.length;
+                        return {
+                          ...r,
+                          likersList: updLikers,
+                          likesCount: cnt,
+                        };
+                      }),
                     };
                   }
-                  return c;
+                  const curLikers = (c.likersList || []).map(normalizeHandle).filter(Boolean);
+                  const updLikers = Array.isArray(remoteLikers)
+                    ? Array.from(new Set(remoteLikers.map(normalizeHandle).filter(Boolean)))
+                    : isLiked
+                    ? Array.from(new Set([...curLikers, cleanLiker].filter(Boolean)))
+                    : curLikers.filter((h) => h !== cleanLiker);
+                  const cnt = typeof likesCount === 'number' ? likesCount : updLikers.length;
+                  return {
+                    ...c,
+                    likersList: updLikers,
+                    likesCount: cnt,
+                  };
                 }),
               };
             });
             safeSaveStorage('privity_posts_v5', next);
             return next;
           });
+
+          // Notification to comment author if someone liked their comment
+          const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+          const cAuthor = normalizeHandle(commentAuthorHandle);
+          if (isLiked && cleanLiker && myClean && cleanLiker !== myClean && cAuthor === myClean) {
+            const notif: AppNotification = {
+              id: `notif-like-comment-${commentId}-${cleanLiker}-${Date.now()}`,
+              type: 'like',
+              actorHandle: cleanLiker,
+              actorName: likerName || cleanLiker,
+              actorAvatar: likerAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanLiker}`,
+              targetPostId: postId,
+              postCaptionSnippet: 'your comment',
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif, myClean);
+            triggerToast(`❤️ @${cleanLiker} liked your comment`);
+          }
           break;
         }
 
@@ -1839,9 +2125,20 @@ export function App() {
             return prev;
           });
 
-          // 3. Instant toast notification if someone just followed the logged-in user
+          // 3. Instant toast and notification if someone just followed the logged-in user
           if (isFollowing && cleanTarget === cleanMyHandle.toLowerCase() && cleanFollower !== cleanMyHandle.toLowerCase()) {
-            triggerToast(`✨ ${followerName ? `${followerName} (@${cleanFollower})` : `@${cleanFollower || 'A user'}`} followed you!`);
+            const notif: AppNotification = {
+              id: `notif-follow-${cleanFollower}-${Date.now()}`,
+              type: 'follow',
+              actorHandle: cleanFollower,
+              actorName: followerName || cleanFollower,
+              actorAvatar: event.followerAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${cleanFollower}`,
+              timestamp: Date.now(),
+              timeAgo: 'Just now',
+              isRead: false,
+            };
+            addNotification(notif);
+            triggerToast(`✨ ${followerName ? `${followerName} (@${cleanFollower})` : `@${cleanFollower}`} followed you!`);
           }
           break;
         }
@@ -2203,12 +2500,47 @@ export function App() {
           const { posts: remotePosts } = event;
           if (Array.isArray(remotePosts) && remotePosts.length > 0) {
             setPosts((prev) => {
-              const existingIds = new Set(prev.map((p) => p.id));
-              const toAdd = remotePosts.filter(
-                (p) => p && p.id && !existingIds.has(p.id) && !isMockPost(p)
-              );
-              if (toAdd.length === 0) return prev;
-              const merged = [...toAdd, ...prev];
+              const map = new Map(prev.map((p) => [p.id, p]));
+              let changed = false;
+              for (const rp of remotePosts) {
+                if (!rp || !rp.id || isMockPost(rp)) continue;
+                if (!map.has(rp.id)) {
+                  map.set(rp.id, rp);
+                  changed = true;
+                } else {
+                  const cur = map.get(rp.id)!;
+                  const curLikers = (cur.likersList || []).map(normalizeHandle).filter(Boolean);
+                  const rpLikers = (rp.likersList || []).map(normalizeHandle).filter(Boolean);
+                  const mergedLikers = Array.from(new Set([...curLikers, ...rpLikers]));
+                  const mergedLikesCount = Math.max(cur.likesCount || 0, rp.likesCount || 0, mergedLikers.length);
+                  const curComments = cur.comments || [];
+                  const rpComments = rp.comments || [];
+                  const mergedComments = rpComments.length > curComments.length ? rpComments : curComments;
+                  const mergedCommentsCount = Math.max(cur.commentsCount || 0, rp.commentsCount || 0, mergedComments.length);
+
+                  if (
+                    mergedLikers.length !== curLikers.length ||
+                    mergedLikesCount !== cur.likesCount ||
+                    mergedCommentsCount !== cur.commentsCount ||
+                    mergedComments.length !== curComments.length
+                  ) {
+                    map.set(rp.id, {
+                      ...cur,
+                      likersList: mergedLikers,
+                      likesCount: mergedLikesCount,
+                      comments: mergedComments,
+                      commentsCount: mergedCommentsCount,
+                    });
+                    changed = true;
+                  }
+                }
+              }
+              if (!changed) return prev;
+              const merged = Array.from(map.values()).sort((a, b) => {
+                const timeA = parseInt(a.id.replace(/\D/g, '') || '0', 10);
+                const timeB = parseInt(b.id.replace(/\D/g, '') || '0', 10);
+                return timeB - timeA;
+              });
               safeSaveStorage('privity_posts_v5', merged);
               return merged;
             });
@@ -3747,31 +4079,32 @@ export function App() {
     }
     if (!targetPost) return;
 
-    const photoUrl = targetPost.contentUrl || targetPost.thumbnailUrl;
-    const baseKey = photoUrl ? extractMediaBaseKey(photoUrl) : '';
-    const photoRecord = photoUrl ? (photoLikesMap[photoUrl] || (baseKey ? photoLikesMap[baseKey] : undefined)) : undefined;
-    const matchingMedia = photoUrl ? Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => isSameMedia(m.url, photoUrl)) : undefined;
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!myClean) {
+      setIsAuthModalOpen(true);
+      triggerToast('Please sign in or create an account to like dispatches');
+      return;
+    }
 
-    const isCurrentlyLiked = photoRecord !== undefined
-      ? photoRecord.isLiked
-      : (matchingMedia !== undefined ? matchingMedia.isLiked : !!targetPost.isLiked);
+    const photoUrl = targetPost.contentUrl || targetPost.thumbnailUrl;
+    const currentLikers = (targetPost.likersList || []).map(normalizeHandle).filter(Boolean);
+    const isCurrentlyLiked = currentLikers.includes(myClean);
     if (fromDoubleTap && isCurrentlyLiked) return;
 
     const nextLiked = fromDoubleTap ? true : !isCurrentlyLiked;
-    const userHandle = myProfile.handle || '';
-    let nextLikers = [...(targetPost.likersList || [])];
-    if (nextLiked) {
-      if (userHandle && !nextLikers.includes(userHandle)) nextLikers = [userHandle, ...nextLikers];
-    } else {
-      nextLikers = nextLikers.filter((h) => h !== userHandle);
-    }
-    const currentCount = photoRecord !== undefined
-      ? photoRecord.count
-      : (matchingMedia !== undefined ? matchingMedia.likes : targetPost.likesCount);
-    const nextCount = nextLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
+    const nextLikers = nextLiked
+      ? Array.from(new Set([...currentLikers, myClean]))
+      : currentLikers.filter((h) => h !== myClean);
 
-    // 1. Update photoLikesMap immediately
+    const nextCount = Math.max(
+      0,
+      nextLiked ? (targetPost.likesCount || 0) + 1 : Math.max(0, (targetPost.likesCount || 0) - 1),
+      nextLikers.length
+    );
+
+    // 1. Update photoLikesMap immediately for media
     if (photoUrl) {
+      const baseKey = extractMediaBaseKey(photoUrl);
       setPhotoLikesMap((prev) => {
         const next = {
           ...prev,
@@ -3782,7 +4115,7 @@ export function App() {
         return next;
       });
 
-      // 2. Update profiles immediately
+      // 2. Update profiles mediaItems synchronously
       setProfiles((prevProfs) => {
         let changed = false;
         const nextProfs = { ...prevProfs };
@@ -3815,7 +4148,6 @@ export function App() {
           if (p.id === postId || (photoUrl && (isSameMedia(p.contentUrl, photoUrl) || isSameMedia(p.thumbnailUrl, photoUrl)))) {
             return {
               ...p,
-              isLiked: nextLiked,
               likersList: nextLikers,
               likesCount: nextCount,
             };
@@ -3825,7 +4157,6 @@ export function App() {
       } else {
         const newP = {
           ...targetPost!,
-          isLiked: nextLiked,
           likersList: nextLikers,
           likesCount: nextCount,
         };
@@ -3835,20 +4166,34 @@ export function App() {
       return nextPosts;
     });
 
+    const likerName = currentAuthUser?.name || myProfile.name || myClean;
+    const likerAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
+
     broadcastSyncEvent({
       action: 'LIKE_POST',
       postId,
       isLiked: nextLiked,
       likesCount: nextCount,
-      userHandle: myProfile.handle || '',
+      likersList: nextLikers,
+      userHandle: myClean,
+      likerHandle: myClean,
+      likerName,
+      likerAvatar,
+      postAuthorHandle: normalizeHandle(targetPost.authorHandle),
+      postCaptionSnippet: targetPost.caption ? targetPost.caption.slice(0, 60) : 'your dispatch',
+      postThumbnail: targetPost.contentUrl || targetPost.thumbnailUrl,
     });
 
-    triggerToast(nextLiked ? 'Liked dispatch' : 'Unliked dispatch');
+    triggerToast(nextLiked ? 'Liked dispatch ❤️' : 'Unliked dispatch');
   };
 
   // Bookmark / Save
   const handleSave = (postId: string) => {
     let nextSavedState = false;
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    const savedKey = myClean ? `privity_saved_posts_${myClean}` : 'privity_saved_posts_default';
+    const currentSaved = readStorage<string[]>(savedKey, []);
+
     setPosts((prev) => {
       let currentList = prev;
       let targetPost = currentList.find((p) => p.id === postId);
@@ -3860,13 +4205,12 @@ export function App() {
         }
       }
       if (!targetPost) return prev;
-      nextSavedState = !targetPost.isSaved;
+      nextSavedState = !currentSaved.includes(postId);
       const nextPosts = currentList.map((p) => {
         if (p.id === postId) {
           return {
             ...p,
-            isSaved: nextSavedState,
-            savesCount: nextSavedState ? p.savesCount + 1 : Math.max(0, p.savesCount - 1),
+            savesCount: nextSavedState ? (p.savesCount || 0) + 1 : Math.max(0, (p.savesCount || 0) - 1),
           };
         }
         return p;
@@ -3874,6 +4218,13 @@ export function App() {
       safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
+
+    // Update user-scoped saved posts list
+    const updatedSaved = nextSavedState
+      ? Array.from(new Set([...currentSaved, postId]))
+      : currentSaved.filter((id) => id !== postId);
+    safeSaveStorage(savedKey, updatedSaved);
+    setSavedPostIds(updatedSaved);
 
     broadcastSyncEvent({
       action: 'SAVE_POST',
@@ -3981,11 +4332,21 @@ export function App() {
     }
 
     if (createdItem) {
+      const commenterH = (myProfile.handle || currentAuthUser?.handle || '').replace(/^@/, '').trim();
+      const commenterName = myProfile.name || currentAuthUser?.name || commenterH;
+      const commenterAvatar = myProfile.avatar || currentAuthUser?.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${commenterH}`;
+
       broadcastSyncEvent({
         action: 'ADD_COMMENT',
         postId,
         comment: createdItem,
         parentCommentId,
+        commenterHandle: commenterH,
+        commenterName,
+        commenterAvatar,
+        postAuthorHandle: (targetPost?.authorHandle || '').replace(/^@/, '').trim(),
+        postCaptionSnippet: targetPost?.caption ? targetPost.caption.slice(0, 60) : 'your dispatch',
+        postThumbnail: targetPost?.contentUrl || targetPost?.thumbnailUrl,
       });
     }
 
@@ -4438,18 +4799,21 @@ export function App() {
 
   // Like or unlike comment
   const handleLikeComment = (postId: string, commentId: string, replyId?: string) => {
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    if (!myClean) {
+      setIsAuthModalOpen(true);
+      triggerToast('Please sign in to like comments');
+      return;
+    }
+
     let nextLikedState = false;
     let nextLikesTotal = 0;
+    let updatedLikersList: string[] = [];
+    let targetCommentAuthor = '';
+
     setPosts((prev) => {
       let currentList = prev;
       let targetPost = currentList.find((p) => p.id === postId);
-      if (!targetPost) {
-        const template = ALL_TEMPLATE_POSTS.find((p) => p.id === postId);
-        if (template) {
-          targetPost = { ...template };
-          currentList = [...currentList, targetPost];
-        }
-      }
       if (!targetPost) return prev;
 
       const nextPosts = currentList.map((p) => {
@@ -4459,23 +4823,37 @@ export function App() {
           if (replyId) {
             const updatedReplies = (c.replies || []).map((r) => {
               if (r.id !== replyId) return r;
-              const nextLiked = !r.isLiked;
+              targetCommentAuthor = normalizeHandle(r.authorHandle);
+              const curLikers = (r.likersList || []).map(normalizeHandle).filter(Boolean);
+              const isCurrentlyLiked = curLikers.includes(myClean);
+              const nextLiked = !isCurrentlyLiked;
               nextLikedState = nextLiked;
-              nextLikesTotal = nextLiked ? (r.likesCount || 0) + 1 : Math.max(0, (r.likesCount || 0) - 1);
+              const nextLikers = nextLiked
+                ? Array.from(new Set([...curLikers, myClean]))
+                : curLikers.filter((h) => h !== myClean);
+              updatedLikersList = nextLikers;
+              nextLikesTotal = nextLikers.length;
               return {
                 ...r,
-                isLiked: nextLiked,
+                likersList: nextLikers,
                 likesCount: nextLikesTotal,
               };
             });
             return { ...c, replies: updatedReplies };
           }
-          const nextLiked = !c.isLiked;
+          targetCommentAuthor = normalizeHandle(c.authorHandle);
+          const curLikers = (c.likersList || []).map(normalizeHandle).filter(Boolean);
+          const isCurrentlyLiked = curLikers.includes(myClean);
+          const nextLiked = !isCurrentlyLiked;
           nextLikedState = nextLiked;
-          nextLikesTotal = nextLiked ? (c.likesCount || 0) + 1 : Math.max(0, (c.likesCount || 0) - 1);
+          const nextLikers = nextLiked
+            ? Array.from(new Set([...curLikers, myClean]))
+            : curLikers.filter((h) => h !== myClean);
+          updatedLikersList = nextLikers;
+          nextLikesTotal = nextLikers.length;
           return {
             ...c,
-            isLiked: nextLiked,
+            likersList: nextLikers,
             likesCount: nextLikesTotal,
           };
         });
@@ -4492,12 +4870,45 @@ export function App() {
       replyId,
       isLiked: nextLikedState,
       likesCount: nextLikesTotal,
+      likersList: updatedLikersList,
+      likerHandle: myClean,
+      likerName: currentAuthUser?.name || myProfile.name || myClean,
+      likerAvatar: currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`,
+      commentAuthorHandle: targetCommentAuthor,
     });
   };
 
   // Reply to a comment
   const handleReplyComment = (postId: string, commentId: string, text: string) => {
     if (!text.trim()) return;
+
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+    if (!myClean) {
+      setIsAuthModalOpen(true);
+      triggerToast('Please sign in to reply');
+      return;
+    }
+
+    const authorName = currentAuthUser?.name || myProfile.name || myClean;
+    const authorHandle = `@${myClean}`;
+    const authorAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
+    const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
+
+    const replyItem: PostCommentReply = {
+      id: `r-${Date.now()}`,
+      authorName,
+      authorHandle,
+      authorAvatar,
+      isVerified,
+      text: text.trim(),
+      timeAgo: 'Just now',
+      likesCount: 0,
+      isLiked: false,
+      likersList: [],
+    };
+
+    let targetPostFound: PostItem | undefined;
+
     setPosts((prev) => {
       let currentList = prev;
       let targetPost = currentList.find((p) => p.id === postId);
@@ -4509,18 +4920,7 @@ export function App() {
         }
       }
       if (!targetPost) return prev;
-
-      const replyItem = {
-        id: `r-${Date.now()}`,
-        authorName: myProfile.name,
-        authorHandle: myProfile.handle,
-        authorAvatar: myProfile.avatar,
-        isVerified: myProfile.isVerified,
-        text: text.trim(),
-        timeAgo: 'Just now',
-        likesCount: 0,
-        isLiked: false,
-      };
+      targetPostFound = targetPost;
 
       const nextPosts = currentList.map((p) => {
         if (p.id === postId) {
@@ -4544,6 +4944,20 @@ export function App() {
       safeSaveStorage('privity_posts_v5', nextPosts);
       return nextPosts;
     });
+
+    broadcastSyncEvent({
+      action: 'ADD_COMMENT',
+      postId,
+      comment: replyItem,
+      parentCommentId: commentId,
+      commenterHandle: myClean,
+      commenterName: authorName,
+      commenterAvatar: authorAvatar,
+      postAuthorHandle: normalizeHandle(targetPostFound?.authorHandle),
+      postCaptionSnippet: targetPostFound?.caption ? targetPostFound.caption.slice(0, 60) : 'your dispatch',
+      postThumbnail: targetPostFound?.contentUrl || targetPostFound?.thumbnailUrl,
+    });
+
     triggerToast('Reply posted! 💬');
   };
 
@@ -4581,16 +4995,29 @@ export function App() {
   // Dedicated Birdie quick-composer post creation
   const handleAddBirdiePost = (caption: string, privacy: 'public' | 'followers' | 'close_friends' = 'public') => {
     if (!caption.trim()) return;
+
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+    if (!myClean) {
+      setIsAuthModalOpen(true);
+      triggerToast('Please sign in to chirp');
+      return;
+    }
+    const authorName = currentAuthUser?.name || myProfile.name || myClean;
+    const authorAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
+    const authorHandle = `@${myClean}`;
+    const authorId = currentAuthUser?.id || myProfile.id || `usr-${myClean}`;
+    const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
+
     const extractedTags = (caption.match(/#[\w-]+/g) || []).map((t) => t.slice(1).toLowerCase().trim()).filter(Boolean);
     const finalTags = extractedTags;
 
     const newBirdiePost: PostItem = {
       id: `p-birdie-${Date.now()}`,
-      authorId: myProfile.id || `usr-${myProfile.handle}`,
-      authorName: myProfile.name,
-      authorHandle: myProfile.handle,
-      authorAvatar: myProfile.avatar,
-      isVerified: myProfile.isVerified,
+      authorId,
+      authorName,
+      authorHandle,
+      authorAvatar,
+      isVerified,
       verifiedCategory: myProfile.verifiedCategory,
       verifiedSince: myProfile.verifiedSince,
       cryptoProofId: myProfile.cryptoProofId,
@@ -4615,6 +5042,11 @@ export function App() {
       return nextPosts;
     });
 
+    broadcastSyncEvent({
+      action: 'NEW_POST',
+      post: newBirdiePost,
+    });
+
     triggerToast('Chirped to Birdie! 🐦');
   };
 
@@ -4623,16 +5055,28 @@ export function App() {
     e.preventDefault();
     if (!composerCaption.trim()) return;
 
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+    if (!myClean) {
+      setIsAuthModalOpen(true);
+      triggerToast('Please sign in to publish');
+      return;
+    }
+    const authorName = currentAuthUser?.name || myProfile.name || myClean;
+    const authorAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
+    const authorHandle = `@${myClean}`;
+    const authorId = currentAuthUser?.id || myProfile.id || `usr-${myClean}`;
+    const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
+
     const extractedTags = (composerCaption.match(/#[\w-]+/g) || []).map((t) => t.slice(1).toLowerCase().trim()).filter(Boolean);
     const finalTags = extractedTags;
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
-      authorId: myProfile.id || `usr-${myProfile.handle}`,
-      authorName: myProfile.name,
-      authorHandle: myProfile.handle,
-      authorAvatar: myProfile.avatar,
-      isVerified: myProfile.isVerified,
+      authorId,
+      authorName,
+      authorHandle,
+      authorAvatar,
+      isVerified,
       verifiedCategory: myProfile.verifiedCategory,
       verifiedSince: myProfile.verifiedSince,
       cryptoProofId: myProfile.cryptoProofId,
@@ -4665,10 +5109,10 @@ export function App() {
       });
 
       setProfiles((prev) => {
-        const handleKey = myProfile.handle.toLowerCase();
+        const handleKey = myClean.toLowerCase();
         const prof = prev[handleKey] || myProfile;
         const newMedia: UserMediaItem = {
-          id: `m-${myProfile.handle}-${Date.now()}`,
+          id: `m-${myClean}-${Date.now()}`,
           url: photoUrl,
           type: 'image',
           likes: 0,
@@ -4717,6 +5161,18 @@ export function App() {
     e.preventDefault();
     if (!modalCaption.trim()) return;
 
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+    if (!myClean) {
+      setIsAuthModalOpen(true);
+      triggerToast('Please sign in to publish');
+      return;
+    }
+    const authorName = currentAuthUser?.name || myProfile.name || myClean;
+    const authorAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
+    const authorHandle = `@${myClean}`;
+    const authorId = currentAuthUser?.id || myProfile.id || `usr-${myClean}`;
+    const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
+
     const tagsArr = modalTags
       .split(' ')
       .map((t) => t.replace('#', '').trim().toLowerCase())
@@ -4727,11 +5183,11 @@ export function App() {
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
-      authorId: myProfile.id || `usr-${myProfile.handle}`,
-      authorName: myProfile.name,
-      authorHandle: myProfile.handle,
-      authorAvatar: myProfile.avatar,
-      isVerified: myProfile.isVerified,
+      authorId,
+      authorName,
+      authorHandle,
+      authorAvatar,
+      isVerified,
       verifiedCategory: myProfile.verifiedCategory,
       verifiedSince: myProfile.verifiedSince,
       cryptoProofId: myProfile.cryptoProofId,
@@ -4764,10 +5220,10 @@ export function App() {
       });
 
       setProfiles((prev) => {
-        const handleKey = myProfile.handle.toLowerCase();
+        const handleKey = myClean.toLowerCase();
         const prof = prev[handleKey] || myProfile;
         const newMedia: UserMediaItem = {
-          id: `m-${myProfile.handle}-${Date.now()}`,
+          id: `m-${myClean}-${Date.now()}`,
           url: photoUrl,
           type: 'image',
           likes: 0,
@@ -4834,6 +5290,18 @@ export function App() {
     privacy: 'close_friends' | 'followers' | 'public';
     soundName?: string;
   }) => {
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+    if (!myClean) {
+      setIsAuthModalOpen(true);
+      triggerToast('Please sign in to publish');
+      return;
+    }
+    const authorName = currentAuthUser?.name || myProfile.name || myClean;
+    const authorAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
+    const authorHandle = `@${myClean}`;
+    const authorId = currentAuthUser?.id || myProfile.id || `usr-${myClean}`;
+    const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
+
     const rawTags = tags
       .split(' ')
       .map((t) => t.replace('#', '').trim().toLowerCase())
@@ -4844,11 +5312,11 @@ export function App() {
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
-      authorId: myProfile.id || `usr-${myProfile.handle}`,
-      authorName: myProfile.name,
-      authorHandle: myProfile.handle,
-      authorAvatar: myProfile.avatar,
-      isVerified: myProfile.isVerified,
+      authorId,
+      authorName,
+      authorHandle,
+      authorAvatar,
+      isVerified,
       verifiedCategory: myProfile.verifiedCategory,
       verifiedSince: myProfile.verifiedSince,
       cryptoProofId: myProfile.cryptoProofId,
@@ -4873,7 +5341,7 @@ export function App() {
 
     if (mediaUrl) {
       const newMedia: UserMediaItem = {
-        id: `m-${myProfile.handle}-${Date.now()}`,
+        id: `m-${myClean}-${Date.now()}`,
         url: mediaUrl,
         type: mediaType === 'video' ? 'video' : 'image',
         likes: 0,
@@ -4882,7 +5350,7 @@ export function App() {
       };
 
       setProfiles((prev) => {
-        const handleKey = myProfile.handle.toLowerCase();
+        const handleKey = myClean.toLowerCase();
         const prof = prev[handleKey] || myProfile;
         const nextProfiles = {
           ...prev,
@@ -5452,9 +5920,9 @@ export function App() {
               <TikTokSlideFeed
                 posts={posts}
                 currentUser={{
-                  name: myProfile.name,
-                  handle: myProfile.handle,
-                  avatar: myProfile.avatar,
+                  name: currentAuthUser?.name || myProfile.name || 'Anonymous',
+                  handle: currentAuthUser?.handle || myProfile.handle || 'anon',
+                  avatar: currentAuthUser?.avatar || myProfile.avatar || '',
                 }}
                 followingMap={followingMap}
                 closeFriendsList={closeFriendsList}
@@ -5479,14 +5947,25 @@ export function App() {
                 onStoryViewerOpenChange={setIsFeedStoryOpen}
                 onStoryReplyToDM={(creatorHandle, msg) => handleStoryReplyToDM(creatorHandle, msg)}
                 onAddNewPost={(newPost) => {
+                  const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+                  const postWithAuthor = {
+                    ...newPost,
+                    authorHandle: myClean ? `@${myClean}` : newPost.authorHandle,
+                    authorName: currentAuthUser?.name || myProfile.name || newPost.authorName,
+                    authorAvatar: currentAuthUser?.avatar || myProfile.avatar || newPost.authorAvatar,
+                    likersList: [],
+                    likesCount: 0,
+                    commentsCount: 0,
+                    comments: [],
+                  };
                   setPosts((prev) => {
-                    const next = [newPost as any, ...prev];
+                    const next = [postWithAuthor as any, ...prev];
                     safeSaveStorage('privity_posts_v5', next);
                     return next;
                   });
                   broadcastSyncEvent({
                     action: 'NEW_POST',
-                    post: newPost,
+                    post: postWithAuthor,
                   });
                 }}
                 onRefreshFeeds={() => {
@@ -5998,22 +6477,12 @@ export function App() {
 
                       {/* Post Actions Toolbar */}
                       {(() => {
-                        const postMediaUrl = post.contentUrl || post.thumbnailUrl;
-                        const postBaseKey = postMediaUrl ? extractMediaBaseKey(postMediaUrl) : '';
-                        const photoRecord = postMediaUrl ? (photoLikesMap[postMediaUrl] || (postBaseKey ? photoLikesMap[postBaseKey] : undefined)) : undefined;
-                        const matchingMedia = postMediaUrl ? Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => isSameMedia(m.url, postMediaUrl)) : undefined;
-
-                        const effectiveLiked = photoRecord !== undefined
-                          ? photoRecord.isLiked
-                          : (matchingMedia !== undefined ? matchingMedia.isLiked : !!post.isLiked);
-
-                        const effectiveLikesCount = photoRecord !== undefined
-                          ? photoRecord.count
-                          : (matchingMedia !== undefined ? matchingMedia.likes : post.likesCount);
-
-                        const effectiveLikers = effectiveLiked
-                          ? (myProfile.handle && !(post.likersList || []).includes(myProfile.handle) ? [myProfile.handle, ...(post.likersList || [])] : (post.likersList || []))
-                          : (post.likersList || []).filter((h) => h !== myProfile.handle);
+                        const viewerHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+                        const effectiveLiked = isPostLikedByUser(post, viewerHandle);
+                        const effectiveLikers = (post.likersList || []).map(normalizeHandle).filter(Boolean);
+                        const rawLikesCount = typeof post.likesCount === 'number' && !isNaN(post.likesCount) ? post.likesCount : 0;
+                        const effectiveLikesCount = Math.max(rawLikesCount, effectiveLikers.length);
+                        const isSaved = savedPostIds.includes(post.id);
 
                         return (
                           <>
@@ -6050,11 +6519,11 @@ export function App() {
 
                               {/* Bookmark */}
                               <button
-                                className={`btn-post-action ${post.isSaved ? 'saved' : ''}`}
+                                className={`btn-post-action ${isSaved ? 'saved' : ''}`}
                                 onClick={() => handleSave(post.id)}
                                 title="Save"
                               >
-                                <IconBookmark size={18} filled={post.isSaved} color={post.isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
+                                <IconBookmark size={18} filled={isSaved} color={isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
                               </button>
 
                               {/* Options / Report Menu */}
@@ -6574,8 +7043,28 @@ export function App() {
                     <IconUsersPlus size={20} color="#fff" />
                   </button>
 
-                  <div className="dm-native-title">
-                    <span>Messages</span>
+                  <div className="dm-segmented-control" role="tablist">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={messagesSubTab === 'chats'}
+                      className={`dm-seg-btn ${messagesSubTab === 'chats' ? 'active' : ''}`}
+                      onClick={() => setMessagesSubTab('chats')}
+                    >
+                      <span>Chats</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={messagesSubTab === 'notifications'}
+                      className={`dm-seg-btn ${messagesSubTab === 'notifications' ? 'active' : ''}`}
+                      onClick={() => setMessagesSubTab('notifications')}
+                    >
+                      <span>Activity</span>
+                      {unreadNotifsCount > 0 && (
+                        <span className="dm-seg-badge">{unreadNotifsCount > 99 ? '99+' : unreadNotifsCount}</span>
+                      )}
+                    </button>
                   </div>
 
                   <button
@@ -6595,7 +7084,7 @@ export function App() {
                 </div>
 
                 {/* Expandable Smooth Search Bar when toggled */}
-                {isDmSearchOpen && (
+                {isDmSearchOpen && messagesSubTab === 'chats' && (
                   <div className="dm-expandable-search-bar">
                     <IconSearch size={15} color="var(--text-muted)" />
                     <input
@@ -6618,148 +7107,310 @@ export function App() {
                   </div>
                 )}
 
-                {/* Dedicated Stories Rail in Direct Messages */}
-                <div className="messages-stories-rail">
-                  {/* Your Story in Messages */}
-                  <div
-                    className="dm-story-bubble"
-                    onClick={() => {
-                      const myIdx = stories.findIndex((st) => st.authorHandle === cleanMyHandle);
-                      if (myIdx !== -1) {
-                        setDmActiveStoryIndex(myIdx);
-                      } else {
-                        setIsCameraOpen(true);
-                      }
-                    }}
-                    title="Your Story"
-                  >
-                    <div className={`dm-story-avatar-ring ${stories.some((s) => s.authorHandle === cleanMyHandle) ? 'cf active-story' : 'add'}`}>
-                      <img src={myProfile.avatar} alt="You" className="dm-story-avatar-img" />
-                      <span className="dm-story-plus-icon">+</span>
+                {messagesSubTab === 'chats' ? (
+                  <>
+                    {/* Dedicated Stories Rail in Direct Messages */}
+                    <div className="messages-stories-rail">
+                      {/* Your Story in Messages */}
+                      <div
+                        className="dm-story-bubble"
+                        onClick={() => {
+                          const myIdx = stories.findIndex((st) => st.authorHandle === cleanMyHandle);
+                          if (myIdx !== -1) {
+                            setDmActiveStoryIndex(myIdx);
+                          } else {
+                            setIsCameraOpen(true);
+                          }
+                        }}
+                        title="Your Story"
+                      >
+                        <div className={`dm-story-avatar-ring ${stories.some((s) => s.authorHandle === cleanMyHandle) ? 'cf active-story' : 'add'}`}>
+                          <img src={myProfile.avatar} alt="You" className="dm-story-avatar-img" />
+                          <span className="dm-story-plus-icon">+</span>
+                        </div>
+                        <span className="dm-story-name">Your Story</span>
+                      </div>
+
+                      {/* Other Stories in Messages */}
+                      {stories
+                        .filter((st) => st.authorHandle !== cleanMyHandle)
+                        .map((st) => {
+                          const isCF = st.privacy === 'close_friends';
+                          const isFollowers = st.privacy === 'followers';
+                          const ringClass = isCF ? 'cf' : isFollowers ? 'followers' : 'public';
+                          const idx = stories.findIndex((x) => x.id === st.id);
+
+                          return (
+                            <div
+                              key={st.id}
+                              className="dm-story-bubble"
+                              onClick={() => setDmActiveStoryIndex(idx)}
+                              title={`View @${st.authorHandle}'s story`}
+                            >
+                              <div className={`dm-story-avatar-ring ${ringClass}`}>
+                                <img src={st.authorAvatar} alt={st.authorName} className="dm-story-avatar-img" />
+                                <span className="dm-story-online-dot" />
+                              </div>
+                              <span className="dm-story-name">{st.authorName.split(' ')[0]}</span>
+                            </div>
+                          );
+                        })}
                     </div>
-                    <span className="dm-story-name">Your Story</span>
+
+                    {/* Filter Pills */}
+                    <div className="messages-filter-pills-row">
+                      <button
+                        type="button"
+                        className={`messages-filter-pill ${chatChannelFilter === 'all' ? 'active' : ''}`}
+                        onClick={() => setChatChannelFilter('all')}
+                      >
+                        All ({allPartnerHandles.length})
+                      </button>
+                      <button
+                        type="button"
+                        className={`messages-filter-pill ${chatChannelFilter === 'close_friends' ? 'active' : ''}`}
+                        onClick={() => setChatChannelFilter('close_friends')}
+                      >
+                        ★ Close Friends ({allPartnerHandles.filter((h) => closeFriendsList.includes(h)).length})
+                      </button>
+                      <button
+                        type="button"
+                        className={`messages-filter-pill ${chatChannelFilter === 'unread' ? 'active' : ''}`}
+                        onClick={() => setChatChannelFilter('unread')}
+                      >
+                        Active Now
+                      </button>
+                    </div>
+
+                    {/* Roster Channels List */}
+                    <div className="messages-roster-list">
+                      {filteredChannels.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '32px 14px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                          No conversations found matching "{chatSearchQuery}"
+                        </div>
+                      ) : (
+                        filteredChannels.map((handle) => {
+                          const user = getUserProfile(handle);
+                          const isSelected = cleanRecipientHandle === handle;
+                          const thread = directMessages[handle] || [];
+                          const lastMsg = thread[thread.length - 1];
+                          const isCF = closeFriendsList.includes(handle);
+
+                          let snippet = 'Encrypted peer channel ready';
+                          if (lastMsg) {
+                            const isMine = cleanMyHandle ? lastMsg.senderHandle === cleanMyHandle : false;
+                            const prefix = isMine ? 'You: ' : '';
+                            if (lastMsg.isVoiceMemo) {
+                              snippet = `${prefix}🎙️ Voice memo (${lastMsg.voiceDuration || '0:18'})`;
+                            } else if (lastMsg.mediaUrl) {
+                              snippet = `${prefix}📸 Visual dispatch`;
+                            } else {
+                              snippet = `${prefix}${lastMsg.text}`;
+                            }
+                          }
+
+                          return (
+                            <div
+                              key={handle}
+                              className={`channel-card-item ${isSelected ? 'active' : ''}`}
+                              onClick={() => {
+                                setActiveChatUser(user);
+                                setChatMediaAttachment(null);
+                              }}
+                            >
+                              <div className="channel-avatar-wrapper">
+                                <img
+                                  src={user.avatar}
+                                  alt={user.name}
+                                  className="channel-avatar-img"
+                                  style={{ borderColor: isCF ? 'var(--cf-emerald)' : undefined }}
+                                />
+                                <span className="online-presence-dot" />
+                              </div>
+                              <div className="channel-info-col">
+                                <div className="channel-name-row">
+                                  <span className="channel-creator-name">
+                                    {user.name}
+                                    {user.isVerified && <VerifiedBadge authorName={user.name} category={user.verifiedCategory} />}
+                                  </span>
+                                  <span className="channel-timestamp">
+                                    {lastMsg ? lastMsg.timeAgo : 'Active'}
+                                  </span>
+                                </div>
+                                <div className="channel-snippet-row">
+                                  <span className="channel-last-text">{snippet}</span>
+                                  {isCF && (
+                                    <span title="Close Friends Circle">
+                                      <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="messages-notifications-container">
+                    {/* Top Action Bar */}
+                    <div className="notif-top-actions-bar">
+                      <div className="notif-filter-pills">
+                        <button
+                          type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'all' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('all')}
+                        >
+                          All ({notifications.length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'like' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('like')}
+                        >
+                          ❤️ Likes ({notifications.filter((n) => n.type === 'like').length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'comment' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('comment')}
+                        >
+                          💬 Comments ({notifications.filter((n) => n.type === 'comment').length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'follow' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('follow')}
+                        >
+                          👤 Follows ({notifications.filter((n) => n.type === 'follow').length})
+                        </button>
+                      </div>
+                      {unreadNotifsCount > 0 && (
+                        <button
+                          type="button"
+                          className="notif-mark-all-btn"
+                          onClick={markAllNotificationsRead}
+                          title="Mark all notifications as read"
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Notifications Feed */}
+                    <div className="notif-feed-list">
+                      {notifications.filter((n) => notificationsFilter === 'all' || n.type === notificationsFilter).length === 0 ? (
+                        <div className="notif-empty-state-card">
+                          <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔔</div>
+                          <div style={{ fontWeight: 700, fontSize: '15px', color: '#fff', marginBottom: '4px' }}>
+                            No notifications yet
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-muted)', maxWidth: '280px', lineHeight: 1.4 }}>
+                            When someone likes, comments, or interacts with your posts, you'll see them right here in real time!
+                          </div>
+                        </div>
+                      ) : (
+                        notifications
+                          .filter((n) => notificationsFilter === 'all' || n.type === notificationsFilter)
+                          .map((notif) => {
+                            const isFollowType = notif.type === 'follow';
+                            const cleanActor = (notif.actorHandle || '').replace(/^@/, '');
+                            const isFollowingActor = !!followingMap[cleanActor] || !!followingMap[`@${cleanActor}`];
+
+                            return (
+                              <div
+                                key={notif.id}
+                                className={`notif-entry-item ${notif.isRead ? 'read' : 'unread'}`}
+                                onClick={() => {
+                                  markNotificationRead(notif.id);
+                                  if (notif.targetPostId) {
+                                    setActiveTab('feed');
+                                    setFeedFilter('all');
+                                    setHighlightPostId(notif.targetPostId);
+                                    setTimeout(() => setHighlightPostId(null), 3500);
+                                    const el = document.getElementById(`post-${notif.targetPostId}`);
+                                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  } else if (isFollowType) {
+                                    setViewedUserHandle(cleanActor);
+                                    setActiveTab('profile');
+                                  }
+                                }}
+                              >
+                                <div className="notif-avatar-wrap">
+                                  <img
+                                    src={notif.actorAvatar}
+                                    alt={notif.actorName}
+                                    className="notif-actor-avatar"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewedUserHandle(cleanActor);
+                                      setActiveTab('profile');
+                                    }}
+                                  />
+                                  <span className={`notif-type-icon-badge ${notif.type}`}>
+                                    {notif.type === 'like' && '❤️'}
+                                    {notif.type === 'comment' && '💬'}
+                                    {notif.type === 'follow' && '👤'}
+                                    {notif.type === 'gift' && '🎁'}
+                                  </span>
+                                </div>
+
+                                <div className="notif-details-wrap">
+                                  <div className="notif-headline">
+                                    <span
+                                      className="notif-actor-name-bold"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setViewedUserHandle(cleanActor);
+                                        setActiveTab('profile');
+                                      }}
+                                    >
+                                      {notif.actorName}
+                                    </span>
+                                    <span className="notif-actor-handle-pill">@{cleanActor}</span>
+                                    {notif.type === 'like' && 'liked your dispatch'}
+                                    {notif.type === 'comment' && 'commented on your dispatch'}
+                                    {notif.type === 'follow' && 'started following you'}
+                                    {notif.type === 'gift' && `sent you a gift: ${notif.giftName || 'Virtual Gift'}`}
+                                  </div>
+
+                                  {notif.commentText && (
+                                    <div className="notif-comment-quote">
+                                      "{notif.commentText}"
+                                    </div>
+                                  )}
+
+                                  <div className="notif-timestamp-row">{notif.timeAgo || 'Recently'}</div>
+                                </div>
+
+                                {notif.postThumbnail && (
+                                  <img
+                                    src={notif.postThumbnail}
+                                    alt="Post preview"
+                                    className="notif-thumb-box"
+                                  />
+                                )}
+
+                                {isFollowType && (
+                                  <button
+                                    type="button"
+                                    className={`notif-action-btn-follow ${isFollowingActor ? 'following' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleFollow(cleanActor, notif.actorName);
+                                    }}
+                                  >
+                                    {isFollowingActor ? 'Following' : 'Follow Back'}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })
+                      )}
+                    </div>
                   </div>
-
-                  {/* Other Stories in Messages */}
-                  {stories
-                    .filter((st) => st.authorHandle !== cleanMyHandle)
-                    .map((st) => {
-                      const isCF = st.privacy === 'close_friends';
-                      const isFollowers = st.privacy === 'followers';
-                      const ringClass = isCF ? 'cf' : isFollowers ? 'followers' : 'public';
-                      const idx = stories.findIndex((x) => x.id === st.id);
-
-                      return (
-                        <div
-                          key={st.id}
-                          className="dm-story-bubble"
-                          onClick={() => setDmActiveStoryIndex(idx)}
-                          title={`View @${st.authorHandle}'s story`}
-                        >
-                          <div className={`dm-story-avatar-ring ${ringClass}`}>
-                            <img src={st.authorAvatar} alt={st.authorName} className="dm-story-avatar-img" />
-                            <span className="dm-story-online-dot" />
-                          </div>
-                          <span className="dm-story-name">{st.authorName.split(' ')[0]}</span>
-                        </div>
-                      );
-                    })}
-                </div>
-
-                {/* Filter Pills */}
-                <div className="messages-filter-pills-row">
-                  <button
-                    type="button"
-                    className={`messages-filter-pill ${chatChannelFilter === 'all' ? 'active' : ''}`}
-                    onClick={() => setChatChannelFilter('all')}
-                  >
-                    All ({allPartnerHandles.length})
-                  </button>
-                  <button
-                    type="button"
-                    className={`messages-filter-pill ${chatChannelFilter === 'close_friends' ? 'active' : ''}`}
-                    onClick={() => setChatChannelFilter('close_friends')}
-                  >
-                    ★ Close Friends ({allPartnerHandles.filter((h) => closeFriendsList.includes(h)).length})
-                  </button>
-                  <button
-                    type="button"
-                    className={`messages-filter-pill ${chatChannelFilter === 'unread' ? 'active' : ''}`}
-                    onClick={() => setChatChannelFilter('unread')}
-                  >
-                    Active Now
-                  </button>
-                </div>
-
-                {/* Roster Channels List */}
-                <div className="messages-roster-list">
-                  {filteredChannels.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '32px 14px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                      No conversations found matching "{chatSearchQuery}"
-                    </div>
-                  ) : (
-                    filteredChannels.map((handle) => {
-                      const user = getUserProfile(handle);
-                      const isSelected = cleanRecipientHandle === handle;
-                      const thread = directMessages[handle] || [];
-                      const lastMsg = thread[thread.length - 1];
-                      const isCF = closeFriendsList.includes(handle);
-
-                      let snippet = 'Encrypted peer channel ready';
-                      if (lastMsg) {
-                        const isMine = cleanMyHandle ? lastMsg.senderHandle === cleanMyHandle : false;
-                        const prefix = isMine ? 'You: ' : '';
-                        if (lastMsg.isVoiceMemo) {
-                          snippet = `${prefix}🎙️ Voice memo (${lastMsg.voiceDuration || '0:18'})`;
-                        } else if (lastMsg.mediaUrl) {
-                          snippet = `${prefix}📸 Visual dispatch`;
-                        } else {
-                          snippet = `${prefix}${lastMsg.text}`;
-                        }
-                      }
-
-                      return (
-                        <div
-                          key={handle}
-                          className={`channel-card-item ${isSelected ? 'active' : ''}`}
-                          onClick={() => {
-                            setActiveChatUser(user);
-                            setChatMediaAttachment(null);
-                          }}
-                        >
-                          <div className="channel-avatar-wrapper">
-                            <img
-                              src={user.avatar}
-                              alt={user.name}
-                              className="channel-avatar-img"
-                              style={{ borderColor: isCF ? 'var(--cf-emerald)' : undefined }}
-                            />
-                            <span className="online-presence-dot" />
-                          </div>
-                          <div className="channel-info-col">
-                            <div className="channel-name-row">
-                              <span className="channel-creator-name">
-                                {user.name}
-                                {user.isVerified && <VerifiedBadge authorName={user.name} category={user.verifiedCategory} />}
-                              </span>
-                              <span className="channel-timestamp">
-                                {lastMsg ? lastMsg.timeAgo : 'Active'}
-                              </span>
-                            </div>
-                            <div className="channel-snippet-row">
-                              <span className="channel-last-text">{snippet}</span>
-                              {isCF && (
-                                <span title="Close Friends Circle">
-                                  <IconStarCloseFriends size={11} color="var(--cf-emerald)" />
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                )}
               </div>
 
               {/* RIGHT PANE: ACTIVE THREAD WORKSPACE */}
@@ -7817,16 +8468,163 @@ export function App() {
               </div>
             )}
 
-            <div className="glass-panel-card">
-              <div className="panel-title-text">Recent Interactions</div>
-              <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
-                <div style={{ fontSize: '32px', marginBottom: '10px', opacity: 0.5 }}>🔔</div>
-                <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>
-                  No interactions yet
-                </div>
-                <div style={{ fontSize: '13px', maxWidth: '340px', margin: '0 auto', lineHeight: 1.4 }}>
-                  When creators interact with your dispatches, stories, or live broadcasts, updates will appear here in real time.
-                </div>
+            <div className="glass-panel-card" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <div className="panel-title-text" style={{ margin: 0 }}>Recent Interactions & Notifications</div>
+                {unreadNotifsCount > 0 && (
+                  <button
+                    type="button"
+                    className="notif-mark-all-btn"
+                    onClick={markAllNotificationsRead}
+                    title="Mark all notifications as read"
+                  >
+                    Mark all read
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Pills */}
+              <div className="notif-filter-pills" style={{ marginBottom: '16px' }}>
+                <button
+                  type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('all')}
+                >
+                  All ({notifications.length})
+                </button>
+                <button
+                  type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'like' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('like')}
+                >
+                  ❤️ Likes ({notifications.filter((n) => n.type === 'like').length})
+                </button>
+                <button
+                  type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'comment' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('comment')}
+                >
+                  💬 Comments ({notifications.filter((n) => n.type === 'comment').length})
+                </button>
+                <button
+                  type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'follow' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('follow')}
+                >
+                  👤 Follows ({notifications.filter((n) => n.type === 'follow').length})
+                </button>
+              </div>
+
+              {/* Feed List */}
+              <div className="notif-feed-list" style={{ padding: 0 }}>
+                {notifications.filter((n) => notificationsFilter === 'all' || n.type === notificationsFilter).length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)' }}>
+                    <div style={{ fontSize: '32px', marginBottom: '10px', opacity: 0.5 }}>🔔</div>
+                    <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>
+                      No interactions yet
+                    </div>
+                    <div style={{ fontSize: '13px', maxWidth: '340px', margin: '0 auto', lineHeight: 1.4 }}>
+                      When creators interact with your dispatches, stories, or live broadcasts, updates will appear here in real time.
+                    </div>
+                  </div>
+                ) : (
+                  notifications
+                    .filter((n) => notificationsFilter === 'all' || n.type === notificationsFilter)
+                    .map((notif) => {
+                      const isFollowType = notif.type === 'follow';
+                      const cleanActor = (notif.actorHandle || '').replace(/^@/, '');
+                      const isFollowingActor = !!followingMap[cleanActor] || !!followingMap[`@${cleanActor}`];
+
+                      return (
+                        <div
+                          key={notif.id}
+                          className={`notif-entry-item ${notif.isRead ? 'read' : 'unread'}`}
+                          onClick={() => {
+                            markNotificationRead(notif.id);
+                            if (notif.targetPostId) {
+                              setActiveTab('feed');
+                              setFeedFilter('all');
+                              setHighlightPostId(notif.targetPostId);
+                              setTimeout(() => setHighlightPostId(null), 3500);
+                              const el = document.getElementById(`post-${notif.targetPostId}`);
+                              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            } else if (isFollowType) {
+                              setViewedUserHandle(cleanActor);
+                              setActiveTab('profile');
+                            }
+                          }}
+                        >
+                          <div className="notif-avatar-wrap">
+                            <img
+                              src={notif.actorAvatar}
+                              alt={notif.actorName}
+                              className="notif-actor-avatar"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewedUserHandle(cleanActor);
+                                setActiveTab('profile');
+                              }}
+                            />
+                            <span className={`notif-type-icon-badge ${notif.type}`}>
+                              {notif.type === 'like' && '❤️'}
+                              {notif.type === 'comment' && '💬'}
+                              {notif.type === 'follow' && '👤'}
+                              {notif.type === 'gift' && '🎁'}
+                            </span>
+                          </div>
+
+                          <div className="notif-details-wrap">
+                            <div className="notif-headline">
+                              <span
+                                className="notif-actor-name-bold"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setViewedUserHandle(cleanActor);
+                                  setActiveTab('profile');
+                                }}
+                              >
+                                {notif.actorName}
+                              </span>
+                              <span className="notif-actor-handle-pill">@{cleanActor}</span>
+                              {notif.type === 'like' && 'liked your dispatch'}
+                              {notif.type === 'comment' && 'commented on your dispatch'}
+                              {notif.type === 'follow' && 'started following you'}
+                              {notif.type === 'gift' && `sent you a gift: ${notif.giftName || 'Virtual Gift'}`}
+                            </div>
+
+                            {notif.commentText && (
+                              <div className="notif-comment-quote">
+                                "{notif.commentText}"
+                              </div>
+                            )}
+
+                            <div className="notif-timestamp-row">{notif.timeAgo || 'Recently'}</div>
+                          </div>
+
+                          {notif.postThumbnail && (
+                            <img
+                              src={notif.postThumbnail}
+                              alt="Post preview"
+                              className="notif-thumb-box"
+                            />
+                          )}
+
+                          {isFollowType && (
+                            <button
+                              type="button"
+                              className={`notif-action-btn-follow ${isFollowingActor ? 'following' : ''}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleFollow(cleanActor, notif.actorName);
+                              }}
+                            >
+                              {isFollowingActor ? 'Following' : 'Follow Back'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                )}
               </div>
             </div>
           </div>
@@ -8319,22 +9117,12 @@ export function App() {
                             )}
 
                             {(() => {
-                              const postMediaUrl = post.contentUrl || post.thumbnailUrl;
-                              const postBaseKey = postMediaUrl ? extractMediaBaseKey(postMediaUrl) : '';
-                              const photoRecord = postMediaUrl ? (photoLikesMap[postMediaUrl] || (postBaseKey ? photoLikesMap[postBaseKey] : undefined)) : undefined;
-                              const matchingMedia = postMediaUrl ? Object.values(profiles).flatMap((p) => p.mediaItems || []).find((m) => isSameMedia(m.url, postMediaUrl)) : undefined;
-
-                              const effectiveLiked = photoRecord !== undefined
-                                ? photoRecord.isLiked
-                                : (matchingMedia !== undefined ? matchingMedia.isLiked : !!post.isLiked);
-
-                              const effectiveLikesCount = photoRecord !== undefined
-                                ? photoRecord.count
-                                : (matchingMedia !== undefined ? matchingMedia.likes : post.likesCount);
-
-                              const effectiveLikers = effectiveLiked
-                                ? (myProfile.handle && !(post.likersList || []).includes(myProfile.handle) ? [myProfile.handle, ...(post.likersList || [])] : (post.likersList || []))
-                                : (post.likersList || []).filter((h) => h !== myProfile.handle);
+                              const viewerHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+                              const effectiveLiked = isPostLikedByUser(post, viewerHandle);
+                              const effectiveLikers = (post.likersList || []).map(normalizeHandle).filter(Boolean);
+                              const rawLikesCount = typeof post.likesCount === 'number' && !isNaN(post.likesCount) ? post.likesCount : 0;
+                              const effectiveLikesCount = Math.max(rawLikesCount, effectiveLikers.length);
+                              const isSaved = savedPostIds.includes(post.id);
 
                               return (
                                 <>
@@ -8364,11 +9152,11 @@ export function App() {
                                       <IconShare size={18} />
                                     </button>
                                     <button
-                                      className={`btn-post-action ${post.isSaved ? 'saved' : ''}`}
+                                      className={`btn-post-action ${isSaved ? 'saved' : ''}`}
                                       onClick={() => handleSave(post.id)}
                                       title="Save"
                                     >
-                                      <IconBookmark size={18} filled={post.isSaved} color={post.isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
+                                      <IconBookmark size={18} filled={isSaved} color={isSaved ? 'var(--cf-emerald)' : 'currentColor'} />
                                     </button>
                                     <button
                                       className="btn-post-action"
@@ -9114,13 +9902,14 @@ export function App() {
         const matchingPost = posts.find((p) => isSameMedia(p.contentUrl, lightboxUrl) || isSameMedia(p.thumbnailUrl, lightboxUrl));
 
         // Real-time reactive like calculation
-        const isPhotoLiked = record !== undefined
-          ? record.isLiked
-          : !!(matchingMedia?.isLiked || matchingPost?.isLiked);
+        const viewerHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
+        const isPhotoLiked = matchingPost
+          ? isPostLikedByUser(matchingPost, viewerHandle)
+          : (record !== undefined ? record.isLiked : !!matchingMedia?.isLiked);
 
-        const photoLikesCount = record !== undefined
-          ? record.count
-          : (matchingMedia ? matchingMedia.likes : (matchingPost ? matchingPost.likesCount : 0));
+        const photoLikesCount = matchingPost
+          ? Math.max(matchingPost.likesCount || 0, (matchingPost.likersList || []).length)
+          : (record !== undefined ? record.count : (matchingMedia ? matchingMedia.likes : 0));
 
         const resolvedComments = matchingPost?.comments || [];
         const resolvedCommentsCount = matchingPost?.commentsCount ?? (matchingMedia?.comments ?? resolvedComments.length);
@@ -9150,6 +9939,12 @@ export function App() {
 
         const handleLightboxLikeToggle = (e?: React.MouseEvent) => {
           e?.stopPropagation();
+          if (matchingPost) {
+            setLightboxHeartAnim(true);
+            setTimeout(() => setLightboxHeartAnim(false), 850);
+            handleLike(matchingPost.id);
+            return;
+          }
           const nextLiked = !isPhotoLiked;
           const nextCount = nextLiked ? photoLikesCount + 1 : Math.max(0, photoLikesCount - 1);
 

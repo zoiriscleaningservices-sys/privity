@@ -71,6 +71,8 @@ export const isSupabaseConfigured = (): boolean => {
 };
 
 let realtimeSyncChannel: any = null;
+const broadcastListeners = new Set<(payload: any) => void>();
+let isBroadcastAttached = false;
 
 export function getSupabaseRealtimeChannel() {
   const sb = getSupabaseClient();
@@ -85,6 +87,18 @@ export function getSupabaseRealtimeChannel() {
           console.log('[Supabase Realtime] Connected to privity_sync_hub');
         }
       });
+      if (!isBroadcastAttached) {
+        isBroadcastAttached = true;
+        realtimeSyncChannel.on('broadcast', { event: 'privity_event' }, ({ payload }: any) => {
+          broadcastListeners.forEach((listener) => {
+            try {
+              listener(payload);
+            } catch (err) {
+              console.error('[Supabase Realtime] Listener error:', err);
+            }
+          });
+        });
+      }
     } catch (e) {
       console.warn('[Supabase Realtime] Failed to create channel:', e);
       return null;
@@ -109,14 +123,10 @@ export function broadcastViaSupabase(payload: any) {
 }
 
 export function onSupabaseBroadcast(callback: (payload: any) => void): () => void {
-  try {
-    const ch = getSupabaseRealtimeChannel();
-    if (!ch) return () => {};
-    ch.on('broadcast', { event: 'privity_event' }, ({ payload }: any) => {
-      callback(payload);
-    });
-    return () => {};
-  } catch {
-    return () => {};
-  }
+  broadcastListeners.add(callback);
+  getSupabaseRealtimeChannel();
+  return () => {
+    broadcastListeners.delete(callback);
+  };
 }
+

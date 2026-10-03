@@ -9348,3 +9348,295 @@ textarea::placeholder {
   color: var(--text-muted);
 }
 
+/* ======================================================== */
+/* MESSAGES NOTIFICATIONS & ACTIVITY CENTER                */
+/* ======================================================== */
+
+.dm-segmented-control {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 3px;
+}
+
+.dm-seg-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dm-seg-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dm-seg-btn.active {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.6), rgba(168, 85, 247, 0.6));
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.35);
+}
+
+.dm-seg-badge {
+  background: #fe2c55;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+  line-height: 14px;
+}
+
+.messages-notifications-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.notif-top-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.notif-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.notif-filter-pill {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.notif-filter-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.notif-filter-pill.active {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #ffffff;
+}
+
+.notif-mark-all-btn {
+  background: transparent;
+  border: none;
+  color: var(--brand-cyan, #06b6d4);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: opacity 0.18s ease;
+}
+
+.notif-mark-all-btn:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+.notif-feed-list {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  gap: 6px;
+}
+
+.notif-entry-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+
+.notif-entry-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.notif-entry-item.unread {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+.notif-entry-item.unread::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fe2c55;
+  box-shadow: 0 0 8px #fe2c55;
+}
+
+.notif-avatar-wrap {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.notif-actor-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.notif-type-icon-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  border: 2px solid #0b0f19;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.notif-type-icon-badge.like {
+  background: linear-gradient(135deg, #fe2c55, #f43f5e);
+}
+
+.notif-type-icon-badge.comment {
+  background: linear-gradient(135deg, #06b6d4, #3b82f6);
+}
+
+.notif-type-icon-badge.follow {
+  background: linear-gradient(135deg, #8b5cf6, #a855f7);
+}
+
+.notif-type-icon-badge.gift {
+  background: linear-gradient(135deg, #f59e0b, #eab308);
+}
+
+.notif-details-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-headline {
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.9);
+  word-break: break-word;
+}
+
+.notif-actor-name-bold {
+  font-weight: 800;
+  color: #ffffff;
+  margin-right: 4px;
+}
+
+.notif-actor-handle-pill {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.notif-comment-quote {
+  display: block;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 2px solid var(--brand-cyan, #06b6d4);
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notif-timestamp-row {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.notif-thumb-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.notif-action-btn-follow {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(168, 85, 247, 0.3));
+  color: #ffffff;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.18s ease;
+}
+
+.notif-action-btn-follow:hover {
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+}
+
+.notif-action-btn-follow.following {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.notif-empty-state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+

@@ -34,6 +34,7 @@ export interface GoogleJwtPayload {
 }
 
 const STORAGE_SESSION_KEY = 'privity_auth_session_v1';
+const STORAGE_TAB_SESSION_KEY = 'privity_tab_auth_session_v1';
 const STORAGE_ACCOUNTS_KEY = 'privity_accounts_v1';
 
 export function mapSupabaseUserToAccount(sbUser: any): UserAccount {
@@ -123,7 +124,10 @@ class AuthService {
 
   private loadSession() {
     try {
-      const raw = localStorage.getItem(STORAGE_SESSION_KEY);
+      let raw = sessionStorage.getItem(STORAGE_TAB_SESSION_KEY);
+      if (!raw) {
+        raw = localStorage.getItem(STORAGE_SESSION_KEY);
+      }
       if (raw) {
         this.currentUser = JSON.parse(raw);
         if (this.currentUser) {
@@ -142,6 +146,24 @@ class AuthService {
     }
     return this.currentUser;
   }
+
+  // Switch active account for this tab
+  public switchAccount(handle: string): UserAccount | null {
+    const clean = handle.replace(/^@/, '').toLowerCase().trim();
+    const accounts = this.getAllAccounts();
+    const target = accounts[clean];
+    if (target) {
+      this.currentUser = target;
+      try {
+        sessionStorage.setItem(STORAGE_TAB_SESSION_KEY, JSON.stringify(target));
+      } catch {}
+      this.notify();
+      return target;
+    }
+    return null;
+  }
+
+
 
   // Get all registered accounts on device
   public getAllAccounts(): Record<string, UserAccount> {
@@ -167,6 +189,7 @@ class AuthService {
     this.currentUser = user;
     if (user) {
       try {
+        sessionStorage.setItem(STORAGE_TAB_SESSION_KEY, JSON.stringify(user));
         localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(user));
         // Also sync to accounts
         const accounts = this.getAllAccounts();
@@ -195,6 +218,7 @@ class AuthService {
         console.warn('Failed to save auth session:', e);
       }
     } else {
+      sessionStorage.removeItem(STORAGE_TAB_SESSION_KEY);
       localStorage.removeItem(STORAGE_SESSION_KEY);
     }
     this.notify();

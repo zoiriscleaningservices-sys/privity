@@ -11,6 +11,7 @@ export interface PostCommentReply {
   timeAgo: string;
   likesCount?: number;
   isLiked?: boolean;
+  likersList?: string[];
 }
 
 export interface PostComment {
@@ -23,8 +24,16 @@ export interface PostComment {
   timeAgo: string;
   likesCount?: number;
   isLiked?: boolean;
+  likersList?: string[];
   replies?: PostCommentReply[];
 }
+
+export const isUserLiked = (targetLikers?: string[], userHandle?: string | null): boolean => {
+  if (!userHandle) return false;
+  const clean = userHandle.replace(/^@/, '').toLowerCase().trim();
+  if (!clean || !Array.isArray(targetLikers)) return false;
+  return targetLikers.some((h) => (h || '').replace(/^@/, '').toLowerCase().trim() === clean);
+};
 
 export interface PostItem {
   id: string;
@@ -856,7 +865,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
     if (now - lastTapRef.current.time < 320) {
       // Double Tap detected!
-      if (!post.isLiked) {
+      if (!isUserLiked(post.likersList, currentUser?.handle)) {
         onLike(post.id, post.contentUrl || post.videoUrl);
       }
       // Trigger burst heart particle
@@ -1356,7 +1365,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             </div>
           ) : (
             displayPosts.map((post) => {
-            const isLiked = !!post.isLiked;
+            const isLiked = isUserLiked(post.likersList, currentUser?.handle);
             const isSaved = !!post.isSaved;
             const replyText = inlineReplyTexts[post.id] || '';
 
@@ -1706,22 +1715,28 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   </div>
 
                   {/* 2. Heart / Like Button */}
-                  <button
-                    type="button"
-                    className={`tiktok-rail-btn like ${post.isLiked ? 'liked' : ''}`}
-                    onClick={() => onLike(post.id, post.contentUrl || post.videoUrl)}
-                    title={post.isLiked ? 'Unlike' : 'Like'}
-                    aria-label="Like"
-                  >
-                    <div className="tiktok-icon-wrap">
-                      <svg width="34" height="34" viewBox="0 0 24 24" fill={post.isLiked ? "#fe2c55" : "#ffffff"} className="tiktok-rail-icon">
-                        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                      </svg>
-                    </div>
-                    <span className="tiktok-rail-count">
-                      {post.likesCount >= 1000 ? `${(post.likesCount / 1000).toFixed(1)}k` : post.likesCount}
-                    </span>
-                  </button>
+                  {(() => {
+                    const isPostLiked = isUserLiked(post.likersList, currentUser?.handle);
+                    const likesDisplay = (post.likesCount || 0) >= 1000 ? `${((post.likesCount || 0) / 1000).toFixed(1)}k` : (post.likesCount || 0);
+                    return (
+                      <button
+                        type="button"
+                        className={`tiktok-rail-btn like ${isPostLiked ? 'liked' : ''}`}
+                        onClick={() => onLike(post.id, post.contentUrl || post.videoUrl)}
+                        title={isPostLiked ? 'Unlike' : 'Like'}
+                        aria-label="Like"
+                      >
+                        <div className="tiktok-icon-wrap">
+                          <svg width="34" height="34" viewBox="0 0 24 24" fill={isPostLiked ? "#fe2c55" : "#ffffff"} className="tiktok-rail-icon">
+                            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                          </svg>
+                        </div>
+                        <span className="tiktok-rail-count">
+                          {likesDisplay}
+                        </span>
+                      </button>
+                    );
+                  })()}
 
                   {/* 3. Comment Speech Bubble Button */}
                   <button
@@ -1905,7 +1920,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                 </div>
               ) : (
                 activeCommentPost.comments.map((comment) => {
-                  const isCommentLiked = !!comment.isLiked;
+                  const isCommentLiked = isUserLiked(comment.likersList, currentUser?.handle);
                   const isMyComment = comment.authorHandle === currentUser.handle || activeCommentPost.authorHandle === currentUser.handle;
 
                   return (
@@ -1968,7 +1983,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                       {comment.replies && comment.replies.length > 0 && (
                         <div className="tiktok-comment-replies-list">
                           {comment.replies.map((reply) => {
-                            const isReplyLiked = !!reply.isLiked;
+                            const isReplyLiked = isUserLiked(reply.likersList, currentUser?.handle);
                             const isMyReply = reply.authorHandle === currentUser.handle || activeCommentPost.authorHandle === currentUser.handle;
 
                             return (
