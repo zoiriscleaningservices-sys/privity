@@ -21,12 +21,12 @@ import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSy
 import { authService } from '../../services/authService';
 import { LiveBeautyEnhancementsModal, BEAUTY_FILTERS } from './LiveBeautyEnhancementsModal';
 import { LiveStudioControlsModal } from './LiveStudioControlsModal';
+import { LiveCoHostCreatorsModal } from './LiveCoHostCreatorsModal';
+import { LiveGoLiveGuestsModal } from './LiveGoLiveGuestsModal';
+import { LiveFilterCarouselTray, LIVE_FILTERS, FilterPreset } from './LiveFilterCarouselTray';
 import { LiveGiftGoalModal, StreamGiftGoal } from './LiveGiftGoalModal';
 import { LiveDailyLeaderboardModal } from './LiveDailyLeaderboardModal';
 import { broadcastViaSupabase, onSupabaseBroadcast } from '../../services/supabaseClient';
-import bubbleBattleImg from '../../assets/live-bubbles/bubble-battle.jpg';
-import bubbleBeautyImg from '../../assets/live-bubbles/bubble-beauty.jpg';
-import bubbleStudioImg from '../../assets/live-bubbles/bubble-studio.jpg';
 import './liveme.css';
 
 export interface LiveBroadcastSummaryData {
@@ -404,6 +404,27 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   // PK Battle Duel State (Default false: Stream starts in full-screen solo mode!)
   const [isPkBattleActive, setIsPkBattleActive] = useState(false);
   const [isPkMatchModalOpen, setIsPkMatchModalOpen] = useState(false);
+  const [isCoHostModalOpen, setIsCoHostModalOpen] = useState(false);
+  const [isGuestsModalOpen, setIsGuestsModalOpen] = useState(false);
+  const [isFilterTrayOpen, setIsFilterTrayOpen] = useState(false);
+  const [activeLiveFilter, setActiveLiveFilter] = useState<FilterPreset>(LIVE_FILTERS[0]);
+  const [showTapToUnmute, setShowTapToUnmute] = useState(false);
+  const [incomingInvite, setIncomingInvite] = useState<{
+    type: 'cohost' | 'guest';
+    senderName: string;
+    senderHandle: string;
+    senderAvatar: string;
+    timestamp: number;
+  } | null>(null);
+  const [floatingGuestPrompt, setFloatingGuestPrompt] = useState<{
+    name: string;
+    handle: string;
+    avatar: string;
+  } | null>({
+    name: 'lbma99',
+    handle: 'lbma99',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+  });
   const [hostPkScore, setHostPkScore] = useState(3);
   const [rivalPkScore, setRivalPkScore] = useState(4);
   const [battleRoundTimer, setBattleRoundTimer] = useState(121);
@@ -464,7 +485,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [isMuted, setIsMuted] = useState(false);
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [_isFullscreen, setIsFullscreen] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
 
   // Floating hearts
@@ -588,9 +609,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
     const filterObj = BEAUTY_FILTERS.find((f) => f.id === activeBeautyFilter);
     const presetFilter = filterObj && filterObj.cssFilter !== 'none' ? filterObj.cssFilter : '';
+    const liveFilterCss = activeLiveFilter && activeLiveFilter.cssFilter !== 'none' ? activeLiveFilter.cssFilter : '';
 
-    return `brightness(${b.toFixed(2)}) contrast(${c.toFixed(2)}) saturate(${s.toFixed(2)}) ${toneFilter} ${presetFilter}`.trim();
-  }, [skinLightening, skinSmoothing, skinTone, activeBeautyFilter]);
+    return `brightness(${b.toFixed(2)}) contrast(${c.toFixed(2)}) saturate(${s.toFixed(2)}) ${toneFilter} ${presetFilter} ${liveFilterCss}`.trim();
+  }, [skinLightening, skinSmoothing, skinTone, activeBeautyFilter, activeLiveFilter]);
 
   const handleResetBeauty = useCallback(() => {
     setSkinSmoothing(0);
@@ -961,7 +983,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               width: { ideal: 1280 },
               height: { ideal: 720 },
             },
-            audio: true,
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              sampleRate: 48000,
+              channelCount: 2,
+            },
           });
         } catch (tier1Err) {
           console.warn('LiveMe Tier 1 failed, trying video only:', tier1Err);
@@ -1019,6 +1047,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   echoCancellation: true,
                   noiseSuppression: true,
                   autoGainControl: true,
+                  sampleRate: 48000,
+                  channelCount: 2,
                 },
               });
               audioStream.getAudioTracks().forEach((at) => stream!.addTrack(at));
@@ -1026,6 +1056,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               console.warn('Microphone fallback acquisition error:', aErr);
             }
           }
+
+          // Ensure audio tracks are correctly toggled according to isMicMuted
+          stream.getAudioTracks().forEach((at) => {
+            at.enabled = !isMicMuted;
+          });
 
           bindStreamToVideos(stream);
           liveStreamSync.updateHostMediaStream(stream);
@@ -1635,6 +1670,42 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           return [...prev, evt.guest];
         });
         showToastRef.current(`🎤 @${evt.guest.name} joined as Co-Host Guest!`);
+      } else if (evt.type === 'COHOST_INVITE') {
+        const myHandle = (currentUser?.handle || '').toLowerCase().replace('@', '');
+        const targetHandle = (evt.targetHandle || '').toLowerCase().replace('@', '');
+        if (targetHandle === myHandle || (!isHost && targetHandle.includes('friend'))) {
+          setIncomingInvite({
+            type: 'cohost',
+            senderName: evt.senderName || 'Host',
+            senderHandle: evt.senderHandle || '@host',
+            senderAvatar: evt.senderAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+            timestamp: Date.now(),
+          });
+          showToastRef.current(`⚡ ${evt.senderName || 'Host'} invited you to Co-Host Battle!`);
+        }
+      } else if (evt.type === 'GUEST_INVITE') {
+        const myHandle = (currentUser?.handle || '').toLowerCase().replace('@', '');
+        const targetHandle = (evt.targetHandle || '').toLowerCase().replace('@', '');
+        if (targetHandle === myHandle || !isHost) {
+          setIncomingInvite({
+            type: 'guest',
+            senderName: evt.senderName || 'Host',
+            senderHandle: evt.senderHandle || '@host',
+            senderAvatar: evt.senderAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+            timestamp: Date.now(),
+          });
+          showToastRef.current(`🎤 ${evt.senderName || 'Host'} invited you to join the stage as a Guest!`);
+        }
+      } else if (evt.type === 'STREAM_FILTER_CHANGE' && evt.cssFilter) {
+        const matched = LIVE_FILTERS.find((f) => f.id === evt.filterId) || {
+          id: evt.filterId || 'custom',
+          name: 'Host Filter',
+          cssFilter: evt.cssFilter,
+          previewColor: '#ec4899',
+          icon: '✨',
+          emoji: '🌸',
+        };
+        setActiveLiveFilter(matched);
       } else if (evt.type === 'GUEST_DISCONNECTED' && evt.handle) {
         setActiveGuests((prev) => prev.filter((g) => g.handle !== evt.handle));
       }
@@ -2352,12 +2423,22 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   node.srcObject = remoteP2PStream;
                   node.setAttribute('playsinline', 'true');
                   node.setAttribute('webkit-playsinline', 'true');
-                  node.play().catch(() => {});
+                  node.muted = isMuted;
+                  const p = node.play();
+                  if (p !== undefined) {
+                    p.catch((err) => {
+                      console.warn('Autoplay unmuted blocked by browser policy:', err);
+                      node.muted = true;
+                      node.play().catch(() => {});
+                      setShowTapToUnmute(true);
+                    });
+                  }
                 }
               }}
               autoPlay
               playsInline
               muted={isMuted}
+              style={{ filter: activeLiveFilter.cssFilter !== 'none' ? activeLiveFilter.cssFilter : undefined }}
               className="liveme-video-canvas"
             />
           ) : remoteLiveFrame ? (
@@ -2818,16 +2899,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               </button>
             )}
 
-            {/* Close / End Live Button (Prominent X button at very top right) */}
+            {/* Close / End Live Button: Sleek TikTok Power Icon (⏻) without background */}
             <button
               type="button"
               id="liveme-end-broadcast-btn"
-              className="liveme-close-btn"
+              className="liveme-power-btn"
               onClick={isHost ? () => setIsConfirmEndOpen(true) : () => onClose({ wasEnded: false, isHost: false })}
               title={isHost ? 'End Broadcast' : 'Close Stream'}
               aria-label={isHost ? 'End Broadcast' : 'Close Stream'}
             >
-              ✕
+              <svg viewBox="0 0 24 24" width="22" height="22" stroke="#ffffff" strokeWidth="2.3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                <line x1="12" y1="2" x2="12" y2="12" />
+              </svg>
             </button>
           </div>
         </div>
@@ -3259,171 +3343,260 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {/* ================================================================ */}
         {/* 6. UNIFIED MODERN BOTTOM CONTROLS BAR                             */}
         {/* ================================================================ */}
+        {/* Floating In-Stream Guest Prompt Matching Screenshot 4 */}
+        {floatingGuestPrompt && isHost && !isFilterTrayOpen && (
+          <div className="tiktok-floating-guest-pill">
+            <img src={floatingGuestPrompt.avatar} alt="" className="pill-avatar" />
+            <span className="pill-text">Invite {floatingGuestPrompt.name} to join as a guest</span>
+            <button
+              type="button"
+              className="pill-invite-btn"
+              onClick={() => {
+                showToast(`📩 Invited ${floatingGuestPrompt.name} to join as guest!`);
+                setFloatingGuestPrompt(null);
+              }}
+            >
+              Invite
+            </button>
+            <button
+              type="button"
+              className="pill-dismiss-btn"
+              onClick={() => setFloatingGuestPrompt(null)}
+              aria-label="Dismiss guest prompt"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Tap to Unmute Overlay for Viewers */}
+        {showTapToUnmute && !isHost && (
+          <div
+            className="tiktok-tap-to-unmute-badge"
+            onClick={() => {
+              setShowTapToUnmute(false);
+              setIsMuted(false);
+              if (videoRef.current) {
+                videoRef.current.muted = false;
+                videoRef.current.volume = 1.0;
+                videoRef.current.play().catch(() => {});
+              }
+              showToast('🔊 Live Sound Unmuted');
+            }}
+          >
+            <span>🔇</span>
+            <span>Tap to unmute live audio</span>
+          </div>
+        )}
+
+        {/* ================================================================ */}
+        {/* 6. UNIFIED MODERN BOTTOM CONTROLS BAR (MATCHING SCREENSHOT 4)    */}
+        {/* ================================================================ */}
         {arenaMode !== 'stream_hud' && (
           <div className="liveme-bottom-bar">
-          {/* Chat Input Form (Type... with Smiley) */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (chatInput.trim()) {
-                handleSendChat(e);
-              } else {
-                setIsChatExpanded(true);
-                setTimeout(() => expandedInputRef.current?.focus(), 80);
-              }
-            }}
-            className="liveme-input-form"
-          >
-            <div
-              className={`liveme-chat-input-wrap ${isUserMuted ? 'muted' : ''}`}
-              onClick={() => {
-                if (!isUserMuted) {
+            {/* Left 1: Battle / Co-Host Matchmaker (Dual Infinity Gradient Rings) */}
+            <button
+              type="button"
+              className={`tiktok-tool-btn battle ${isPkBattleActive ? 'active' : ''}`}
+              onClick={() => setIsCoHostModalOpen(true)}
+              title="Co-host with creators & Battles"
+            >
+              <svg viewBox="0 0 28 28" width="22" height="22" fill="none">
+                <defs>
+                  <linearGradient id="tkBattleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#ec4899" />
+                    <stop offset="100%" stopColor="#06b6d4" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M8.5 9C6.01472 9 4 11.0147 4 13.5C4 15.9853 6.01472 18 8.5 18C10.7423 18 12.336 16.3813 14 14C15.664 11.6187 17.2577 10 19.5 10C21.9853 10 24 12.0147 24 14.5C24 16.9853 21.9853 19 19.5 19C17.2577 19 15.664 17.3813 14 15C12.336 12.6187 10.7423 11 8.5 11"
+                  stroke="url(#tkBattleGrad)"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+              {isPkBattleActive && <span className="badge-pill">PK</span>}
+            </button>
+
+            {/* Left 2: Guests / Multi-Guest Icon */}
+            <button
+              type="button"
+              className="tiktok-tool-btn guests"
+              onClick={() => setIsGuestsModalOpen(true)}
+              title="Go LIVE with guests"
+            >
+              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              {activeGuests.length > 0 && <span className="badge-pill">{activeGuests.length}</span>}
+            </button>
+
+            {/* Center: Chat Input Form (Type... with Smiley) */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (chatInput.trim()) {
+                  handleSendChat(e);
+                } else {
                   setIsChatExpanded(true);
                   setTimeout(() => expandedInputRef.current?.focus(), 80);
                 }
               }}
+              className="liveme-input-form"
             >
-              <input
-                type="text"
-                className="liveme-chat-input"
-                placeholder={isUserMuted ? "🔇 You are muted by the host" : "Type..."}
-                value={chatInput}
-                disabled={isUserMuted}
-                onFocus={() => {
+              <div
+                className={`liveme-chat-input-wrap ${isUserMuted ? 'muted' : ''}`}
+                onClick={() => {
                   if (!isUserMuted) {
                     setIsChatExpanded(true);
-                    setTimeout(() => expandedInputRef.current?.focus(), 80);
-                  }
-                }}
-                onChange={(e) => setChatInput(e.target.value)}
-              />
-              <button
-                type="button"
-                className="liveme-chat-smiley-btn"
-                disabled={isUserMuted}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!isUserMuted) {
-                    setIsChatExpanded(true);
-                    setChatInput((prev) => prev + ' 😊');
                     setTimeout(() => expandedInputRef.current?.focus(), 80);
                   }
                 }}
               >
-                😊
-              </button>
-            </div>
-          </form>
-
-          {/* Right Toolbar Action Icons */}
-          <div className="liveme-toolbar-actions">
-            {isHost ? (
-              <div className="liveme-host-bubbles-dock">
-                {/* Bubble 1: Battle & Guests */}
+                <input
+                  type="text"
+                  className="liveme-chat-input"
+                  placeholder={isUserMuted ? "🔇 You are muted by the host" : "Add a comment..."}
+                  value={chatInput}
+                  disabled={isUserMuted}
+                  onFocus={() => {
+                    if (!isUserMuted) {
+                      setIsChatExpanded(true);
+                      setTimeout(() => expandedInputRef.current?.focus(), 80);
+                    }
+                  }}
+                  onChange={(e) => setChatInput(e.target.value)}
+                />
                 <button
                   type="button"
-                  className={`liveme-host-bubble-btn battle ${isPkBattleActive ? 'active' : ''}`}
-                  onClick={() => setIsPkMatchModalOpen(true)}
-                  title="Battle Matchmaker & Co-Host Guests"
+                  className="liveme-chat-smiley-btn"
+                  disabled={isUserMuted}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!isUserMuted) {
+                      setIsChatExpanded(true);
+                      setChatInput((prev) => prev + ' 😊');
+                      setTimeout(() => expandedInputRef.current?.focus(), 80);
+                    }
+                  }}
                 >
-                  <img
-                    src={bubbleBattleImg}
-                    alt=""
-                    loading="eager"
-                    className="liveme-host-bubble-img"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                  {isPkBattleActive && <span className="liveme-host-bubble-badge">PK</span>}
-                  {activeGuests.length > 0 && <span className="liveme-host-bubble-badge">{activeGuests.length}</span>}
-                </button>
-
-                {/* Bubble 2: Beauty & Enhancements */}
-                <button
-                  type="button"
-                  className="liveme-host-bubble-btn beauty"
-                  onClick={() => setIsBeautyModalOpen(true)}
-                  title="Beauty Filters & Skin Enhancements"
-                >
-                  <img
-                    src={bubbleBeautyImg}
-                    alt=""
-                    loading="eager"
-                    className="liveme-host-bubble-img"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                </button>
-
-                {/* Bubble 3: Studio & Dual Camera Controls */}
-                <button
-                  type="button"
-                  className="liveme-host-bubble-btn studio"
-                  onClick={() => setIsStudioModalOpen(true)}
-                  title="Studio Controls, Mirror, Mic & Dual Camera"
-                >
-                  <img
-                    src={bubbleStudioImg}
-                    alt=""
-                    loading="eager"
-                    className="liveme-host-bubble-img"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                  {micAudioLevel > 15 && !isMicMuted && <span className="liveme-host-bubble-vu-ring" />}
-                  {isDualCameraActive && <span className="liveme-host-bubble-badge">2</span>}
-                  {isMicMuted && <span className="liveme-host-bubble-badge">🔇</span>}
+                  😊
                 </button>
               </div>
-            ) : (
-              <>
-                {/* Share Button */}
-                <button
-                  type="button"
-                  className="liveme-tool-btn"
-                  onClick={handleShareStream}
-                  title="Share Stream"
-                >
-                  ↗️
-                </button>
+            </form>
 
-                {/* Mute Button */}
-                <button
-                  type="button"
-                  className="liveme-tool-btn"
-                  onClick={() => setIsMuted(!isMuted)}
-                  title={isMuted ? 'Unmute' : 'Mute'}
-                >
-                  {isMuted ? '🔇' : '🔊'}
-                </button>
+            {/* Right Toolbar Action Icons Matching Screenshot 4 */}
+            <div className="liveme-toolbar-actions">
+              {isHost ? (
+                <>
+                  {/* Share Button */}
+                  <button
+                    type="button"
+                    className="tiktok-tool-btn share"
+                    onClick={handleShareStream}
+                    title="Share Stream"
+                  >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                      <polyline points="16 6 12 2 8 6" />
+                      <line x1="12" y1="2" x2="12" y2="15" />
+                    </svg>
+                  </button>
 
-                {/* Fullscreen Button */}
-                <button
-                  type="button"
-                  className="liveme-tool-btn"
-                  onClick={handleToggleFullscreen}
-                  title="Toggle Fullscreen"
-                >
-                  {isFullscreen ? '⤦' : '⛶'}
-                </button>
+                  {/* Magic Pen / Filters Carousel Button */}
+                  <button
+                    type="button"
+                    className={`tiktok-tool-btn magic-pen ${isFilterTrayOpen ? 'active' : ''}`}
+                    onClick={() => setIsFilterTrayOpen(!isFilterTrayOpen)}
+                    title="Open AR & Beauty Filters"
+                  >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                    </svg>
+                  </button>
 
-                {/* 3D Glowing Pink Gift Box Button (Viewers only, NOT host) */}
-                <button
-                  type="button"
-                  className="liveme-gift-box-trigger"
-                  onClick={() => setIsGiftTrayOpen(!isGiftTrayOpen)}
-                  title="Open Gift Tray"
-                >
-                  🎁
-                </button>
-              </>
-            )}
+                  {/* Host Studio Tools (Three Dots •••) */}
+                  <button
+                    type="button"
+                    className="tiktok-tool-btn more-tools"
+                    onClick={() => setIsStudioModalOpen(true)}
+                    title="Host Studio Settings & Tools"
+                  >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                      <circle cx="5" cy="12" r="2" />
+                      <circle cx="12" cy="12" r="2" />
+                      <circle cx="19" cy="12" r="2" />
+                    </svg>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Share Button */}
+                  <button
+                    type="button"
+                    className="tiktok-tool-btn share"
+                    onClick={handleShareStream}
+                    title="Share Stream"
+                  >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                      <polyline points="16 6 12 2 8 6" />
+                      <line x1="12" y1="2" x2="12" y2="15" />
+                    </svg>
+                  </button>
+
+                  {/* Mute / Unmute Button */}
+                  <button
+                    type="button"
+                    className="tiktok-tool-btn mute"
+                    onClick={() => {
+                      const next = !isMuted;
+                      setIsMuted(next);
+                      showToast(next ? '🔇 Stream Muted' : '🔊 Stream Audio Unmuted');
+                    }}
+                    title={isMuted ? 'Unmute' : 'Mute'}
+                  >
+                    {isMuted ? '🔇' : '🔊'}
+                  </button>
+
+                  {/* 3D Glowing Pink Gift Box Button */}
+                  <button
+                    type="button"
+                    className="liveme-gift-box-trigger"
+                    onClick={() => setIsGiftTrayOpen(!isGiftTrayOpen)}
+                    title="Open Gift Tray"
+                  >
+                    🎁
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
         )}
+
+        {/* 7. TIKTOK AR & BEAUTY FILTER CAROUSEL TRAY (Toggled by the Magic Pen ✏️) */}
+        <LiveFilterCarouselTray
+          isOpen={isFilterTrayOpen}
+          onClose={() => setIsFilterTrayOpen(false)}
+          activeFilterId={activeLiveFilter.id}
+          onSelectFilter={(filter) => {
+            setActiveLiveFilter(filter);
+            if (isHost) {
+              const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+              liveStreamSync.sendRoomEvent(roomId, {
+                type: 'STREAM_FILTER_CHANGE',
+                filterId: filter.id,
+                cssFilter: filter.cssFilter,
+              });
+            }
+          }}
+          onToggleFullscreen={handleToggleFullscreen}
+          showToast={showToast}
+        />
 
         {/* 6b. EXPANDED REAL-APP TYPING DOCK (Opens when clicking to type for full message visibility) */}
         {isChatExpanded && (
@@ -3700,6 +3873,122 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         onInviteGuest={handleInviteGuest}
         onRemoveGuest={handleRemoveGuest}
       />
+
+      {/* ================================================================ */}
+      {/* 9A. TIKTOK CO-HOST WITH CREATORS & BATTLES MODAL (SCREENSHOT 1) */}
+      {/* ================================================================ */}
+      <LiveCoHostCreatorsModal
+        isOpen={isCoHostModalOpen}
+        onClose={() => setIsCoHostModalOpen(false)}
+        currentHostName={currentUser.name}
+        currentHostHandle={currentUser.handle}
+        currentHostAvatar={currentUser.avatar}
+        onStartBattle={(rival) => {
+          setPkRival(rival);
+          setIsPkBattleActive(true);
+          isPkBattleActiveRef.current = true;
+          setHostPkScore(3);
+          setRivalPkScore(4);
+          setBattleRoundTimer(121);
+          setBattleWinner(null);
+          const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+          liveStreamSync.sendRoomEvent(roomId, {
+            type: 'PK_BATTLE_START',
+            rival,
+            hostScore: 3,
+            rivalScore: 4,
+            roundTimer: 121,
+          });
+        }}
+        showToast={showToast}
+      />
+
+      {/* ================================================================ */}
+      {/* 9B. TIKTOK GO LIVE WITH GUESTS BOTTOM SHEET (SCREENSHOT 3)      */}
+      {/* ================================================================ */}
+      <LiveGoLiveGuestsModal
+        isOpen={isGuestsModalOpen}
+        onClose={() => setIsGuestsModalOpen(false)}
+        currentHostName={currentUser.name}
+        currentHostHandle={currentUser.handle}
+        currentHostAvatar={currentUser.avatar}
+        activeAudience={activeAudience}
+        activeGuests={activeGuests}
+        cameraFacing={cameraFacing}
+        isVideoOff={isVideoOff}
+        onToggleVideo={handleToggleVideo}
+        onFlipCamera={handleFlipCamera}
+        onInviteGuest={handleInviteGuest}
+        onRemoveGuest={handleRemoveGuest}
+        showToast={showToast}
+      />
+
+      {/* ================================================================ */}
+      {/* 9C. INCOMING INVITATION PROMPT BANNER FOR RECIPIENTS             */}
+      {/* ================================================================ */}
+      {incomingInvite && (
+        <div className="tiktok-incoming-invite-banner">
+          <img src={incomingInvite.senderAvatar} alt="" className="invite-avatar" />
+          <div className="invite-text">
+            <span className="invite-name">{incomingInvite.senderName}</span>
+            <span className="invite-sub">
+              {incomingInvite.type === 'cohost'
+                ? 'invited you to Co-Host & Battle!'
+                : 'invited you to join as a Guest!'}
+            </span>
+          </div>
+          <div className="invite-actions">
+            <button
+              type="button"
+              className="invite-accept-btn"
+              onClick={() => {
+                const invite = incomingInvite;
+                setIncomingInvite(null);
+                if (invite.type === 'cohost') {
+                  const rivalStreamer: LiveMeStreamer = {
+                    id: `rival-${invite.senderHandle}`,
+                    name: invite.senderName,
+                    handle: invite.senderHandle.startsWith('@') ? invite.senderHandle : `@${invite.senderHandle}`,
+                    avatar: invite.senderAvatar,
+                    title: 'Live PK Battle',
+                    description: 'PK battle stream duel',
+                    viewersCount: 24,
+                    likesCount: 5000,
+                    category: 'Battle',
+                    videoStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+                    posterUrl: invite.senderAvatar,
+                    isVerified: true,
+                    diamonds: 500,
+                    totalViews: '2.5K',
+                    popularity: 'Hot',
+                    tags: ['Battle', 'CoHost'],
+                    topContributors: [],
+                  };
+                  setPkRival(rivalStreamer);
+                  setIsPkBattleActive(true);
+                  isPkBattleActiveRef.current = true;
+                  setHostPkScore(3);
+                  setRivalPkScore(4);
+                  setBattleRoundTimer(121);
+                  showToast(`⚔️ Connected with ${invite.senderName} for Live Battle!`);
+                } else {
+                  showToast(`🎤 Joined stage as guest!`);
+                }
+              }}
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              className="invite-decline-btn"
+              onClick={() => setIncomingInvite(null)}
+              aria-label="Decline invitation"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ================================================================ */}
       {/* 10. AUTHENTIC LIVEME RECHARGE MODAL                              */}

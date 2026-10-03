@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 export interface LiveStudioControlsModalProps {
   isOpen: boolean;
@@ -13,21 +13,20 @@ export interface LiveStudioControlsModalProps {
   // Audio Controls
   isMicMuted: boolean;
   onToggleMic: () => void;
-  micAudioLevel: number;
-  isAudioMonitoring: boolean;
-  onToggleAudioMonitoring: () => void;
+  micAudioLevel?: number;
+  isAudioMonitoring?: boolean;
+  onToggleAudioMonitoring?: () => void;
   // Dual Camera Controls
-  isDualCameraActive: boolean;
-  onToggleDualCamera: () => void;
-  dualCameraPosition: 'top-right' | 'top-left' | 'bottom-right' | 'split';
-  onChangeDualCameraPosition?: (pos: 'top-right' | 'top-left' | 'bottom-right' | 'split') => void;
+  isDualCameraActive?: boolean;
+  onToggleDualCamera?: () => void;
+  dualCameraPosition?: 'top-right' | 'top-left' | 'bottom-right' | 'split';
   onChangeDualPosition?: (pos: 'top-right' | 'top-left' | 'bottom-right' | 'split') => void;
-  onSwapDualCameras: () => void;
+  onSwapDualCameras?: () => void;
   isDualSwapped?: boolean;
   // Moderation Panel Trigger
   restrictedCount?: number;
   moderationCount?: number;
-  onOpenModeration: () => void;
+  onOpenModeration?: () => void;
   showToast?: (msg: string) => void;
 }
 
@@ -42,225 +41,297 @@ export const LiveStudioControlsModal: React.FC<LiveStudioControlsModalProps> = (
   onToggleVideo,
   isMicMuted,
   onToggleMic,
-  micAudioLevel,
-  isAudioMonitoring,
+  micAudioLevel = 0,
+  isAudioMonitoring = false,
   onToggleAudioMonitoring,
-  isDualCameraActive,
-  onToggleDualCamera,
-  dualCameraPosition,
-  onChangeDualCameraPosition,
-  onChangeDualPosition,
-  onSwapDualCameras,
-  isDualSwapped: _isDualSwapped,
-  restrictedCount = 0,
-  moderationCount,
   onOpenModeration,
-  showToast,
+  showToast = () => {},
 }) => {
-  const handleChangeDualPos = onChangeDualPosition || onChangeDualCameraPosition || (() => {});
-  const activeRestrictedCount = moderationCount ?? restrictedCount;
+  const [isGridCollapsed, setIsGridCollapsed] = useState(false);
+  const [activePollActive, setActivePollActive] = useState(false);
+  const [treasureBoxActive, setTreasureBoxActive] = useState(false);
+  const [fanBoxActive, setFanBoxActive] = useState(false);
 
   if (!isOpen) return null;
 
   return (
-    <div className="liveme-studio-modal-backdrop" onClick={onClose}>
-      <div className="liveme-studio-modal-sheet" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="liveme-studio-modal-header">
-          <div className="liveme-studio-header-title">
-            <span className="liveme-studio-header-icon">🎛️</span>
-            <div>
-              <h3>Host Studio Controls</h3>
-              <p>Hardware camera, microphone, dual camera & stream settings</p>
-            </div>
-          </div>
-          <button type="button" className="liveme-studio-close-btn" onClick={onClose}>
-            ✕
-          </button>
-        </div>
+    <div className="tiktok-sheet-backdrop" onClick={onClose}>
+      <div className="tiktok-studio-sheet" onClick={(e) => e.stopPropagation()}>
+        {/* Top Sheet Grabber */}
+        <div className="tiktok-sheet-grabber" />
 
-        {/* Section 1: Quick Camera & Mic Hardware Grid */}
-        <div className="liveme-studio-grid">
-          {/* Flip Camera */}
+        {/* Section 1: Top 4 Hardware Buttons Row Matching Screenshot 2 */}
+        <div className="tiktok-studio-hardware-row">
+          {/* Button 1: Flip Camera */}
           <button
             type="button"
-            className="liveme-studio-card-btn"
+            className="tiktok-studio-hardware-btn"
             onClick={() => {
               onFlipCamera();
-              if (showToast) showToast(`🔄 Camera switched to ${cameraFacing === 'user' ? 'Back (Environment)' : 'Front (Selfie)'}`);
+              showToast(`🔄 Camera flipped to ${cameraFacing === 'user' ? 'Back' : 'Front'}`);
             }}
+            title="Flip Camera (Front/Back)"
           >
-            <span className="liveme-studio-card-icon">🔄</span>
-            <div className="liveme-studio-card-text">
-              <span className="title">Flip Camera</span>
-              <span className="sub">{cameraFacing === 'user' ? 'Front (Selfie)' : 'Back Camera'}</span>
-            </div>
-            <span className="liveme-studio-card-pill">Switch</span>
+            <span className="icon">🔄</span>
           </button>
 
-          {/* Mirror Camera */}
+          {/* Button 2: Mirror Camera */}
           <button
             type="button"
-            className={`liveme-studio-card-btn ${isMirrored ? 'active' : ''}`}
+            className={`tiktok-studio-hardware-btn ${isMirrored ? 'active' : ''}`}
             onClick={() => {
               onToggleMirror();
-              if (showToast) showToast(isMirrored ? '🪞 Mirroring turned OFF' : '🪞 Mirroring turned ON');
+              showToast(isMirrored ? '🪞 Mirroring Disabled' : '🪞 Mirroring Enabled');
             }}
+            title="Mirror Camera Video"
           >
-            <span className="liveme-studio-card-icon">🪞</span>
-            <div className="liveme-studio-card-text">
-              <span className="title">Mirror Camera</span>
-              <span className="sub">{isMirrored ? 'Reflection ON' : 'Standard View'}</span>
-            </div>
-            <span className={`liveme-studio-card-pill ${isMirrored ? 'on' : ''}`}>
-              {isMirrored ? 'ON' : 'OFF'}
-            </span>
+            <span className="icon">🪞</span>
           </button>
 
-          {/* Mute Microphone */}
+          {/* Button 3: Microphone Toggle */}
           <button
             type="button"
-            className={`liveme-studio-card-btn ${isMicMuted ? 'danger' : ''}`}
+            className={`tiktok-studio-hardware-btn ${isMicMuted ? 'muted' : ''}`}
             onClick={() => {
               onToggleMic();
-              if (showToast) showToast(isMicMuted ? '🎙️ Microphone Unmuted' : '🔇 Microphone Muted');
+              showToast(isMicMuted ? '🎙️ Microphone Unmuted' : '🔇 Microphone Muted');
             }}
+            title={isMicMuted ? 'Unmute Microphone' : 'Mute Microphone'}
           >
-            <span className="liveme-studio-card-icon">{isMicMuted ? '🔇' : '🎙️'}</span>
-            <div className="liveme-studio-card-text">
-              <span className="title">Microphone</span>
-              <span className="sub">{isMicMuted ? 'Muted' : `Active · Level: ${micAudioLevel}%`}</span>
-            </div>
-            <span className={`liveme-studio-card-pill ${isMicMuted ? 'off' : 'on'}`}>
-              {isMicMuted ? 'MUTED' : 'LIVE'}
-            </span>
+            <span className="icon">{isMicMuted ? '🔇' : '🎙️'}</span>
+            {micAudioLevel > 15 && !isMicMuted && <span className="vu-dot" />}
           </button>
 
-          {/* Turn Camera Off / On */}
+          {/* Button 4: Pause LIVE / Video */}
           <button
             type="button"
-            className={`liveme-studio-card-btn ${isVideoOff ? 'danger' : ''}`}
+            className={`tiktok-studio-hardware-btn ${isVideoOff ? 'paused' : ''}`}
             onClick={() => {
               onToggleVideo();
-              if (showToast) showToast(isVideoOff ? '📹 Video Stream Resumed' : '🚫 Video Stream Paused');
+              showToast(isVideoOff ? '▶️ LIVE Video Resumed' : '⏸️ LIVE Video Paused');
             }}
+            title={isVideoOff ? 'Resume LIVE Stream' : 'Pause LIVE Stream'}
           >
-            <span className="liveme-studio-card-icon">{isVideoOff ? '🚫' : '📹'}</span>
-            <div className="liveme-studio-card-text">
-              <span className="title">Camera Video</span>
-              <span className="sub">{isVideoOff ? 'Camera Paused' : 'Broadcasting Live'}</span>
-            </div>
-            <span className={`liveme-studio-card-pill ${isVideoOff ? 'off' : 'on'}`}>
-              {isVideoOff ? 'OFF' : 'ON'}
-            </span>
+            <span className="icon">{isVideoOff ? '▶️' : '⏸️'}</span>
           </button>
         </div>
 
-        {/* Audio VU Monitor Gauge */}
-        <div className="liveme-studio-vu-container">
-          <div className="liveme-studio-vu-header">
-            <span>🎙️ Microphone Input Volume</span>
-            <span className="liveme-studio-vu-db">{isMicMuted ? 'MUTED' : `${micAudioLevel}%`}</span>
-          </div>
-          <div className="liveme-studio-vu-bar-track">
-            <div
-              className={`liveme-studio-vu-bar-fill ${isMicMuted ? 'muted' : ''}`}
-              style={{ width: `${isMicMuted ? 0 : micAudioLevel}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Section 2: DUAL CAMERA EXPERIENCE */}
-        <div className="liveme-studio-section">
-          <div className="liveme-studio-section-title">
-            <div className="left">
-              <span className="icon">📷</span>
-              <div>
-                <h4>Dual Camera Mode</h4>
-                <p>Simultaneous front & back camera PIP or screen share</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              className={`liveme-studio-toggle-switch ${isDualCameraActive ? 'active' : ''}`}
-              onClick={() => {
-                onToggleDualCamera();
-                if (showToast) showToast(isDualCameraActive ? 'Dual Camera Turned OFF' : 'Dual Camera Activated! Both views are active.');
-              }}
-            >
-              <span className="thumb" />
-            </button>
-          </div>
-
-          {isDualCameraActive && (
-            <div className="liveme-dual-camera-options">
-              <div className="liveme-dual-layout-picker">
-                <span className="label">PIP Position:</span>
-                {(['top-right', 'top-left', 'bottom-right', 'split'] as const).map((pos) => (
-                  <button
-                    key={pos}
-                    type="button"
-                    className={`liveme-dual-pos-btn ${dualCameraPosition === pos ? 'active' : ''}`}
-                    onClick={() => {
-                      handleChangeDualPos(pos);
-                      if (showToast) showToast(`Dual view position set to ${pos.replace('-', ' ').toUpperCase()}`);
-                    }}
-                  >
-                    {pos === 'top-right' ? '↗️ Top-Right' : pos === 'top-left' ? '↖️ Top-Left' : pos === 'bottom-right' ? '↘️ Bottom-Right' : '🔲 50/50 Split'}
-                  </button>
-                ))}
-              </div>
-
+        {/* Section 2: 8-Tool Feature Grid in Rounded Card Matching Screenshot 2 */}
+        <div className="tiktok-studio-card-container">
+          {!isGridCollapsed && (
+            <div className="tiktok-studio-tools-grid">
+              {/* 1. Poll & Gift vote */}
               <button
                 type="button"
-                className="liveme-dual-swap-btn"
+                className={`tiktok-studio-tool-item ${activePollActive ? 'active' : ''}`}
                 onClick={() => {
-                  onSwapDualCameras();
-                  if (showToast) showToast('🔄 Main and PIP cameras swapped!');
+                  setActivePollActive(!activePollActive);
+                  showToast('📊 Poll & Gift Vote triggered for audience!');
                 }}
               >
-                🔄 Swap Main & Secondary Cameras
+                <div className="tool-icon-wrap">
+                  <span className="tool-icon">📊</span>
+                </div>
+                <span className="tool-label">Poll & Gift vote</span>
+              </button>
+
+              {/* 2. Draw & Guess */}
+              <button
+                type="button"
+                className="tiktok-studio-tool-item"
+                onClick={() => showToast('✏️ Draw & Guess mini-game started!')}
+              >
+                <div className="tool-icon-wrap">
+                  <span className="tool-icon">✏️</span>
+                </div>
+                <span className="tool-label">Draw & Guess</span>
+              </button>
+
+              {/* 3. Playbook */}
+              <button
+                type="button"
+                className="tiktok-studio-tool-item"
+                onClick={() => showToast('📖 Creator Playbook & Tips opened')}
+              >
+                <div className="tool-icon-wrap">
+                  <span className="tool-icon">📖</span>
+                </div>
+                <span className="tool-label">Playbook</span>
+              </button>
+
+              {/* 4. Treasure Box */}
+              <button
+                type="button"
+                className={`tiktok-studio-tool-item ${treasureBoxActive ? 'active' : ''}`}
+                onClick={() => {
+                  setTreasureBoxActive(!treasureBoxActive);
+                  showToast('📦 Countdown Treasure Box dropped in stream!');
+                }}
+              >
+                <div className="tool-icon-wrap">
+                  <span className="tool-icon">📦</span>
+                </div>
+                <span className="tool-label">Treasure Box</span>
+              </button>
+
+              {/* 5. Super Fan Box */}
+              <button
+                type="button"
+                className={`tiktok-studio-tool-item ${fanBoxActive ? 'active' : ''}`}
+                onClick={() => {
+                  setFanBoxActive(!fanBoxActive);
+                  showToast('💝 Super Fan Box active for top gifters!');
+                }}
+              >
+                <div className="tool-icon-wrap">
+                  <span className="tool-icon">💝</span>
+                </div>
+                <span className="tool-label">Super Fan Box</span>
+              </button>
+
+              {/* 6. AI wallpaper */}
+              <button
+                type="button"
+                className="tiktok-studio-tool-item"
+                onClick={() => showToast('🖼️ AI Wallpaper Studio: Green screen background generated')}
+              >
+                <div className="tool-icon-wrap">
+                  <span className="tool-icon">🖼️</span>
+                  <span className="red-badge-dot" />
+                </div>
+                <span className="tool-label">AI wallpaper</span>
+              </button>
+
+              {/* 7. Viewer Wishes */}
+              <button
+                type="button"
+                className="tiktok-studio-tool-item"
+                onClick={() => showToast('✨ Viewer Wishes & Goal Wishlist opened')}
+              >
+                <div className="tool-icon-wrap">
+                  <span className="tool-icon">✨</span>
+                </div>
+                <span className="tool-label">Viewer Wishes</span>
+              </button>
+
+              {/* 8. Songs of LIVE */}
+              <button
+                type="button"
+                className="tiktok-studio-tool-item"
+                onClick={() => showToast('💿 Songs of LIVE: Background playlist & karaoke cue')}
+              >
+                <div className="tool-icon-wrap">
+                  <span className="tool-icon">💿</span>
+                </div>
+                <span className="tool-label">Songs of LIVE</span>
               </button>
             </div>
           )}
-        </div>
 
-        {/* Section 3: In-Ear Voice Monitoring & Moderation Panel */}
-        <div className="liveme-studio-row-extras">
-          {/* Voice Monitoring */}
+          {/* Toggle Less / More link */}
           <button
             type="button"
-            className={`liveme-studio-pill-action ${isAudioMonitoring ? 'active' : ''}`}
-            onClick={() => {
-              onToggleAudioMonitoring();
-              if (showToast) showToast(isAudioMonitoring ? '🎧 Voice Monitoring OFF' : '🎧 Voice Monitoring ON (Listen in headphones)');
-            }}
+            className="tiktok-studio-less-btn"
+            onClick={() => setIsGridCollapsed(!isGridCollapsed)}
           >
-            <span>🎧</span>
-            <span>Hear Myself (Monitoring)</span>
-            <span className="indicator">{isAudioMonitoring ? 'ON' : 'OFF'}</span>
-          </button>
-
-          {/* Moderation Panel */}
-          <button
-            type="button"
-            className="liveme-studio-pill-action"
-            onClick={() => {
-              onClose();
-              onOpenModeration();
-            }}
-          >
-            <span>🛡️</span>
-            <span>Room Moderation</span>
-            {activeRestrictedCount > 0 && <span className="mod-count">{activeRestrictedCount}</span>}
+            {isGridCollapsed ? 'More ⌄' : 'Less ⌃'}
           </button>
         </div>
 
-        {/* Footer Done */}
-        <div className="liveme-studio-footer">
-          <button type="button" className="liveme-studio-done-btn" onClick={onClose}>
-            ✓ Done
-          </button>
+        {/* Section 3: Bottom Menu Settings List Matching Screenshot 2 */}
+        <div className="tiktok-studio-menu-list">
+          {/* Item 1: LIVE Gifts */}
+          <div
+            className="tiktok-studio-menu-item"
+            onClick={() => showToast('🎁 LIVE Gifts & Gifting Permissions')}
+          >
+            <div className="menu-left">
+              <span className="menu-icon">🎁</span>
+              <span className="menu-title">LIVE Gifts</span>
+            </div>
+            <div className="menu-right">
+              <span className="menu-red-dot" />
+              <span className="menu-chevron">›</span>
+            </div>
+          </div>
+
+          {/* Item 2: Comment */}
+          <div
+            className="tiktok-studio-menu-item"
+            onClick={() => {
+              if (onOpenModeration) onOpenModeration();
+              else showToast('💬 Comment settings & Keyword Filter');
+            }}
+          >
+            <div className="menu-left">
+              <span className="menu-icon">💬</span>
+              <span className="menu-title">Comment</span>
+            </div>
+            <div className="menu-right">
+              <span className="menu-chevron">›</span>
+            </div>
+          </div>
+
+          {/* Item 3: About me */}
+          <div
+            className="tiktok-studio-menu-item"
+            onClick={() => showToast('📋 Host Bio & Introduction Card')}
+          >
+            <div className="menu-left">
+              <span className="menu-icon">📋</span>
+              <span className="menu-title">About me</span>
+            </div>
+            <div className="menu-right">
+              <span className="menu-sub-text">Shown</span>
+              <span className="menu-chevron">›</span>
+            </div>
+          </div>
+
+          {/* Item 4: LIVE title */}
+          <div
+            className="tiktok-studio-menu-item"
+            onClick={() => showToast('✏️ Edit LIVE Stream Title & Topic')}
+          >
+            <div className="menu-left">
+              <span className="menu-icon">✏️</span>
+              <span className="menu-title">LIVE title</span>
+            </div>
+            <div className="menu-right">
+              <span className="menu-chevron">›</span>
+            </div>
+          </div>
+
+          {/* Item 5: Campaigns */}
+          <div
+            className="tiktok-studio-menu-item"
+            onClick={() => showToast('⭐ Creator Campaigns & Bonus Challenges')}
+          >
+            <div className="menu-left">
+              <span className="menu-icon">⭐</span>
+              <span className="menu-title">Campaigns</span>
+            </div>
+            <div className="menu-right">
+              <span className="menu-sub-badge">New</span>
+              <span className="menu-chevron">›</span>
+            </div>
+          </div>
+
+          {/* Voice Monitoring Extra Option */}
+          {onToggleAudioMonitoring && (
+            <div
+              className="tiktok-studio-menu-item"
+              onClick={onToggleAudioMonitoring}
+            >
+              <div className="menu-left">
+                <span className="menu-icon">🎧</span>
+                <span className="menu-title">Earphone Audio Monitoring</span>
+              </div>
+              <div className="menu-right">
+                <span className="menu-sub-text">{isAudioMonitoring ? 'ON' : 'OFF'}</span>
+                <span className="menu-chevron">›</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

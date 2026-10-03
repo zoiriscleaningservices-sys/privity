@@ -610,6 +610,23 @@ class LiveStreamSyncService {
 
   public updateHostMediaStream(stream: MediaStream | null) {
     this.hostMediaStream = stream;
+    if (stream) {
+      this.hostPeerConnections.forEach((pc) => {
+        try {
+          const senders = pc.getSenders();
+          stream.getTracks().forEach((track) => {
+            const sender = senders.find((s) => s.track?.kind === track.kind);
+            if (sender) {
+              sender.replaceTrack(track).catch(() => {});
+            } else {
+              pc.addTrack(track, stream);
+            }
+          });
+        } catch (e) {
+          console.warn('Privity live error replacing tracks on pc:', e);
+        }
+      });
+    }
   }
 
   // =========================================================================
@@ -945,8 +962,10 @@ class LiveStreamSyncService {
     const targetPeerId = `privity-live-${roomId}`;
     const viewerId = `privity-v-${Math.random().toString(36).substring(2, 9)}`;
 
+    const incomingMediaStream = new MediaStream();
+
     const handleStreamSuccess = (remoteStream: MediaStream) => {
-      if (isCleanedUp || hasStreamConnected) return;
+      if (isCleanedUp) return;
       hasStreamConnected = true;
       if (onStatusChange) onStatusChange('connected');
       onStream(remoteStream);
@@ -967,9 +986,19 @@ class LiveStreamSyncService {
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
       pc.ontrack = (event) => {
-        if (event.streams && event.streams[0]) {
-          handleStreamSuccess(event.streams[0]);
+        if (event.track) {
+          if (!incomingMediaStream.getTracks().some((t) => t.id === event.track.id)) {
+            incomingMediaStream.addTrack(event.track);
+          }
         }
+        if (event.streams && event.streams[0]) {
+          event.streams[0].getTracks().forEach((t) => {
+            if (!incomingMediaStream.getTracks().some((it) => it.id === t.id)) {
+              incomingMediaStream.addTrack(t);
+            }
+          });
+        }
+        handleStreamSuccess(incomingMediaStream);
       };
 
       pc.onicecandidate = (event) => {
