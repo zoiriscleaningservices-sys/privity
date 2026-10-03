@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './tiktokFeed.css';
+import { PrivityVideoPlayer } from './PrivityVideoPlayer';
+import { getFreshMediaUrl } from '../../services/mediaDb';
 
 export interface PostCommentReply {
   id: string;
@@ -50,6 +52,7 @@ export interface PostItem {
   contentUrl?: string;
   thumbnailUrl?: string;
   videoUrl?: string;
+  videoMediaId?: string;
   soundName?: string;
   soundCover?: string;
   soundUrl?: string;
@@ -131,6 +134,57 @@ export const MediaAvatar: React.FC<{
   }
   return <img src={src} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
 };
+
+export const TikTokSlideVideo: React.FC<{
+  post: PostItem;
+  videoRefCallback: (el: HTMLVideoElement | null) => void;
+}> = ({ post, videoRefCallback }) => {
+  const [src, setSrc] = useState<string>(post.videoUrl || post.contentUrl || '');
+  const [isErr, setIsErr] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const mediaKey = post.videoMediaId || post.id;
+    if (mediaKey) {
+      getFreshMediaUrl(mediaKey).then((fresh) => {
+        if (active && fresh) {
+          setSrc(fresh);
+          setIsErr(false);
+        }
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [post.id, post.videoMediaId]);
+
+  return (
+    <video
+      ref={videoRefCallback}
+      src={src}
+      poster={post.thumbnailUrl || (post.type === 'video' ? undefined : post.contentUrl)}
+      className="tiktok-video-player"
+      loop
+      playsInline
+      // @ts-ignore
+      webkit-playsinline="true"
+      muted={false}
+      onError={async () => {
+        if (!isErr) {
+          setIsErr(true);
+          const mediaKey = post.videoMediaId || post.id;
+          if (mediaKey) {
+            const fresh = await getFreshMediaUrl(mediaKey);
+            if (fresh) {
+              setSrc(fresh);
+            }
+          }
+        }
+      }}
+    />
+  );
+};
+
 
 export interface ItunesTrack {
   id: number | string;
@@ -1493,7 +1547,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     </div>
 
                     <div className="birdie-handle-timestamp">
-                      @{post.authorHandle} · {post.timeAgo}
+                      @{post.authorHandle.replace(/^@+/, '')} · {post.timeAgo}
                     </div>
                   </div>
                 </div>
@@ -1514,25 +1568,19 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
                 {/* Birdie Post Media Attachment (Photo or Video) */}
                 {(post.videoUrl || (post.type === 'video' && post.contentUrl) || isVideoMedia(post.contentUrl)) ? (
-                  <div className="birdie-post-media-container" style={{ marginTop: '10px', borderRadius: '12px', overflow: 'hidden', background: '#000', maxHeight: '420px' }}>
-                    <video
-                      src={post.videoUrl || post.contentUrl}
-                      controls
-                      playsInline
-                      loop
-                      style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block' }}
-                    />
+                  <div className="birdie-post-media-container" style={{ marginTop: '10px', borderRadius: '12px', overflow: 'hidden', background: '#05070d', maxHeight: 'min(70vh, 520px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <PrivityVideoPlayer post={post} />
                   </div>
                 ) : (post.contentUrl || post.thumbnailUrl) ? (
                   <div
                     className="birdie-post-media-container"
-                    style={{ marginTop: '10px', borderRadius: '12px', overflow: 'hidden', maxHeight: '420px', cursor: 'pointer' }}
+                    style={{ marginTop: '10px', borderRadius: '12px', overflow: 'hidden', maxHeight: 'min(70vh, 520px)', cursor: 'pointer', background: '#05070d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     onClick={() => onLike(post.id, post.contentUrl || post.thumbnailUrl)}
                   >
                     <img
                       src={post.contentUrl || post.thumbnailUrl}
                       alt={post.caption || 'Dispatch photo'}
-                      style={{ width: '100%', maxHeight: '420px', objectFit: 'cover', display: 'block' }}
+                      style={{ width: '100%', maxHeight: 'min(70vh, 520px)', objectFit: 'contain', display: 'block' }}
                     />
                   </div>
                 ) : null}
@@ -1711,15 +1759,9 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   onClick={(e) => handleMediaTap(e, post)}
                 >
                   {isVideo ? (
-                    <video
-                      ref={(el) => { videoRefs.current[post.id] = el; }}
-                      src={mediaUrl}
-                      poster={post.thumbnailUrl || post.contentUrl}
-                      className="tiktok-video-player"
-                      loop
-                      playsInline
-                      webkit-playsinline="true"
-                      muted={false}
+                    <TikTokSlideVideo
+                      post={post}
+                      videoRefCallback={(el) => { videoRefs.current[post.id] = el; }}
                     />
                   ) : mediaUrl ? (
                     <img
@@ -2126,7 +2168,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             {/* Replying Banner */}
             {replyingToComment && (
               <div className="tiktok-replying-banner">
-                <span>Replying to <strong>@{replyingToComment.authorHandle}</strong></span>
+                <span>Replying to <strong>@{replyingToComment.authorHandle.replace(/^@+/, '')}</strong></span>
                 <button
                   type="button"
                   className="tiktok-cancel-reply-btn"
@@ -2394,7 +2436,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             <div className="privity-action-sheet-handle" />
             <div className="privity-action-sheet-header">
               <span className="privity-sheet-title">Dispatch Options</span>
-              <span className="privity-sheet-subtitle">@{activePostMenu.authorHandle}</span>
+              <span className="privity-sheet-subtitle">@{activePostMenu.authorHandle.replace(/^@+/, '')}</span>
             </div>
             <div className="privity-action-sheet-options">
               {/* If user's own post, show Delete Dispatch */}
@@ -2485,7 +2527,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   <line x1="23" y1="9" x2="17" y2="15"/>
                   <line x1="17" y1="9" x2="23" y2="15"/>
                 </svg>
-                <span>Mute @{activePostMenu.authorHandle}</span>
+                <span>Mute @{activePostMenu.authorHandle.replace(/^@+/, '')}</span>
               </button>
 
               {/* Report Dispatch */}
@@ -2774,7 +2816,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     <img src={curStory.authorAvatar} alt={curStory.authorName} className="story-viewer-avatar" />
                     <div className="story-viewer-meta">
                       <span className="story-viewer-name">{curStory.authorName}</span>
-                      <span className="story-viewer-sub">@{curStory.authorHandle} · {curStory.timeAgo}</span>
+                      <span className="story-viewer-sub">@{curStory.authorHandle.replace(/^@+/, '')} · {curStory.timeAgo}</span>
                     </div>
                   </div>
 

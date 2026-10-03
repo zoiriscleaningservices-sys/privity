@@ -57,12 +57,14 @@ export interface CameraModalProps {
   onPublishPost: (postData: {
     caption: string;
     mediaUrl?: string | null;
+    mediaId?: string;
     thumbnailUrl?: string;
     mediaType?: 'photo' | 'video';
     tags: string;
     privacy: 'close_friends' | 'followers' | 'public';
     soundName?: string;
     targetDestination?: 'feed' | 'story';
+    blob?: Blob;
   }) => void;
   onGoLive: (liveData: {
     title: string;
@@ -384,15 +386,18 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
     if (mediaStreamRef.current && typeof MediaRecorder !== 'undefined') {
       try {
-        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-          ? 'video/webm;codecs=vp9'
-          : MediaRecorder.isTypeSupported('video/webm')
-          ? 'video/webm'
-          : 'video/mp4';
+        const supportedMime = [
+          'video/mp4',
+          'video/mp4;codecs=avc1',
+          'video/mp4;codecs=h264',
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm',
+        ].find((type) => MediaRecorder.isTypeSupported(type)) || '';
 
         const recorder = new MediaRecorder(mediaStreamRef.current, {
-          mimeType,
-          videoBitsPerSecond: 240000,
+          ...(supportedMime ? { mimeType: supportedMime } : {}),
+          videoBitsPerSecond: 1200000,
         });
 
         recorder.ondataavailable = (e) => {
@@ -402,7 +407,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         };
 
         recorder.onstop = async () => {
-          const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+          const blob = new Blob(recordedChunksRef.current, { type: supportedMime || 'video/mp4' });
           const mediaId = `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           let posterThumb = '';
           try {
@@ -414,6 +419,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
             dataUrl: storedUrl,
             thumbnailUrl: posterThumb,
             blob,
+            mediaId,
           });
         };
 
@@ -452,11 +458,6 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
-    } else {
-      setCapturedMedia({
-        type: 'video',
-        dataUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4',
-      });
     }
   };
 
@@ -514,6 +515,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
               dataUrl: storedUrl,
               thumbnailUrl: posterThumb,
               blob: file,
+              mediaId,
             });
           })
           .catch(async () => {
@@ -522,6 +524,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
               type: 'video',
               dataUrl: storedUrl,
               blob: file,
+              mediaId,
             });
           });
       } else {
@@ -534,7 +537,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
             const canvas = document.createElement('canvas');
             let w = img.width;
             let h = img.height;
-            const maxDim = 640;
+            const maxDim = 1600;
             if (w > h && w > maxDim) {
               h = Math.round((h * maxDim) / w);
               w = maxDim;
@@ -549,7 +552,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
               ctx.drawImage(img, 0, 0, w, h);
               setCapturedMedia({
                 type: 'photo',
-                dataUrl: canvas.toDataURL('image/jpeg', 0.58),
+                dataUrl: canvas.toDataURL('image/jpeg', 0.84),
               });
             } else {
               setCapturedMedia({
@@ -572,12 +575,14 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     onPublishPost({
       caption: reviewCaption.trim() || 'Shared via Privity Studio 📸',
       mediaUrl: capturedMedia.dataUrl,
+      mediaId: capturedMedia.mediaId,
       thumbnailUrl: capturedMedia.thumbnailUrl,
       mediaType: capturedMedia.type,
       tags: reviewTags,
       privacy: reviewPrivacy,
       soundName: selectedSound ? `${selectedSound.name} - ${selectedSound.artist}` : undefined,
       targetDestination: (activeTab === 'STORY' || activeTab === 'CREATE') ? 'story' : 'feed',
+      blob: capturedMedia.blob,
     });
 
     onClose();

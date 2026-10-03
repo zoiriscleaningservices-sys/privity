@@ -1090,23 +1090,36 @@ textarea::placeholder {
   margin-bottom: 14px;
   border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-float);
-  max-height: 440px;
+  max-height: min(74vh, 620px);
   position: relative;
-  background: #000;
+  background: #05070d;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .post-visual-stage img {
   width: 100%;
-  height: 100%;
-  max-height: 440px;
-  object-fit: cover;
+  height: auto;
+  max-height: min(74vh, 620px);
+  object-fit: contain;
   display: block;
-  transition: transform 0.3s ease;
+  transition: transform 0.25s ease;
+}
+
+.post-visual-stage video {
+  width: 100%;
+  height: auto;
+  max-height: min(74vh, 620px);
+  object-fit: contain;
+  border-radius: inherit;
+  display: block;
+  background: #05070d;
 }
 
 .post-visual-stage:hover img {
-  transform: scale(1.015);
+  transform: scale(1.01);
 }
 
 /* Spring Floating Heart on Double Tap */
@@ -2099,6 +2112,7 @@ textarea::placeholder {
   background-size: cover;
   background-position: center;
   overflow: hidden;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 .profile-cover-stage::after {
@@ -5202,15 +5216,27 @@ textarea::placeholder {
   }
 
   .post-visual-stage {
-    max-height: 420px;
-    border-radius: 14px;
+    max-height: min(75vh, 560px);
+    border-radius: 16px;
     overflow: hidden;
+    background: #05070d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .post-visual-stage img {
-    max-height: 420px;
+    max-height: min(75vh, 560px);
     width: 100%;
-    object-fit: cover;
+    height: auto;
+    object-fit: contain;
+  }
+
+  .post-visual-stage video {
+    max-height: min(75vh, 560px);
+    width: 100%;
+    height: auto;
+    object-fit: contain;
   }
 
   .post-toolbar-line {

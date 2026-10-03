@@ -73,6 +73,7 @@ import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnect
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
 import { convertVideoToAnimatedLoop } from './services/videoMediaHelper';
+import { storePostMedia } from './services/mediaDb';
 
 export const BANNED_MOCK_HANDLES = new Set([
   'elena_rodriguez',
@@ -267,6 +268,7 @@ interface PostItem {
   contentUrl?: string;
   thumbnailUrl?: string;
   videoUrl?: string;
+  videoMediaId?: string;
   soundName?: string;
   soundCover?: string;
   soundUrl?: string;
@@ -484,6 +486,8 @@ const compressImageFile = (
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, w, h);
         onComplete(canvas.toDataURL('image/jpeg', quality));
       } else {
@@ -673,6 +677,9 @@ export const MediaAvatar: React.FC<{
   return <img src={src} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
 };
 
+import { PrivityVideoPlayer } from './components/feed/PrivityVideoPlayer';
+export { PrivityVideoPlayer };
+
 export interface DirectChatMessage {
   id: string;
   senderHandle: string;
@@ -755,10 +762,10 @@ export function App() {
         for (const [k, prof] of Object.entries(data as Record<string, any>)) {
           if (!prof) continue;
           let cleanProf = { ...prof };
-          if (cleanProf.avatar && cleanProf.avatar.length > 120000 && cleanProf.avatar.startsWith('data:')) {
+          if (cleanProf.avatar && cleanProf.avatar.length > 380000 && cleanProf.avatar.startsWith('data:')) {
             cleanProf.avatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400';
           }
-          if (cleanProf.coverUrl && cleanProf.coverUrl.length > 120000 && cleanProf.coverUrl.startsWith('data:')) {
+          if (cleanProf.coverUrl && cleanProf.coverUrl.length > 380000 && cleanProf.coverUrl.startsWith('data:')) {
             cleanProf.coverUrl = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200';
           }
           (sanitized as any)[k] = cleanProf;
@@ -5763,7 +5770,7 @@ export function App() {
     }
     const authorName = currentAuthUser?.name || myProfile.name || myClean;
     const authorAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
-    const authorHandle = `@${myClean}`;
+    const authorHandle = myClean;
     const authorId = currentAuthUser?.id || myProfile.id || `usr-${myClean}`;
     const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
 
@@ -5978,21 +5985,25 @@ export function App() {
   const handleCameraPublishPost = ({
     caption,
     mediaUrl,
+    mediaId,
     thumbnailUrl,
     mediaType,
     tags,
     privacy,
     soundName,
     targetDestination = 'feed',
+    blob,
   }: {
     caption: string;
     mediaUrl?: string | null;
+    mediaId?: string;
     thumbnailUrl?: string;
     mediaType?: 'photo' | 'video';
     tags: string;
     privacy: 'close_friends' | 'followers' | 'public';
     soundName?: string;
     targetDestination?: 'feed' | 'story';
+    blob?: Blob;
   }) => {
     const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
     if (!myClean) {
@@ -6002,7 +6013,7 @@ export function App() {
     }
     const authorName = currentAuthUser?.name || myProfile.name || myClean;
     const authorAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
-    const authorHandle = `@${myClean}`;
+    const authorHandle = myClean;
     const authorId = currentAuthUser?.id || myProfile.id || `usr-${myClean}`;
     const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
 
@@ -6038,8 +6049,14 @@ export function App() {
     const combinedTags = Array.from(new Set([...rawTags, ...captionTags]));
     const finalTags = combinedTags;
 
+    const postId = `p-${Date.now()}`;
+    const effectiveMediaId = mediaId || postId;
+    if (blob) {
+      storePostMedia(postId, blob, effectiveMediaId);
+    }
+
     const newPost: PostItem = {
-      id: `p-${Date.now()}`,
+      id: postId,
       authorId,
       authorName,
       authorHandle,
@@ -6052,6 +6069,7 @@ export function App() {
       contentUrl: mediaUrl || undefined,
       thumbnailUrl: thumbnailUrl || (mediaType === 'video' ? undefined : (mediaUrl || undefined)),
       videoUrl: mediaType === 'video' ? (mediaUrl || undefined) : undefined,
+      videoMediaId: mediaType === 'video' ? effectiveMediaId : undefined,
       soundName: soundName,
       caption: caption,
       tags: finalTags,
@@ -7162,7 +7180,7 @@ export function App() {
                             style={{ cursor: 'pointer' }}
                             onClick={() => navigateToProfile(post.authorHandle)}
                           >
-                            @{post.authorHandle}
+                            @{post.authorHandle.replace(/^@+/, '')}
                           </span>
                           <span className="post-time-stamp">· {post.timeAgo}</span>
                         </div>
@@ -7241,27 +7259,9 @@ export function App() {
                       )}
 
                       {/* Video Player Display (Real Video or Cinematic Thumbnail) */}
-                      {post.type === 'video' && (post.videoUrl || post.contentUrl || post.thumbnailUrl) && (
+                      {post.type === 'video' && (post.videoUrl || post.contentUrl || post.thumbnailUrl || post.videoMediaId) && (
                         <div className="post-visual-stage">
-                          {post.videoUrl || (post.contentUrl && (post.contentUrl.startsWith('data:video') || post.contentUrl.endsWith('.mp4') || post.contentUrl.endsWith('.webm') || post.contentUrl.startsWith('blob:'))) ? (
-                            <video
-                              src={post.videoUrl || post.contentUrl}
-                              controls
-                              playsInline
-                              preload="metadata"
-                              poster={post.thumbnailUrl}
-                              style={{ width: '100%', maxHeight: '520px', borderRadius: '16px', background: '#000', objectFit: 'contain' }}
-                            />
-                          ) : (
-                            <div onClick={() => setLightboxUrl(post.thumbnailUrl || post.contentUrl || null)}>
-                              <img
-                                src={post.thumbnailUrl || post.contentUrl}
-                                alt="Video Thumbnail"
-                                loading="lazy"
-                              />
-                              <div className="video-status-pill">4K • 60 FPS • 0:48</div>
-                            </div>
-                          )}
+                          <PrivityVideoPlayer post={post} />
                         </div>
                       )}
 
@@ -9516,16 +9516,32 @@ export function App() {
                     loop
                     muted
                     playsInline
+                    // @ts-ignore
+                    webkit-playsinline="true"
                     className="profile-cover-video"
-                  />
-                ) : (
-                  <div
                     style={{
                       position: 'absolute',
                       inset: 0,
-                      backgroundImage: `url(${profile.coverUrl})`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      display: 'block',
+                    }}
+                  />
+                ) : (
+                  <img
+                    src={profile.coverUrl}
+                    alt={`${profile.name} Cover`}
+                    className="profile-cover-img"
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      objectPosition: 'center',
+                      display: 'block',
+                      imageRendering: '-webkit-optimize-contrast',
                     }}
                   />
                 )}
@@ -9563,7 +9579,7 @@ export function App() {
                               const animatedUrl = await convertVideoToAnimatedLoop(file, 'banner');
                               handleDirectBannerChange(animatedUrl);
                             } else {
-                              compressImageFile(file, 720, 0.58, (dataUrl) => {
+                              compressImageFile(file, 1600, 0.86, (dataUrl) => {
                                 handleDirectBannerChange(dataUrl);
                               });
                             }
@@ -9971,7 +9987,7 @@ export function App() {
                                     proofId={post.cryptoProofId}
                                   />
                                 )}
-                                <span className="author-handle-text">@{post.authorHandle}</span>
+                                <span className="author-handle-text">@{post.authorHandle.replace(/^@+/, '')}</span>
                                 <span className="post-time-stamp">· {post.timeAgo}</span>
                               </div>
                               <div className={`privacy-pill-tag ${post.privacy}`}>
@@ -10028,23 +10044,9 @@ export function App() {
                               </div>
                             )}
 
-                            {post.type === 'video' && (post.videoUrl || post.contentUrl || post.thumbnailUrl) && (
+                            {post.type === 'video' && (post.videoUrl || post.contentUrl || post.thumbnailUrl || post.videoMediaId) && (
                               <div className="post-visual-stage">
-                                {post.videoUrl || (post.contentUrl && (post.contentUrl.startsWith('data:video') || post.contentUrl.endsWith('.mp4') || post.contentUrl.endsWith('.webm') || post.contentUrl.startsWith('blob:'))) ? (
-                                  <video
-                                    src={post.videoUrl || post.contentUrl}
-                                    controls
-                                    playsInline
-                                    preload="metadata"
-                                    poster={post.thumbnailUrl}
-                                    style={{ width: '100%', maxHeight: '520px', borderRadius: '16px', background: '#000', objectFit: 'contain' }}
-                                  />
-                                ) : (
-                                  <div onClick={() => setLightboxUrl(post.thumbnailUrl || post.contentUrl || null)}>
-                                    <img src={post.thumbnailUrl || post.contentUrl} alt="Video Thumbnail" loading="lazy" />
-                                    <div className="video-status-pill">4K • 60 FPS • 0:48</div>
-                                  </div>
-                                )}
+                                <PrivityVideoPlayer post={post} />
                               </div>
                             )}
 
@@ -11727,7 +11729,7 @@ export function App() {
                               setEditForm((prev) => ({ ...prev, coverUrl: animatedUrl }));
                               triggerToast('Cover banner video loop updated!');
                             } else {
-                              compressImageFile(file, 720, 0.58, (dataUrl) => {
+                              compressImageFile(file, 1600, 0.86, (dataUrl) => {
                                 setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
                                 triggerToast('Cover banner photo updated!');
                               });

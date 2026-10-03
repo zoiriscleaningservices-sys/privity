@@ -19,6 +19,7 @@ export interface CapturedMedia {
   type: 'photo' | 'video';
   dataUrl: string;
   thumbnailUrl?: string;
+  mediaId?: string;
   blob?: Blob;
   durationSeconds?: number;
   width?: number;

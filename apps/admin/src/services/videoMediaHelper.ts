@@ -11,10 +11,40 @@ export async function convertVideoToAnimatedLoop(
     video.muted = true;
     video.playsInline = true;
     video.autoplay = true;
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
+    video.setAttribute('muted', 'true');
+    video.preload = 'auto';
     video.src = objUrl;
 
-    const targetWidth = mode === 'avatar' ? 200 : 480;
-    const targetHeight = mode === 'avatar' ? 200 : 180;
+    // Retina-crisp HD dimensions for avatars and banners
+    const targetWidth = mode === 'avatar' ? 360 : 1080;
+    const targetHeight = mode === 'avatar' ? 360 : 420;
+
+    const drawAspectCrop = (ctx: CanvasRenderingContext2D) => {
+      const vW = video.videoWidth || targetWidth;
+      const vH = video.videoHeight || targetHeight;
+      const targetAspect = targetWidth / targetHeight;
+      const sourceAspect = vW / vH;
+      let sX = 0;
+      let sY = 0;
+      let sW = vW;
+      let sH = vH;
+
+      if (sourceAspect > targetAspect) {
+        // Source is wider than target banner/avatar
+        sW = vH * targetAspect;
+        sX = (vW - sW) / 2;
+      } else {
+        // Source is taller than target (e.g. mobile 9:16 portrait video or square)
+        sH = vW / targetAspect;
+        sY = (vH - sH) / 2;
+      }
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(video, sX, sY, sW, sH, 0, 0, targetWidth, targetHeight);
+    };
 
     let isHandled = false;
 
@@ -36,8 +66,8 @@ export async function convertVideoToAnimatedLoop(
         canvas.height = targetHeight;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
+          drawAspectCrop(ctx);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
           cleanup();
           resolve(dataUrl);
           return;
@@ -46,18 +76,14 @@ export async function convertVideoToAnimatedLoop(
         console.warn('Fallback snapshot error:', e);
       }
       cleanup();
-      resolve('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400');
+      resolve(mode === 'avatar' ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400' : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200');
     };
 
     const timeoutTimer = setTimeout(() => {
       fallbackSnapshot();
-    }, 6000);
+    }, 5000);
 
-    video.onloadedmetadata = () => {
-      video.currentTime = Math.min(0.5, (video.duration || 1) / 2);
-    };
-
-    video.onseeked = () => {
+    const captureCanvas = () => {
       if (isHandled) return;
 
       const canvas = document.createElement('canvas');
@@ -72,13 +98,14 @@ export async function convertVideoToAnimatedLoop(
       // Check if MediaRecorder on canvas is supported for animated loop
       const stream = (canvas as any).captureStream ? (canvas as any).captureStream(12) : null;
       const hasMediaRecorder = typeof MediaRecorder !== 'undefined';
+      // Prioritize video/mp4 for iOS Safari
       const supportedMime = hasMediaRecorder
-        ? MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? MediaRecorder.isTypeSupported('video/mp4')
+          ? 'video/mp4'
+          : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
           ? 'video/webm;codecs=vp9'
           : MediaRecorder.isTypeSupported('video/webm')
           ? 'video/webm'
-          : MediaRecorder.isTypeSupported('video/mp4')
-          ? 'video/mp4'
           : ''
         : '';
 
@@ -87,7 +114,7 @@ export async function convertVideoToAnimatedLoop(
           const recordedChunks: Blob[] = [];
           const recorder = new MediaRecorder(stream, {
             mimeType: supportedMime,
-            videoBitsPerSecond: 80000, // 80kbps -> ~20KB for 2 seconds
+            videoBitsPerSecond: mode === 'banner' ? 240000 : 120000,
           });
 
           recorder.ondataavailable = (e) => {
@@ -101,7 +128,7 @@ export async function convertVideoToAnimatedLoop(
             reader.onloadend = () => {
               cleanup();
               const result = reader.result as string;
-              if (result && result.length < 90000) {
+              if (result && result.length < 240000) {
                 resolve(result);
               } else {
                 fallbackSnapshot();
@@ -116,7 +143,7 @@ export async function convertVideoToAnimatedLoop(
           let start = performance.now();
           const drawFrame = () => {
             if (isHandled) return;
-            ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+            drawAspectCrop(ctx);
             if (performance.now() - start < 1800) {
               requestAnimationFrame(drawFrame);
             } else {
@@ -134,8 +161,14 @@ export async function convertVideoToAnimatedLoop(
           fallbackSnapshot();
         }
       } else {
-        // Fallback to crisp high-performance poster snapshot
         fallbackSnapshot();
+      }
+    };
+
+    video.onloadeddata = () => {
+      // First frame ready
+      if (!isHandled) {
+        captureCanvas();
       }
     };
 
@@ -152,7 +185,14 @@ export async function extractVideoThumbnail(file: File | Blob): Promise<string> 
     const video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
+    video.autoplay = true;
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('webkit-playsinline', 'true');
+    video.setAttribute('muted', 'true');
+    video.preload = 'auto';
     video.src = objUrl;
+
+    let isDone = false;
 
     const cleanup = () => {
       video.pause();
@@ -164,34 +204,38 @@ export async function extractVideoThumbnail(file: File | Blob): Promise<string> 
     };
 
     const timeout = setTimeout(() => {
+      if (isDone) return;
+      isDone = true;
       cleanup();
       resolve('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600');
     }, 4500);
 
-    video.onloadedmetadata = () => {
-      video.currentTime = Math.min(1.0, (video.duration || 1) / 3);
-    };
-
-    video.onseeked = () => {
+    const captureFrame = () => {
+      if (isDone) return;
+      isDone = true;
       clearTimeout(timeout);
       try {
         const canvas = document.createElement('canvas');
-        let w = video.videoWidth || 640;
-        let h = video.videoHeight || 360;
-        const maxDim = 540;
-        if (w > h && w > maxDim) {
-          h = Math.round((h * maxDim) / w);
-          w = maxDim;
-        } else if (h > maxDim) {
-          w = Math.round((w * maxDim) / h);
-          h = maxDim;
+        let w = video.videoWidth || 720;
+        let h = video.videoHeight || 1280;
+        const maxDim = 1080;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
         }
         canvas.width = w;
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(video, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.58);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
           cleanup();
           resolve(dataUrl);
           return;
@@ -203,7 +247,17 @@ export async function extractVideoThumbnail(file: File | Blob): Promise<string> 
       resolve('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600');
     };
 
+    video.onloadeddata = () => {
+      captureFrame();
+    };
+
+    video.onloadedmetadata = () => {
+      video.play().catch(() => {});
+    };
+
     video.onerror = () => {
+      if (isDone) return;
+      isDone = true;
       clearTimeout(timeout);
       cleanup();
       resolve('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600');
