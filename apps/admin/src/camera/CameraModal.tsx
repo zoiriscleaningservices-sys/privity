@@ -335,8 +335,18 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
     if (video && isCameraActive && video.videoWidth > 0) {
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      let w = video.videoWidth;
+      let h = video.videoHeight;
+      const maxDim = 960;
+      if (w > h && w > maxDim) {
+        h = Math.round((h * maxDim) / w);
+        w = maxDim;
+      } else if (h > maxDim) {
+        w = Math.round((w * maxDim) / h);
+        h = maxDim;
+      }
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (ctx) {
         if (isMirrored) {
@@ -348,7 +358,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
           ctx.filter = selectedPreset.filterStyle;
         }
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        dataUrl = canvas.toDataURL('image/jpeg', 0.72);
       }
     }
 
@@ -370,10 +380,15 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
     if (mediaStreamRef.current && typeof MediaRecorder !== 'undefined') {
       try {
+        const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+          ? 'video/webm;codecs=vp9'
+          : MediaRecorder.isTypeSupported('video/webm')
+          ? 'video/webm'
+          : 'video/mp4';
+
         const recorder = new MediaRecorder(mediaStreamRef.current, {
-          mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-            ? 'video/webm;codecs=vp9'
-            : 'video/webm',
+          mimeType,
+          videoBitsPerSecond: 350000,
         });
 
         recorder.ondataavailable = (e) => {
@@ -383,13 +398,17 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         };
 
         recorder.onstop = () => {
-          const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-          const videoUrl = URL.createObjectURL(blob);
-          setCapturedMedia({
-            type: 'video',
-            dataUrl: videoUrl,
-            blob,
-          });
+          const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const videoDataUrl = (reader.result as string) || URL.createObjectURL(blob);
+            setCapturedMedia({
+              type: 'video',
+              dataUrl: videoDataUrl,
+              blob,
+            });
+          };
+          reader.readAsDataURL(blob);
         };
 
         mediaRecorderRef.current = recorder;
@@ -479,15 +498,54 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       const isVideo = file.type.startsWith('video');
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        setCapturedMedia({
-          type: isVideo ? 'video' : 'photo',
-          dataUrl: result,
-        });
-      };
-      reader.readAsDataURL(file);
+      if (isVideo) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const result = event.target?.result as string;
+          setCapturedMedia({
+            type: 'video',
+            dataUrl: result,
+          });
+        };
+        reader.readAsDataURL(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const raw = event.target?.result as string;
+          if (!raw) return;
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let w = img.width;
+            let h = img.height;
+            const maxDim = 960;
+            if (w > h && w > maxDim) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else if (h > maxDim) {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, w, h);
+              setCapturedMedia({
+                type: 'photo',
+                dataUrl: canvas.toDataURL('image/jpeg', 0.72),
+              });
+            } else {
+              setCapturedMedia({
+                type: 'photo',
+                dataUrl: raw,
+              });
+            }
+          };
+          img.src = raw;
+        };
+        reader.readAsDataURL(file);
+      }
     }
   };
 
@@ -512,8 +570,8 @@ export const CameraModal: React.FC<CameraModalProps> = ({
     if (!storyText.trim()) return;
 
     const canvas = document.createElement('canvas');
-    canvas.width = 1080;
-    canvas.height = 1920;
+    canvas.width = 720;
+    canvas.height = 1280;
     const ctx = canvas.getContext('2d');
     if (ctx) {
       const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
@@ -523,16 +581,16 @@ export const CameraModal: React.FC<CameraModalProps> = ({
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 54px "Plus Jakarta Sans", sans-serif';
+      ctx.font = 'bold 42px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const lines = storyText.split('\n');
       lines.forEach((line, idx) => {
-        ctx.fillText(line, canvas.width / 2, canvas.height / 2 - (lines.length * 30) + idx * 70);
+        ctx.fillText(line, canvas.width / 2, canvas.height / 2 - (lines.length * 24) + idx * 56);
       });
 
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
       onPublishPost({
         caption: storyText,
         mediaUrl: dataUrl,

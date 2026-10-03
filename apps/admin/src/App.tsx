@@ -130,15 +130,16 @@ export const isMockPost = (p: any): boolean => {
     id.startsWith('p-julian') ||
     id.startsWith('p-chloe') ||
     id.startsWith('p-oliver') ||
-    id.startsWith('post-')
+    id.startsWith('mock-') ||
+    id.startsWith('demo-')
   ) {
     return true;
   }
   return isMockHandle(p.authorHandle);
 };
 
-// Guaranteed Absolute Zero Reset v300: Wipes all legacy cached data, users, and accounts to start completely from scratch zero
-const GROUND_ZERO_FLAG = 'privity_ground_zero_v300';
+// Guaranteed Absolute Zero Reset v350: Completely erase all profiles, activities, shots, sessions, and log everybody out
+const GROUND_ZERO_FLAG = 'privity_ground_zero_v350';
 if (typeof window !== 'undefined' && localStorage.getItem(GROUND_ZERO_FLAG) !== 'done') {
   try {
     const keysToRemove: string[] = [];
@@ -1871,25 +1872,26 @@ export function App() {
 
         case 'NEW_POST': {
           const { post } = event;
-          if (!post || !post.id) return;
+          if (!post || !post.id || isMockPost(post)) return;
           setPosts((prev) => {
             if (prev.some((p) => p.id === post.id)) return prev;
             const next = [post, ...prev];
             safeSaveStorage('privity_posts_v5', next);
             return next;
           });
-          if (post.contentUrl) {
-            const author = (post.authorHandle || '').replace(/^@/, '');
+          const mediaUrl = post.contentUrl || post.videoUrl || post.thumbnailUrl;
+          if (mediaUrl) {
+            const author = (post.authorHandle || '').replace(/^@/, '').toLowerCase();
             if (!author) return;
             setProfiles((prev) => {
               const prof = prev[author] || getUserProfile(author);
               const exists = (prof.mediaItems || []).some(
-                (m) => m.id === post.id || isSameMedia(m.url, post.contentUrl)
+                (m) => m.id === post.id || isSameMedia(m.url, mediaUrl)
               );
               if (exists) return prev;
               const newMedia: UserMediaItem = {
                 id: post.id,
-                url: post.contentUrl,
+                url: mediaUrl,
                 type: post.type === 'video' ? 'video' : 'image',
                 likes: 0,
                 comments: 0,
@@ -2780,10 +2782,16 @@ export function App() {
 
         case 'QUERY_POSTS': {
           if (postsRef.current && postsRef.current.length > 0) {
-            broadcastSyncEventRef.current({
-              action: 'SYNC_POSTS_REGISTRY',
-              posts: postsRef.current.slice(0, 100),
-            });
+            const validPosts = postsRef.current.filter((p) => !isMockPost(p));
+            for (let i = 0; i < Math.min(validPosts.length, 15); i += 3) {
+              const chunk = validPosts.slice(i, i + 3);
+              setTimeout(() => {
+                broadcastSyncEventRef.current({
+                  action: 'SYNC_POSTS_REGISTRY',
+                  posts: chunk,
+                });
+              }, i * 50);
+            }
           }
           break;
         }
@@ -6497,21 +6505,55 @@ export function App() {
                 onStoryReplyToDM={(creatorHandle, msg) => handleStoryReplyToDM(creatorHandle, msg)}
                 onAddNewPost={(newPost) => {
                   const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle || activeAuthHandle);
-                  const postWithAuthor = {
-                    ...newPost,
-                    authorHandle: myClean ? `@${myClean}` : newPost.authorHandle,
-                    authorName: currentAuthUser?.name || myProfile.name || newPost.authorName,
-                    authorAvatar: currentAuthUser?.avatar || myProfile.avatar || newPost.authorAvatar,
-                    likersList: [],
+                  const postWithAuthor: PostItem = {
                     likesCount: 0,
                     commentsCount: 0,
+                    sharesCount: 0,
+                    savesCount: 0,
+                    likersList: [],
                     comments: [],
-                  };
+                    timeAgo: 'Just now',
+                    privacy: 'public',
+                    type: 'image',
+                    tags: ['#privity'],
+                    ...newPost,
+                    id: newPost.id || `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                    authorHandle: myClean ? `@${myClean}` : (newPost.authorHandle || `@${myClean}`),
+                    authorName: currentAuthUser?.name || myProfile.name || newPost.authorName || myClean,
+                    authorAvatar: currentAuthUser?.avatar || myProfile.avatar || newPost.authorAvatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`,
+                  } as PostItem;
+
+                  const mediaUrl = postWithAuthor.contentUrl || postWithAuthor.videoUrl || postWithAuthor.thumbnailUrl;
+                  if (mediaUrl && myClean) {
+                    const newMedia: UserMediaItem = {
+                      id: `m-${myClean}-${Date.now()}`,
+                      url: mediaUrl,
+                      type: postWithAuthor.type === 'video' ? 'video' : 'image',
+                      likes: 0,
+                      comments: 0,
+                      isLiked: false,
+                    };
+                    setProfiles((prev) => {
+                      const handleKey = myClean.toLowerCase();
+                      const prof = prev[handleKey] || myProfile;
+                      const nextProfiles = {
+                        ...prev,
+                        [handleKey]: {
+                          ...prof,
+                          mediaItems: [newMedia, ...(prof.mediaItems || [])],
+                        },
+                      };
+                      safeSaveStorage('privity_profiles_v5', nextProfiles);
+                      return nextProfiles;
+                    });
+                  }
+
                   setPosts((prev) => {
-                    const next = [postWithAuthor as any, ...prev];
+                    const next = [postWithAuthor, ...prev.filter((p) => p.id !== postWithAuthor.id)];
                     safeSaveStorage('privity_posts_v5', next);
                     return next;
                   });
+
                   broadcastSyncEvent({
                     action: 'NEW_POST',
                     post: postWithAuthor,

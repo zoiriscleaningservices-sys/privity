@@ -926,16 +926,16 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
     if (!postDraftCaption.trim() && !storyDraftMediaUrl) return;
 
     const newPostItem: PostItem = {
-      id: 'post-' + Date.now(),
+      id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       authorId: 'usr-' + currentUser.handle.replace(/^@/, ''),
       authorName: currentUser.name,
       authorHandle: currentUser.handle,
       authorAvatar: currentUser.avatar,
       isVerified: true,
       type: storyDraftMediaType === 'video' ? 'video' : 'image',
-      contentUrl: storyDraftMediaType !== 'video' ? storyDraftMediaUrl : undefined,
+      contentUrl: storyDraftMediaUrl || undefined,
       videoUrl: storyDraftMediaType === 'video' ? storyDraftMediaUrl : undefined,
-      thumbnailUrl: storyDraftMediaUrl,
+      thumbnailUrl: storyDraftMediaUrl || undefined,
       caption: postDraftCaption.trim() || 'Visual sovereign dispatch 🌟',
       tags: ['#privity', '#creator'],
       privacy: postDraftPrivacy,
@@ -2520,14 +2520,49 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     const file = e.target.files?.[0];
                     if (!file) return;
                     const isVid = file.type.startsWith('video');
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      if (reader.result) {
-                        setStoryDraftMediaUrl(reader.result as string);
-                        setStoryDraftMediaType(isVid ? 'video' : 'image');
-                      }
-                    };
-                    reader.readAsDataURL(file);
+                    if (isVid) {
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        if (reader.result) {
+                          setStoryDraftMediaUrl(reader.result as string);
+                          setStoryDraftMediaType('video');
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    } else {
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const raw = reader.result as string;
+                        if (!raw) return;
+                        const img = new Image();
+                        img.onload = () => {
+                          const canvas = document.createElement('canvas');
+                          let w = img.width;
+                          let h = img.height;
+                          const maxDim = 960;
+                          if (w > h && w > maxDim) {
+                            h = Math.round((h * maxDim) / w);
+                            w = maxDim;
+                          } else if (h > maxDim) {
+                            w = Math.round((w * maxDim) / h);
+                            h = maxDim;
+                          }
+                          canvas.width = w;
+                          canvas.height = h;
+                          const ctx = canvas.getContext('2d');
+                          if (ctx) {
+                            ctx.drawImage(img, 0, 0, w, h);
+                            setStoryDraftMediaUrl(canvas.toDataURL('image/jpeg', 0.72));
+                            setStoryDraftMediaType('image');
+                          } else {
+                            setStoryDraftMediaUrl(raw);
+                            setStoryDraftMediaType('image');
+                          }
+                        };
+                        img.src = raw;
+                      };
+                      reader.readAsDataURL(file);
+                    }
                   }}
                 />
               </label>
