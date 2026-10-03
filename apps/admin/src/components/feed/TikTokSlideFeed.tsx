@@ -86,6 +86,51 @@ export interface StoryItem {
 
 export const INITIAL_STORIES_V3: StoryItem[] = [];
 
+export const isVideoMedia = (url?: string): boolean => {
+  if (!url) return false;
+  if (url.startsWith('data:video/')) return true;
+  const clean = url.split('?')[0].toLowerCase();
+  return clean.endsWith('.mp4') || clean.endsWith('.webm') || clean.endsWith('.mov') || clean.endsWith('.ogg');
+};
+
+export const MediaAvatar: React.FC<{
+  src: string;
+  alt?: string;
+  className?: string;
+  style?: React.CSSProperties;
+  showBadge?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
+  title?: string;
+}> = ({ src, alt = 'Avatar', className = '', style, showBadge = true, onClick, title }) => {
+  const isVid = isVideoMedia(src);
+  if (isVid) {
+    return (
+      <div
+        className={`media-avatar-container ${className}`}
+        style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', ...style }}
+        onClick={onClick}
+        title={title}
+      >
+        <video
+          src={src}
+          autoPlay
+          loop
+          muted
+          playsInline
+          className={`media-avatar-video ${className}`}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
+        />
+        {showBadge && (
+          <span className="media-avatar-gif-tag" title="Animated GIF Sticker">
+            GIF
+          </span>
+        )}
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
+};
+
 export interface ItunesTrack {
   id: number | string;
   trackName: string;
@@ -1251,26 +1296,28 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
             <div
               className="birdie-story-unit user-story-unit"
               onClick={() => {
-                const userStoryIdx = stories.findIndex((s) => s.authorHandle === currentUser.handle);
-                if (userStoryIdx !== -1) {
-                  stopAllAudio();
-                  setActiveStoryViewerIndex(userStoryIdx);
+                if (_onOpenCreate) {
+                  _onOpenCreate();
                 } else {
                   setIsAddStoryModalOpen(true);
                 }
               }}
-              title={stories.some((s) => s.authorHandle === currentUser.handle) ? 'View your Story' : 'Add Story'}
+              title="Your Story - Open Studio Camera"
             >
               <div className={`birdie-story-halo ${stories.some((s) => s.authorHandle === currentUser.handle) ? 'cf active-story' : 'add'}`}>
-                <img src={currentUser.avatar} alt={currentUser.name} className="birdie-story-avatar" />
+                <MediaAvatar src={currentUser.avatar} alt={currentUser.name} className="birdie-story-avatar" showBadge={false} />
                 <button
                   type="button"
                   className="birdie-story-plus-badge"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setIsAddStoryModalOpen(true);
+                    if (_onOpenCreate) {
+                      _onOpenCreate();
+                    } else {
+                      setIsAddStoryModalOpen(true);
+                    }
                   }}
-                  title="Add Story"
+                  title="Add Story via Studio Camera"
                 >
                   <span>+</span>
                 </button>
@@ -1293,7 +1340,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   title={`View @${story.authorHandle}'s Story`}
                 >
                   <div className={`birdie-story-halo ${story.privacy === 'close_friends' ? 'cf' : story.privacy === 'followers' ? 'followers' : 'public'}`}>
-                    <img src={story.authorAvatar} alt={story.authorName} className="birdie-story-avatar" />
+                    <MediaAvatar src={story.authorAvatar} alt={story.authorName} className="birdie-story-avatar" showBadge={false} />
                   </div>
                   <span className="birdie-story-name">{story.authorName.split(' ')[0]}</span>
                 </div>
@@ -1303,7 +1350,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
           {/* Dedicated Birdie Quick-Composer Bar */}
           <div className="birdie-quick-composer-card">
             <div className="birdie-quick-composer-top">
-              <img
+              <MediaAvatar
                 src={currentUser.avatar}
                 alt={currentUser.name}
                 className="birdie-quick-composer-avatar"
@@ -1380,7 +1427,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
               >
                 {/* Author Header Row */}
                 <div className="birdie-card-header">
-                  <img
+                  <MediaAvatar
                     src={post.authorAvatar}
                     alt={post.authorName}
                     className="birdie-author-avatar"
@@ -1450,6 +1497,31 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     return segment;
                   })}
                 </div>
+
+                {/* Birdie Post Media Attachment (Photo or Video) */}
+                {(post.videoUrl || (post.type === 'video' && post.contentUrl) || isVideoMedia(post.contentUrl)) ? (
+                  <div className="birdie-post-media-container" style={{ marginTop: '10px', borderRadius: '12px', overflow: 'hidden', background: '#000', maxHeight: '420px' }}>
+                    <video
+                      src={post.videoUrl || post.contentUrl}
+                      controls
+                      playsInline
+                      loop
+                      style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block' }}
+                    />
+                  </div>
+                ) : (post.contentUrl || post.thumbnailUrl) ? (
+                  <div
+                    className="birdie-post-media-container"
+                    style={{ marginTop: '10px', borderRadius: '12px', overflow: 'hidden', maxHeight: '420px', cursor: 'pointer' }}
+                    onClick={() => onLike(post.id, post.contentUrl || post.thumbnailUrl)}
+                  >
+                    <img
+                      src={post.contentUrl || post.thumbnailUrl}
+                      alt={post.caption || 'Dispatch photo'}
+                      style={{ width: '100%', maxHeight: '420px', objectFit: 'cover', display: 'block' }}
+                    />
+                  </div>
+                ) : null}
 
                 {/* Action Buttons Row */}
                 <div className="birdie-actions-bar" onClick={(e) => e.stopPropagation()}>
@@ -1533,7 +1605,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
                 {/* Inline Thoughtful Reply Form (Signature Privity Spec) */}
                 <div className="birdie-reply-section" onClick={(e) => e.stopPropagation()}>
-                  <img src={currentUser.avatar} alt={currentUser.name} className="birdie-reply-user-avatar" />
+                  <MediaAvatar src={currentUser.avatar} alt={currentUser.name} className="birdie-reply-user-avatar" />
                   <form className="birdie-reply-form" onSubmit={(e) => handleInlineReplySubmit(e, post.id)}>
                     <input
                       type="text"
@@ -1693,7 +1765,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                     onClick={() => onNavigateProfile(post.authorHandle)}
                     title={`View @${post.authorHandle}`}
                   >
-                    <img
+                    <MediaAvatar
                       src={post.authorAvatar}
                       alt={post.authorName}
                       className="tiktok-rail-avatar-img"
@@ -1926,7 +1998,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
                   return (
                     <div key={comment.id} className="tiktok-comment-thread">
                       <div className="tiktok-comment-row">
-                        <img
+                        <MediaAvatar
                           src={comment.authorAvatar}
                           alt={comment.authorName}
                           className="tiktok-comment-avatar"
@@ -1988,7 +2060,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
                             return (
                               <div key={reply.id} className="tiktok-comment-row reply-row">
-                                <img
+                                <MediaAvatar
                                   src={reply.authorAvatar}
                                   alt={reply.authorName}
                                   className="tiktok-comment-avatar reply-avatar"
@@ -2052,7 +2124,7 @@ export const TikTokSlideFeed: React.FC<TikTokSlideFeedProps> = ({
 
             {/* Bottom Add Comment Bar */}
             <form onSubmit={handleCommentSubmit} className="tiktok-comments-input-bar">
-              <img src={currentUser.avatar} alt="You" className="tiktok-input-avatar" />
+              <MediaAvatar src={currentUser.avatar} alt="You" className="tiktok-input-avatar" />
               <input
                 ref={commentInputRef}
                 type="text"

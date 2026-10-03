@@ -388,7 +388,7 @@ export const CameraModal: React.FC<CameraModalProps> = ({
 
         const recorder = new MediaRecorder(mediaStreamRef.current, {
           mimeType,
-          videoBitsPerSecond: 350000,
+          videoBitsPerSecond: 240000,
         });
 
         recorder.ondataavailable = (e) => {

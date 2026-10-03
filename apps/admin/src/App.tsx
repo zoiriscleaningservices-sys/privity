@@ -619,6 +619,51 @@ const isSameMedia = (url1?: string, url2?: string): boolean => {
   return url1.split('?')[0].trim() === url2.split('?')[0].trim();
 };
 
+export const isVideoMedia = (url?: string): boolean => {
+  if (!url) return false;
+  if (url.startsWith('data:video/')) return true;
+  const clean = url.split('?')[0].toLowerCase();
+  return clean.endsWith('.mp4') || clean.endsWith('.webm') || clean.endsWith('.mov') || clean.endsWith('.ogg');
+};
+
+export const MediaAvatar: React.FC<{
+  src: string;
+  alt?: string;
+  className?: string;
+  style?: React.CSSProperties;
+  showBadge?: boolean;
+  onClick?: (e: React.MouseEvent) => void;
+  title?: string;
+}> = ({ src, alt = 'Avatar', className = '', style, showBadge = true, onClick, title }) => {
+  const isVid = isVideoMedia(src);
+  if (isVid) {
+    return (
+      <div
+        className={`media-avatar-container ${className}`}
+        style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', ...style }}
+        onClick={onClick}
+        title={title}
+      >
+        <video
+          src={src}
+          autoPlay
+          loop
+          muted
+          playsInline
+          className={`media-avatar-video ${className}`}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }}
+        />
+        {showBadge && (
+          <span className="media-avatar-gif-tag" title="Animated GIF Sticker">
+            GIF
+          </span>
+        )}
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} className={className} style={style} onClick={onClick} title={title} />;
+};
+
 export interface DirectChatMessage {
   id: string;
   senderHandle: string;
@@ -2535,6 +2580,10 @@ export function App() {
               return s;
             })
           );
+
+          if (cleanLower && cleanLower !== cleanMyHandle.toLowerCase()) {
+            triggerToast(`✨ @${clean} updated their profile & avatar`);
+          }
           break;
         }
 
@@ -3377,15 +3426,15 @@ export function App() {
     triggerToast('Profile photo updated instantly');
   };
 
-  // Add photo directly to profile Studio & Media with instant broadcast
-  const handleAddProfileMedia = (photoUrl: string) => {
+  // Add photo or video directly to profile Studio & Media with instant broadcast
+  const handleAddProfileMedia = (mediaUrl: string, mediaType: 'image' | 'video' = isVideoMedia(mediaUrl) ? 'video' : 'image') => {
     const cleanHandle = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
     if (!cleanHandle) return;
 
     const newMedia: UserMediaItem = {
       id: `m-${cleanHandle}-${Date.now()}`,
-      url: photoUrl,
-      type: 'image',
+      url: mediaUrl,
+      type: mediaType,
       likes: 0,
       comments: 0,
       isLiked: false,
@@ -3413,6 +3462,7 @@ export function App() {
     const authorAvatar = currentAuthUser?.avatar || myProfile.avatar;
     const authorHandle = `@${cleanHandle}`;
     const authorId = currentAuthUser?.id || myProfile.id || `usr-${cleanHandle}`;
+    const isVerified = Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified);
 
     const newPost: PostItem = {
       id: `p-${Date.now()}`,
@@ -3420,11 +3470,12 @@ export function App() {
       authorName,
       authorHandle,
       authorAvatar,
-      isVerified: Boolean(currentAuthUser?.isVerified ?? myProfile.isVerified),
-      type: 'image',
-      contentUrl: photoUrl,
-      thumbnailUrl: photoUrl,
-      caption: 'Added new visual to profile studio',
+      isVerified,
+      type: mediaType === 'video' ? 'video' : 'image',
+      contentUrl: mediaUrl,
+      thumbnailUrl: mediaType === 'video' ? undefined : mediaUrl,
+      videoUrl: mediaType === 'video' ? mediaUrl : undefined,
+      caption: mediaType === 'video' ? 'Added new video dispatch to profile studio' : 'Added new visual to profile studio',
       tags: ['studio', 'media'],
       privacy: 'public',
       likesCount: 0,
@@ -3444,6 +3495,23 @@ export function App() {
       return next;
     });
 
+    const newStory: StoryItem = {
+      id: `st-${cleanHandle}-${Date.now()}`,
+      authorName,
+      authorHandle: cleanHandle,
+      authorAvatar,
+      isVerified,
+      mediaUrl,
+      mediaType: mediaType === 'video' ? 'video' : 'image',
+      caption: mediaType === 'video' ? 'New studio video' : 'New studio visual',
+      timeAgo: 'Just now',
+      createdAt: Date.now(),
+      privacy: 'public',
+      likesCount: 0,
+      isLiked: false,
+    };
+    handleAddStory(newStory);
+
     broadcastSyncEvent({
       action: 'UPDATE_PROFILE',
       profile: updatedProf,
@@ -3462,7 +3530,7 @@ export function App() {
       post: newPost,
     });
 
-    triggerToast('Photo added to your profile studio');
+    triggerToast(mediaType === 'video' ? 'Video added to your studio & story' : 'Photo added to your studio & story');
   };
 
   // Like media item directly on profile with synchronized posts & photo likes registry
@@ -5948,6 +6016,23 @@ export function App() {
         safeSaveStorage('privity_profiles_v5', nextProfiles);
         return nextProfiles;
       });
+
+      const newStory: StoryItem = {
+        id: `st-${myClean}-${Date.now()}`,
+        authorName,
+        authorHandle: myClean,
+        authorAvatar,
+        isVerified,
+        mediaUrl,
+        mediaType: mediaType === 'video' ? 'video' : 'image',
+        caption: caption || undefined,
+        timeAgo: 'Just now',
+        createdAt: Date.now(),
+        privacy: privacy as any,
+        likesCount: 0,
+        isLiked: false,
+      };
+      handleAddStory(newStory);
     }
 
     setPosts((prev) => {
@@ -6680,26 +6765,23 @@ export function App() {
                   <div
                     className="circle-unit"
                     onClick={() => {
-                      if (myStoryIdx !== -1) {
-                        setDmActiveStoryIndex(myStoryIdx);
-                      } else {
-                        setIsCameraOpen(true);
-                      }
+                      setIsCameraOpen(true);
                     }}
-                    title={myStoryIdx !== -1 ? 'View your Story' : 'Add to your Story'}
+                    title="Your Story - Open Studio Camera"
                   >
                     <div className="circle-halo-ring" style={{ position: 'relative', border: myStoryIdx !== -1 ? '2.5px solid #ec4899' : undefined }}>
-                      <img
+                      <MediaAvatar
                         src={myProfile.avatar}
                         alt={myProfile.name}
                         className="circle-user-img"
+                        showBadge={false}
                       />
                       <div
                         onClick={(e) => {
                           e.stopPropagation();
                           setIsCameraOpen(true);
                         }}
-                        title="Add New Story"
+                        title="Add New Story via Studio Camera"
                         style={{
                           position: 'absolute',
                           bottom: '-2px',
@@ -6745,7 +6827,7 @@ export function App() {
                       title={`Watch @${cleanAuth}'s Story`}
                     >
                       <div className="circle-halo-ring active-story" style={{ border: '2.5px solid transparent', background: 'linear-gradient(135deg, #f43f5e 0%, #ec4899 40%, #8b5cf6 100%) border-box', padding: '2px' }}>
-                        <img src={st.authorAvatar} alt={st.authorName} className="circle-user-img" />
+                        <MediaAvatar src={st.authorAvatar} alt={st.authorName} className="circle-user-img" showBadge={false} />
                       </div>
                       <span className="circle-tag-name" style={{ color: '#fff', fontWeight: 600 }}>{st.authorName.split(' ')[0]}</span>
                     </div>
@@ -7809,17 +7891,12 @@ export function App() {
                       <div
                         className="dm-story-bubble"
                         onClick={() => {
-                          const myIdx = stories.findIndex((st) => st.authorHandle === cleanMyHandle);
-                          if (myIdx !== -1) {
-                            setDmActiveStoryIndex(myIdx);
-                          } else {
-                            setIsCameraOpen(true);
-                          }
+                          setIsCameraOpen(true);
                         }}
-                        title="Your Story"
+                        title="Your Story - Open Studio Camera"
                       >
                         <div className={`dm-story-avatar-ring ${stories.some((s) => s.authorHandle === cleanMyHandle) ? 'cf active-story' : 'add'}`}>
-                          <img src={myProfile.avatar} alt="You" className="dm-story-avatar-img" />
+                          <MediaAvatar src={myProfile.avatar} alt="You" className="dm-story-avatar-img" showBadge={false} />
                           <span className="dm-story-plus-icon">+</span>
                         </div>
                         <span className="dm-story-name">Your Story</span>
@@ -7842,7 +7919,7 @@ export function App() {
                               title={`View @${st.authorHandle}'s story`}
                             >
                               <div className={`dm-story-avatar-ring ${ringClass}`}>
-                                <img src={st.authorAvatar} alt={st.authorName} className="dm-story-avatar-img" />
+                                <MediaAvatar src={st.authorAvatar} alt={st.authorName} className="dm-story-avatar-img" showBadge={false} />
                                 <span className="dm-story-online-dot" />
                               </div>
                               <span className="dm-story-name">{st.authorName.split(' ')[0]}</span>
@@ -9373,8 +9450,28 @@ export function App() {
               {/* Cover Stage Banner */}
               <div
                 className="profile-cover-stage"
-                style={{ backgroundImage: `url(${profile.coverUrl})`, position: 'relative' }}
+                style={{ position: 'relative', overflow: 'hidden' }}
               >
+                {isVideoMedia(profile.coverUrl) ? (
+                  <video
+                    src={profile.coverUrl}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="profile-cover-video"
+                  />
+                ) : (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      backgroundImage: `url(${profile.coverUrl})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }}
+                  />
+                )}
                 {isOwnProfile && (
                   <div style={{ position: 'absolute', top: '14px', right: '14px', zIndex: 10 }}>
                     <label
@@ -9393,20 +9490,28 @@ export function App() {
                         cursor: 'pointer',
                         boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
                       }}
-                      title="Change Banner Photo"
+                      title="Change Banner Photo or Video"
                     >
                       <IconPhoto size={14} color="#00f0ff" />
                       <span>Change Banner</span>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/*,video/*"
                         style={{ display: 'none' }}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            compressImageFile(file, 1200, 0.75, (dataUrl) => {
-                              handleDirectBannerChange(dataUrl);
-                            });
+                            if (file.type.startsWith('video')) {
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                handleDirectBannerChange(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            } else {
+                              compressImageFile(file, 1200, 0.75, (dataUrl) => {
+                                handleDirectBannerChange(dataUrl);
+                              });
+                            }
                           }
                         }}
                       />
@@ -9434,11 +9539,28 @@ export function App() {
                         }}
                         title={hasActiveStory ? `Tap to view @${profile.handle}'s story` : profile.name}
                       >
-                        <img
-                          src={profile.avatar}
-                          alt={profile.name}
-                          className={`profile-avatar-squircle ${hasActiveStory ? 'has-active-story-ring' : ''}`}
-                        />
+                        {isVideoMedia(profile.avatar) ? (
+                          <div style={{ position: 'relative', display: 'inline-block' }}>
+                            <video
+                              src={profile.avatar}
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                              className={`profile-avatar-squircle is-video-avatar ${hasActiveStory ? 'has-active-story-ring' : ''}`}
+                              style={{ objectFit: 'cover' }}
+                            />
+                            <div className="profile-avatar-sticker-tag" title="Animated GIF / Sticker Profile">
+                              GIF
+                            </div>
+                          </div>
+                        ) : (
+                          <img
+                            src={profile.avatar}
+                            alt={profile.name}
+                            className={`profile-avatar-squircle ${hasActiveStory ? 'has-active-story-ring' : ''}`}
+                          />
+                        )}
                         {hasActiveStory && (
                           <div className="profile-story-badge" title="Active Story">
                             <span className="profile-story-badge-pulse" />
@@ -9448,21 +9570,29 @@ export function App() {
                         {isOwnProfile && (
                           <label
                             className="btn-glass-avatar-edit"
-                            title="Change Profile Photo"
+                            title="Change Profile Photo or Video (Sticker / GIF)"
                             style={{ cursor: 'pointer' }}
                             onClick={(e) => e.stopPropagation()}
                           >
                             <IconPhoto size={13} />
                             <input
                               type="file"
-                              accept="image/*"
+                              accept="image/*,video/*"
                               style={{ display: 'none' }}
                               onChange={(e) => {
                                 const file = e.target.files?.[0];
                                 if (file) {
-                                  compressImageFile(file, 360, 0.8, (dataUrl) => {
-                                    handleDirectAvatarChange(dataUrl);
-                                  });
+                                  if (file.type.startsWith('video')) {
+                                    const reader = new FileReader();
+                                    reader.onload = () => {
+                                      handleDirectAvatarChange(reader.result as string);
+                                    };
+                                    reader.readAsDataURL(file);
+                                  } else {
+                                    compressImageFile(file, 360, 0.8, (dataUrl) => {
+                                      handleDirectAvatarChange(dataUrl);
+                                    });
+                                  }
                                 }
                               }}
                             />
@@ -10185,17 +10315,25 @@ export function App() {
                           }}
                         >
                           <IconPhoto size={15} color="var(--brand-cyan)" />
-                          <span>+ Add Photo to Studio</span>
+                          <span>+ Add Photo / Video to Studio</span>
                           <input
                             type="file"
-                            accept="image/*"
+                            accept="image/*,video/*"
                             style={{ display: 'none' }}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                compressImageFile(file, 960, 0.8, (dataUrl) => {
-                                  handleAddProfileMedia(dataUrl);
-                                });
+                                if (file.type.startsWith('video')) {
+                                  const reader = new FileReader();
+                                  reader.onload = () => {
+                                    handleAddProfileMedia(reader.result as string, 'video');
+                                  };
+                                  reader.readAsDataURL(file);
+                                } else {
+                                  compressImageFile(file, 960, 0.8, (dataUrl) => {
+                                    handleAddProfileMedia(dataUrl, 'image');
+                                  });
+                                }
                               }
                             }}
                           />
@@ -10226,7 +10364,23 @@ export function App() {
                                 setLightboxShowComments(false);
                               }}
                             >
-                              <img src={item.url} alt="Studio Media" loading="lazy" />
+                              {item.type === 'video' || isVideoMedia(item.url) ? (
+                                <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                                  <video
+                                    src={item.url}
+                                    muted
+                                    playsInline
+                                    loop
+                                    autoPlay
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                  />
+                                  <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.65)', borderRadius: 10, padding: '2px 6px', fontSize: 10, color: '#fff', fontWeight: 700 }}>
+                                    ▶ VIDEO
+                                  </div>
+                                </div>
+                              ) : (
+                                <img src={item.url} alt="Studio Media" loading="lazy" />
+                              )}
                               <div className="profile-media-hover-overlay">
                                 <div
                                   className="media-interactive-heart"
@@ -10880,14 +11034,27 @@ export function App() {
 
             {/* Photo Center with Double-Click & Heart Burst Overlay */}
             <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-              <img
-                src={lightboxUrl}
-                alt="Fullscreen View"
-                className="lightbox-hero-image"
-                onClick={(e) => e.stopPropagation()}
-                onDoubleClick={handleLightboxLikeToggle}
-                title="Double-click to like photo"
-              />
+              {isVideoMedia(lightboxUrl) ? (
+                <video
+                  src={lightboxUrl}
+                  controls
+                  autoPlay
+                  loop
+                  playsInline
+                  className="lightbox-hero-image"
+                  style={{ maxHeight: '82vh', maxWidth: '92vw', objectFit: 'contain' }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <img
+                  src={lightboxUrl}
+                  alt="Fullscreen View"
+                  className="lightbox-hero-image"
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={handleLightboxLikeToggle}
+                  title="Double-click to like photo"
+                />
+              )}
 
               {lightboxHeartAnim && (
                 <div className="lightbox-heart-burst-overlay">
@@ -11446,37 +11613,64 @@ export function App() {
 
             <form onSubmit={handleSaveProfile}>
               <div className="edit-profile-modal-body">
-                {/* Cover Photo Customization */}
+                {/* Cover Photo/Video Customization */}
                 <div className="edit-profile-section">
-                  <label className="edit-profile-label">Cover Banner Photo</label>
-                  <div
-                    style={{
-                      width: '100%',
-                      height: '110px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundImage: `url(${editForm.coverUrl})`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: 'center',
-                      position: 'relative',
-                      border: '1px solid var(--glass-border)',
-                      marginBottom: '10px',
-                    }}
-                  />
+                  <label className="edit-profile-label">Cover Banner Photo or Video</label>
+                  {isVideoMedia(editForm.coverUrl) ? (
+                    <video
+                      src={editForm.coverUrl}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      style={{
+                        width: '100%',
+                        height: '110px',
+                        borderRadius: 'var(--radius-md)',
+                        objectFit: 'cover',
+                        marginBottom: '10px',
+                        border: '1px solid var(--glass-border)',
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '110px',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundImage: `url(${editForm.coverUrl})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        position: 'relative',
+                        border: '1px solid var(--glass-border)',
+                        marginBottom: '10px',
+                      }}
+                    />
+                  )}
                   <div className="photo-upload-dock">
                     <label className="btn-file-upload-label">
                       <IconPhoto size={15} />
                       <span>Upload Banner From Device</span>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/*,video/*"
                         style={{ display: 'none' }}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            compressImageFile(file, 960, 0.72, (dataUrl) => {
-                              setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
-                              triggerToast('Cover banner photo updated!');
-                            });
+                            if (file.type.startsWith('video')) {
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                setEditForm((prev) => ({ ...prev, coverUrl: reader.result as string }));
+                                triggerToast('Cover banner video updated!');
+                              };
+                              reader.readAsDataURL(file);
+                            } else {
+                              compressImageFile(file, 960, 0.72, (dataUrl) => {
+                                setEditForm((prev) => ({ ...prev, coverUrl: dataUrl }));
+                                triggerToast('Cover banner photo updated!');
+                              });
+                            }
                           }
                         }}
                       />
@@ -11485,7 +11679,7 @@ export function App() {
                       type="text"
                       className="edit-profile-input"
                       style={{ flex: 1, minWidth: '180px' }}
-                      placeholder="Or paste banner image URL..."
+                      placeholder="Or paste banner image/video URL..."
                       value={editForm.coverUrl}
                       onChange={(e) => setEditForm({ ...editForm, coverUrl: e.target.value })}
                     />
@@ -11508,36 +11702,66 @@ export function App() {
 
                 {/* Avatar Customization */}
                 <div className="edit-profile-section">
-                  <label className="edit-profile-label">Profile Avatar</label>
+                  <label className="edit-profile-label">Profile Avatar (Photo or Video GIF Sticker)</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    <img
-                      src={editForm.avatar}
-                      alt="Avatar Preview"
-                      style={{
-                        width: '68px',
-                        height: '68px',
-                        borderRadius: 'var(--radius-md)',
-                        objectFit: 'cover',
-                        border: '2px solid var(--glass-border-light)',
-                        boxShadow: 'var(--shadow-elevated)',
-                      }}
-                    />
+                    {isVideoMedia(editForm.avatar) ? (
+                      <div style={{ position: 'relative', width: '68px', height: '68px', flexShrink: 0 }}>
+                        <video
+                          src={editForm.avatar}
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                          style={{
+                            width: '68px',
+                            height: '68px',
+                            borderRadius: 'var(--radius-md)',
+                            objectFit: 'cover',
+                            border: '2px solid var(--glass-border-light)',
+                            boxShadow: 'var(--shadow-elevated)',
+                          }}
+                        />
+                        <span className="media-avatar-gif-tag">GIF</span>
+                      </div>
+                    ) : (
+                      <img
+                        src={editForm.avatar}
+                        alt="Avatar Preview"
+                        style={{
+                          width: '68px',
+                          height: '68px',
+                          borderRadius: 'var(--radius-md)',
+                          objectFit: 'cover',
+                          border: '2px solid var(--glass-border-light)',
+                          boxShadow: 'var(--shadow-elevated)',
+                        }}
+                      />
+                    )}
                     <div style={{ flex: 1 }}>
                       <div className="photo-upload-dock">
                         <label className="btn-file-upload-label">
                           <IconPhoto size={15} />
-                          <span>Upload Photo From Device</span>
+                          <span>Upload From Device</span>
                           <input
                             type="file"
-                            accept="image/*"
+                            accept="image/*,video/*"
                             style={{ display: 'none' }}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                compressImageFile(file, 320, 0.80, (dataUrl) => {
-                                  setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
-                                  triggerToast('Avatar photo updated!');
-                                });
+                                if (file.type.startsWith('video')) {
+                                  const reader = new FileReader();
+                                  reader.onload = () => {
+                                    setEditForm((prev) => ({ ...prev, avatar: reader.result as string }));
+                                    triggerToast('Avatar animated GIF/sticker video updated!');
+                                  };
+                                  reader.readAsDataURL(file);
+                                } else {
+                                  compressImageFile(file, 320, 0.80, (dataUrl) => {
+                                    setEditForm((prev) => ({ ...prev, avatar: dataUrl }));
+                                    triggerToast('Avatar photo updated!');
+                                  });
+                                }
                               }
                             }}
                           />
@@ -12947,7 +13171,7 @@ export function App() {
               title="Your Profile"
             >
               <div className={`mobile-nav-avatar-wrap ${activeTab === 'profile' && viewedUserHandle === myProfile.handle ? 'active' : ''}`}>
-                <img src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" />
+                <MediaAvatar src={myProfile.avatar} alt="Profile" className="mobile-nav-avatar" showBadge={false} />
               </div>
               <span className="mobile-nav-label">Profile</span>
               {activeTab === 'profile' && viewedUserHandle === myProfile.handle && <span className="mobile-nav-indicator" />}
@@ -13051,28 +13275,55 @@ export function App() {
                     navigateToProfile(curStory.authorHandle);
                   }}
                 >
-                  <img src={curStory.authorAvatar} alt={curStory.authorName} className="story-viewer-avatar" style={{ width: '38px', height: '38px', borderRadius: '50%', border: '1.5px solid #fff' }} />
+                  <MediaAvatar src={curStory.authorAvatar} alt={curStory.authorName} className="story-viewer-avatar" style={{ width: '38px', height: '38px', borderRadius: '50%', border: '1.5px solid #fff' }} />
                   <div>
                     <div style={{ color: '#fff', fontWeight: 700, fontSize: '14px' }}>{curStory.authorName}</div>
                     <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '11px' }}>@{curStory.authorHandle} · {curStory.timeAgo}</div>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="story-viewer-close"
-                  onClick={() => {
-                    setDmActiveStoryIndex(null);
-                    setDmStoryDragY(0);
-                  }}
-                  style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '50%', width: '32px', height: '32px', color: '#fff', cursor: 'pointer' }}
-                >
-                  ✕
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="story-viewer-camera-btn"
+                    onClick={() => {
+                      setDmActiveStoryIndex(null);
+                      setIsCameraOpen(true);
+                    }}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.2)',
+                      backdropFilter: 'blur(10px)',
+                      border: '1px solid rgba(255, 255, 255, 0.35)',
+                      borderRadius: '20px',
+                      padding: '5px 12px',
+                      color: '#fff',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      cursor: 'pointer',
+                    }}
+                    title="Open Studio Camera to post story"
+                  >
+                    <span>📷 Studio</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="story-viewer-close"
+                    onClick={() => {
+                      setDmActiveStoryIndex(null);
+                      setDmStoryDragY(0);
+                    }}
+                    style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '50%', width: '32px', height: '32px', color: '#fff', cursor: 'pointer' }}
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
               <div className="story-viewer-media-wrap" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-                {curStory.mediaType === 'video' ? (
+                {curStory.mediaType === 'video' || isVideoMedia(curStory.mediaUrl) ? (
                   <video src={curStory.mediaUrl} autoPlay loop playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
                   <img src={curStory.mediaUrl} alt={curStory.caption || 'Story'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
