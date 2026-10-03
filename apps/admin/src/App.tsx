@@ -349,6 +349,15 @@ export interface AppNotification {
   isRead: boolean;
 }
 
+export interface ChatGroup {
+  id: string;
+  name: string;
+  avatar: string;
+  members: string[];
+  createdAt: number;
+  createdBy: string;
+}
+
 export const SAMPLE_POSTS: PostItem[] = [];
 
 export const SUGGESTED_CREATORS: any[] = [];
@@ -1092,6 +1101,13 @@ export function App() {
   const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupSelectedMembers, setNewGroupSelectedMembers] = useState<string[]>([]);
+  const [chatGroups, setChatGroups] = useState<Record<string, ChatGroup>>(() => {
+    return readStorage<Record<string, ChatGroup>>('privity_chat_groups_v1', {});
+  });
+  const [selectedGroupInfo, setSelectedGroupInfo] = useState<ChatGroup | null>(null);
+  const [deletedChannelHandles, setDeletedChannelHandles] = useState<string[]>(() => {
+    return readStorage<string[]>('privity_deleted_channels_v1', []);
+  });
   const [isProfileDrawerOpen, setIsProfileDrawerOpen] = useState(false);
   const [isFeedCommentsOpen, setIsFeedCommentsOpen] = useState(false);
   const [isFeedStoryOpen, setIsFeedStoryOpen] = useState(false);
@@ -1282,7 +1298,8 @@ export function App() {
   }, [notifStorageKey]);
 
   const [messagesSubTab, setMessagesSubTab] = useState<'chats' | 'notifications'>('chats');
-  const [notificationsFilter, setNotificationsFilter] = useState<'all' | 'like' | 'comment' | 'follow'>('all');
+  type NotificationFilter = 'all' | 'like' | 'comment' | 'follow' | 'save' | 'gift' | 'live' | 'story' | 'read';
+  const [notificationsFilter, setNotificationsFilter] = useState<NotificationFilter>('all');
 
   const unreadNotifsCount = useMemo(() => {
     return notifications.filter((n) => !n.isRead).length;
@@ -1294,7 +1311,7 @@ export function App() {
     const cleaned: Record<string, UserProfile> = {};
     if (loaded && typeof loaded === 'object') {
       for (const [k, v] of Object.entries(loaded)) {
-        if (!isMockHandle(k) && !isMockHandle(v?.handle)) {
+        if (!isMockHandle(k) && !isMockHandle(v?.handle) && !k.startsWith('group_')) {
           cleaned[k] = { ...v, isVerified: Boolean(v?.isVerified) };
         }
       }
@@ -1614,6 +1631,28 @@ export function App() {
         circleStatus: 'Public Connection',
         isPrivate: false,
         followersList: [],
+        followingList: [],
+        trustCirclesList: [],
+        mediaItems: [],
+      };
+    }
+    // If a group handle is passed, return lightweight group entity without creating a user profile
+    if (clean.startsWith('group_')) {
+      const g = chatGroups[clean] || (typeof window !== 'undefined' ? readStorage<Record<string, any>>('privity_chat_groups_v1', {})[clean] : null);
+      return {
+        id: clean,
+        name: g?.name || defaultName || 'Group Chat',
+        handle: clean,
+        avatar: g?.avatar || defaultAvatar || 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=400',
+        coverUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=1600',
+        isVerified: true,
+        verifiedCategory: 'Group Circle',
+        bio: `Private group channel with ${g?.members?.length || 2} members.`,
+        location: 'Group Chat',
+        joinedDate: 'Joined 2026',
+        circleStatus: 'Close Friend',
+        isPrivate: true,
+        followersList: g?.members || [],
         followingList: [],
         trustCirclesList: [],
         mediaItems: [],
@@ -2557,17 +2596,33 @@ export function App() {
         }
 
         case 'DELETE_DM': {
-          const { recipientHandle, messageId } = event;
-          const clean = (recipientHandle || '').replace(/^@/, '');
-          if (!clean || !messageId) return;
+          const { messageId } = event;
+          if (!messageId) return;
           setDirectMessages((prev) => {
-            const thread = prev[clean] || [];
-            const updated = {
-              ...prev,
-              [clean]: thread.filter((m) => m.id !== messageId),
-            };
-            safeSaveStorage('privity_direct_messages_v5', updated);
-            return updated;
+            let changed = false;
+            const updated = { ...prev };
+            for (const [k, thread] of Object.entries(updated)) {
+              if (thread.some((m) => m.id === messageId)) {
+                changed = true;
+                updated[k] = thread.filter((m) => m.id !== messageId);
+              }
+            }
+            if (changed) {
+              safeSaveStorage('privity_direct_messages_v5', updated);
+              return updated;
+            }
+            return prev;
+          });
+          break;
+        }
+
+        case 'CREATE_GROUP': {
+          const { group } = event;
+          if (!group || !group.id) return;
+          setChatGroups((prev) => {
+            const next = { ...prev, [group.id]: group };
+            safeSaveStorage('privity_chat_groups_v1', next);
+            return next;
           });
           break;
         }
@@ -4797,6 +4852,20 @@ export function App() {
       return nextProfiles;
     });
 
+    if (next) {
+      const notif: AppNotification = {
+        id: `notif-follow-${resolvedHandle}-${myHandle}-${Date.now()}`,
+        type: 'follow',
+        actorHandle: myProfile.handle || myHandle,
+        actorName: myProfile.name || myHandle,
+        actorAvatar: myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myHandle}`,
+        timestamp: Date.now(),
+        timeAgo: 'Just now',
+        isRead: false,
+      };
+      addNotification(notif, resolvedHandle);
+    }
+
     broadcastSyncEvent({
       action: 'TOGGLE_FOLLOW',
       targetHandle: resolvedHandle,
@@ -5011,11 +5080,50 @@ export function App() {
     }
     const groupId = `group_${Date.now()}`;
     const gName = newGroupName.trim();
-    const members = newGroupSelectedMembers;
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+    const members = Array.from(new Set([myClean, ...newGroupSelectedMembers.map(normalizeHandle)].filter(Boolean)));
 
     const groupAvatar = 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=400';
 
-    const newGroupProfile: UserProfile = {
+    const newGroup: ChatGroup = {
+      id: groupId,
+      name: gName,
+      avatar: groupAvatar,
+      members: members,
+      createdAt: Date.now(),
+      createdBy: myClean,
+    };
+
+    setChatGroups((prev) => {
+      const next = { ...prev, [groupId]: newGroup };
+      safeSaveStorage('privity_chat_groups_v1', next);
+      return next;
+    });
+
+    const welcomeMsg: DirectChatMessage = {
+      id: `msg-${Date.now()}`,
+      senderHandle: myClean || 'user',
+      recipientHandle: groupId,
+      text: `🎉 Group "${gName}" created with ${members.length} members. Start chatting!`,
+      timeAgo: 'Just now',
+      timestamp: Date.now(),
+    };
+
+    setDirectMessages((prev) => {
+      const next = {
+        [groupId]: [welcomeMsg],
+        ...prev,
+      };
+      safeSaveStorage('privity_direct_messages_v5', next);
+      return next;
+    });
+
+    setNewGroupName('');
+    setNewGroupSelectedMembers([]);
+    setIsCreateGroupOpen(false);
+
+    // Active recipient strictly for messaging workspace
+    const groupChatEntity: UserProfile = {
       id: groupId,
       name: gName,
       handle: groupId,
@@ -5023,40 +5131,23 @@ export function App() {
       coverUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=1600',
       isVerified: true,
       verifiedCategory: 'Group Circle',
-      bio: `Encrypted group channel with ${members.length + 1} members.`,
+      bio: `Encrypted group channel with ${members.length} members.`,
       location: 'Private Group',
       joinedDate: 'Created 2026',
       circleStatus: 'Close Friend',
       isPrivate: true,
-      followersList: [...members, ...(myProfile.handle ? [myProfile.handle] : [])],
-      followingList: myProfile.handle ? [myProfile.handle] : [],
-      trustCirclesList: myProfile.handle ? [myProfile.handle] : [],
+      followersList: members,
+      followingList: [],
+      trustCirclesList: [],
       mediaItems: [],
     };
+    setActiveChatUser(groupChatEntity);
 
-    setProfiles((prev) => ({
-      ...prev,
-      [groupId]: newGroupProfile,
-    }));
+    broadcastSyncEvent({
+      action: 'CREATE_GROUP',
+      group: newGroup,
+    });
 
-    const welcomeMsg: DirectChatMessage = {
-      id: `msg-${Date.now()}`,
-      senderHandle: myProfile.handle || 'user',
-      recipientHandle: groupId,
-      text: `🎉 Group "${gName}" created with ${members.length} members. Start chatting!`,
-      timeAgo: 'Just now',
-      timestamp: Date.now(),
-    };
-
-    setDirectMessages((prev) => ({
-      [groupId]: [welcomeMsg],
-      ...prev,
-    }));
-
-    setNewGroupName('');
-    setNewGroupSelectedMembers([]);
-    setIsCreateGroupOpen(false);
-    setActiveChatUser(newGroupProfile);
     triggerToast(`Group "${gName}" created!`);
   };
 
@@ -5225,6 +5316,29 @@ export function App() {
     const likerName = currentAuthUser?.name || myProfile.name || myClean;
     const likerAvatar = currentAuthUser?.avatar || myProfile.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${myClean}`;
 
+    if (computedNextLiked) {
+      const targetAuthor = normalizeHandle(targetPost.authorHandle);
+      const notif: AppNotification = {
+        id: `notif-like-${postId}-${myClean}-${Date.now()}`,
+        type: 'like',
+        actorHandle: myClean,
+        actorName: likerName,
+        actorAvatar: likerAvatar,
+        targetPostId: postId,
+        postCaptionSnippet: targetPost.caption ? targetPost.caption.slice(0, 60) : 'your dispatch',
+        postThumbnail: targetPost.contentUrl || targetPost.thumbnailUrl,
+        timestamp: Date.now(),
+        timeAgo: 'Just now',
+        isRead: false,
+      };
+      if (targetAuthor) {
+        addNotification(notif, targetAuthor);
+      }
+      if (targetAuthor === myClean) {
+        addNotification(notif, myClean);
+      }
+    }
+
     broadcastSyncEvent({
       action: 'LIKE_POST',
       postId,
@@ -5300,6 +5414,29 @@ export function App() {
       : currentSaved.filter((id) => id !== postId);
     safeSaveStorage(savedKey, updatedSaved);
     setSavedPostIds(updatedSaved);
+
+    if (nextSavedState) {
+      const targetAuthor = normalizeHandle(targetPost?.authorHandle);
+      const notif: AppNotification = {
+        id: `notif-save-${postId}-${myClean}-${Date.now()}`,
+        type: 'save',
+        actorHandle: myClean,
+        actorName: currentAuthUser?.name || myProfile.name || myClean,
+        actorAvatar: currentAuthUser?.avatar || myProfile.avatar,
+        targetPostId: postId,
+        postCaptionSnippet: targetPost?.caption ? targetPost.caption.slice(0, 60) : 'your dispatch',
+        postThumbnail: targetPost?.contentUrl || targetPost?.thumbnailUrl,
+        timestamp: Date.now(),
+        timeAgo: 'Just now',
+        isRead: false,
+      };
+      if (targetAuthor) {
+        addNotification(notif, targetAuthor);
+      }
+      if (targetAuthor === myClean) {
+        addNotification(notif, myClean);
+      }
+    }
 
     broadcastSyncEvent({
       action: 'SAVE_POST',
@@ -5454,6 +5591,28 @@ export function App() {
       const commenterH = (myProfile.handle || currentAuthUser?.handle || '').replace(/^@/, '').trim();
       const commenterName = myProfile.name || currentAuthUser?.name || commenterH;
       const commenterAvatar = myProfile.avatar || currentAuthUser?.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${commenterH}`;
+      const targetAuthor = normalizeHandle(targetPost?.authorHandle);
+
+      const notif: AppNotification = {
+        id: `notif-comment-${postId}-${commenterH}-${Date.now()}`,
+        type: 'comment',
+        actorHandle: commenterH,
+        actorName: commenterName,
+        actorAvatar: commenterAvatar,
+        targetPostId: postId,
+        postCaptionSnippet: targetPost?.caption ? targetPost.caption.slice(0, 60) : 'your dispatch',
+        postThumbnail: targetPost?.contentUrl || targetPost?.thumbnailUrl,
+        commentText: text,
+        timestamp: Date.now(),
+        timeAgo: 'Just now',
+        isRead: false,
+      };
+      if (targetAuthor) {
+        addNotification(notif, targetAuthor);
+      }
+      if (targetAuthor === commenterH) {
+        addNotification(notif, commenterH);
+      }
 
       broadcastSyncEvent({
         action: 'ADD_COMMENT',
@@ -5538,19 +5697,26 @@ export function App() {
   // Real-Time Direct Message Deletion (Unsend / Delete)
   const handleDeleteMessage = (recipientHandle: string, messageId: string) => {
     const cleanRecipient = recipientHandle.replace(/^@/, '');
+    const myClean = normalizeHandle(currentAuthUser?.handle || myProfile.handle);
     setDirectMessages((prev) => {
-      const thread = prev[cleanRecipient] || [];
-      const updatedThread = thread.filter((m) => m.id !== messageId);
-      const updated = {
-        ...prev,
-        [cleanRecipient]: updatedThread,
-      };
-      safeSaveStorage('privity_direct_messages_v5', updated);
-      return updated;
+      let changed = false;
+      const updated = { ...prev };
+      for (const [threadKey, messages] of Object.entries(updated)) {
+        if (messages.some((m) => m.id === messageId)) {
+          changed = true;
+          updated[threadKey] = messages.filter((m) => m.id !== messageId);
+        }
+      }
+      if (changed) {
+        safeSaveStorage('privity_direct_messages_v5', updated);
+        return updated;
+      }
+      return prev;
     });
     broadcastSyncEvent({
       action: 'DELETE_DM',
       recipientHandle: cleanRecipient,
+      senderHandle: myClean,
       messageId,
     });
     triggerToast('Message permanently removed from channel');
@@ -5563,6 +5729,7 @@ export function App() {
       const updated = {
         ...prev,
         [cleanRecipient]: [],
+        [cleanRecipient.toLowerCase()]: [],
       };
       safeSaveStorage('privity_direct_messages_v5', updated);
       return updated;
@@ -5580,10 +5747,16 @@ export function App() {
     setDirectMessages((prev) => {
       const updated = { ...prev };
       delete updated[cleanRecipient];
+      delete updated[cleanRecipient.toLowerCase()];
       safeSaveStorage('privity_direct_messages_v5', updated);
       return updated;
     });
-    if (activeChatUser && activeChatUser.handle.replace(/^@/, '').toLowerCase() === cleanRecipient.toLowerCase()) {
+    setDeletedChannelHandles((prev) => {
+      const next = Array.from(new Set([...prev, cleanRecipient.toLowerCase()]));
+      safeSaveStorage('privity_deleted_channels_v1', next);
+      return next;
+    });
+    if (activeChatUser && (activeChatUser.handle || '').replace(/^@/, '').toLowerCase() === cleanRecipient.toLowerCase()) {
       setActiveChatUser(null);
     }
     triggerToast(`Conversation with @${cleanRecipient} deleted`);
@@ -8274,17 +8447,30 @@ export function App() {
         {activeTab === 'messages' && (() => {
           // 1. Gather all conversation partner handles & registered users
           const existingDmHandles = Object.keys(directMessages).map((h) => h.replace(/^@/, ''));
-          const allRegisteredProfiles = Object.keys(profiles).map((h) => h.replace(/^@/, ''));
-          const allRegisteredAccounts = Object.values(authService.getAllAccounts()).map((a) => a.handle.replace(/^@/, ''));
+          const groupHandles = Object.keys(chatGroups).map((h) => h.replace(/^@/, ''));
+          const allRegisteredProfiles = Object.keys(profiles)
+            .map((h) => h.replace(/^@/, ''))
+            .filter((h) => !h.startsWith('group_'));
+          const allRegisteredAccounts = Object.values(authService.getAllAccounts())
+            .map((a) => a.handle.replace(/^@/, ''))
+            .filter((h) => !h.startsWith('group_'));
           const myClean = (myProfile.handle || '').replace(/^@/, '').toLowerCase();
+          const deletedSet = new Set((deletedChannelHandles || []).map((h) => h.toLowerCase()));
 
           const allPartnerHandles = Array.from(
             new Set([
               ...existingDmHandles,
+              ...groupHandles,
               ...allRegisteredProfiles,
               ...allRegisteredAccounts,
             ])
-          ).filter((h) => h && h.toLowerCase() !== myClean && !h.startsWith('sc-') && !isMockHandle(h));
+          ).filter((h) => {
+            const hLower = h.toLowerCase();
+            if (!h || hLower === myClean || h.startsWith('sc-') || isMockHandle(h)) return false;
+            const thread = directMessages[h] || directMessages[hLower] || [];
+            if (deletedSet.has(hLower) && thread.length === 0) return false;
+            return true;
+          });
 
           // 2. Filter channels based on search and active channel filter
           const filteredChannels = allPartnerHandles.filter((handle) => {
@@ -8801,10 +8987,45 @@ export function App() {
                         </button>
                         <button
                           type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'save' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('save')}
+                        >
+                          🔖 Saves ({notifications.filter((n) => n.type === 'save').length})
+                        </button>
+                        <button
+                          type="button"
                           className={`notif-filter-pill ${notificationsFilter === 'follow' ? 'active' : ''}`}
                           onClick={() => setNotificationsFilter('follow')}
                         >
                           👤 Follows ({notifications.filter((n) => n.type === 'follow').length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'gift' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('gift')}
+                        >
+                          🎁 Gifts ({notifications.filter((n) => n.type === 'gift').length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'live' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('live')}
+                        >
+                          🔴 Live ({notifications.filter((n) => n.type === 'live').length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'story' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('story')}
+                        >
+                          ✨ Stories ({notifications.filter((n) => n.type === 'story').length})
+                        </button>
+                        <button
+                          type="button"
+                          className={`notif-filter-pill ${notificationsFilter === 'read' ? 'active' : ''}`}
+                          onClick={() => setNotificationsFilter('read')}
+                        >
+                          👁️ Reads ({notifications.filter((n) => n.type === 'read').length})
                         </button>
                       </div>
                       {unreadNotifsCount > 0 && (
@@ -9078,83 +9299,117 @@ export function App() {
                       <IconArrowLeft size={18} />
                     </button>
 
-                    <div
-                      className="messages-thread-user-meta"
-                      onClick={() => {
-                        setActiveChatUser(null);
-                        navigateToProfile(currentRecipient.handle);
-                      }}
-                      title={`View @${currentRecipient.handle}'s profile`}
-                    >
-                      <div className="messages-thread-avatar-wrap">
-                        <MediaAvatar
-                          src={currentRecipient.avatar}
-                          alt={currentRecipient.name}
-                          className="messages-thread-avatar"
-                          style={{ borderColor: isPartnerInCloseFriends ? 'var(--cf-emerald)' : undefined }}
-                          showBadge={false}
-                        />
-                        <span className={`online-presence-dot presence-dot-${getUserPresenceState(cleanRecipientHandle)}`} />
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
-                        <div className="messages-thread-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentRecipient.name}</span>
-                          {currentRecipient.isVerified && (
-                            <VerifiedBadge
-                              authorName={currentRecipient.name}
-                              category={currentRecipient.verifiedCategory}
-                              since={currentRecipient.verifiedSince}
-                              proofId={currentRecipient.cryptoProofId}
+                    {(() => {
+                      const isGrp = cleanRecipientHandle.startsWith('group_') || Boolean(chatGroups[cleanRecipientHandle]);
+                      const grpObj = chatGroups[cleanRecipientHandle];
+                      const headerTitle = isGrp ? (grpObj?.name || currentRecipient.name || 'Group Chat') : currentRecipient.name;
+                      const headerAvatar = isGrp ? (grpObj?.avatar || currentRecipient.avatar || 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=400') : currentRecipient.avatar;
+
+                      return (
+                        <div
+                          className="messages-thread-user-meta"
+                          onClick={() => {
+                            if (isGrp) {
+                              setSelectedGroupInfo(grpObj || {
+                                id: cleanRecipientHandle,
+                                name: headerTitle,
+                                avatar: headerAvatar,
+                                members: [cleanMyHandle],
+                                createdAt: Date.now(),
+                                createdBy: cleanMyHandle,
+                              });
+                            } else {
+                              setActiveChatUser(null);
+                              navigateToProfile(currentRecipient.handle);
+                            }
+                          }}
+                          title={isGrp ? 'View Group Circle Details' : `View @${currentRecipient.handle}'s profile`}
+                        >
+                          <div className="messages-thread-avatar-wrap">
+                            <MediaAvatar
+                              src={headerAvatar}
+                              alt={headerTitle}
+                              className="messages-thread-avatar"
+                              style={{ borderColor: isGrp ? 'rgba(0, 240, 255, 0.4)' : isPartnerInCloseFriends ? 'var(--cf-emerald)' : undefined }}
+                              showBadge={false}
                             />
-                          )}
-                          {isPartnerInCloseFriends && (
-                            <span
-                              style={{
-                                fontSize: '10.5px',
-                                background: 'var(--cf-glass)',
-                                border: '1px solid var(--cf-border)',
-                                color: 'var(--cf-emerald)',
-                                padding: '1px 6px',
-                                borderRadius: 'var(--radius-pill)',
-                                fontWeight: 700,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '3px',
-                                flexShrink: 0,
-                              }}
-                            >
-                              <IconStarCloseFriends size={10} color="var(--cf-emerald)" />
-                              Circle
-                            </span>
-                          )}
+                            {!isGrp && (
+                              <span className={`online-presence-dot presence-dot-${getUserPresenceState(cleanRecipientHandle)}`} />
+                            )}
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
+                            <div className="messages-thread-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{headerTitle}</span>
+                              {isGrp ? (
+                                <span style={{ fontSize: '10.5px', background: 'rgba(0, 240, 255, 0.15)', border: '1px solid rgba(0, 240, 255, 0.3)', color: 'var(--brand-cyan)', padding: '1px 6px', borderRadius: 'var(--radius-pill)', fontWeight: 700 }}>
+                                  Group
+                                </span>
+                              ) : currentRecipient.isVerified && (
+                                <VerifiedBadge
+                                  authorName={currentRecipient.name}
+                                  category={currentRecipient.verifiedCategory}
+                                  since={currentRecipient.verifiedSince}
+                                  proofId={currentRecipient.cryptoProofId}
+                                />
+                              )}
+                              {isPartnerInCloseFriends && (
+                                <span
+                                  style={{
+                                    fontSize: '10.5px',
+                                    background: 'var(--cf-glass)',
+                                    border: '1px solid var(--cf-border)',
+                                    color: 'var(--cf-emerald)',
+                                    padding: '1px 6px',
+                                    borderRadius: 'var(--radius-pill)',
+                                    fontWeight: 700,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <IconStarCloseFriends size={10} color="var(--cf-emerald)" />
+                                  Circle
+                                </span>
+                              )}
+                            </div>
+                            <div className="messages-thread-status" style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+                              {isGrp ? (
+                                <span style={{ fontSize: '11.5px', color: 'var(--brand-cyan)', fontWeight: 600 }}>
+                                  Group · {grpObj?.members?.length || 2} members (tap for details)
+                                </span>
+                              ) : (
+                                <>
+                                  <span
+                                    className="status-indicator-dot"
+                                    style={{
+                                      background:
+                                        getUserPresenceState(cleanRecipientHandle) === 'active'
+                                          ? '#22c55e'
+                                          : getUserPresenceState(cleanRecipientHandle) === 'inactive'
+                                          ? '#ef4444'
+                                          : '#475569',
+                                      boxShadow:
+                                        getUserPresenceState(cleanRecipientHandle) === 'active' ? '0 0 8px #22c55e' : 'none',
+                                      flexShrink: 0,
+                                    }}
+                                  />
+                                  <span style={{ color: getUserPresenceState(cleanRecipientHandle) === 'active' ? '#22c55e' : 'var(--text-muted)', fontSize: '11.5px' }}>
+                                    {isRecipientTyping
+                                      ? `@${cleanRecipientHandle} is typing...`
+                                      : getUserPresenceState(cleanRecipientHandle) === 'active'
+                                      ? 'Active now'
+                                      : getUserPresenceState(cleanRecipientHandle) === 'inactive'
+                                      ? 'Active recently'
+                                      : 'Offline'}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="messages-thread-status" style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
-                          <span
-                            className="status-indicator-dot"
-                            style={{
-                              background:
-                                getUserPresenceState(cleanRecipientHandle) === 'active'
-                                  ? '#22c55e'
-                                  : getUserPresenceState(cleanRecipientHandle) === 'inactive'
-                                  ? '#ef4444'
-                                  : '#475569',
-                              boxShadow:
-                                getUserPresenceState(cleanRecipientHandle) === 'active' ? '0 0 8px #22c55e' : 'none',
-                              flexShrink: 0,
-                            }}
-                          />
-                          <span style={{ color: getUserPresenceState(cleanRecipientHandle) === 'active' ? '#22c55e' : 'var(--text-muted)', fontSize: '11.5px' }}>
-                            {isRecipientTyping
-                              ? `@${cleanRecipientHandle} is typing...`
-                              : getUserPresenceState(cleanRecipientHandle) === 'active'
-                              ? 'Active now'
-                              : getUserPresenceState(cleanRecipientHandle) === 'inactive'
-                              ? 'Active recently'
-                              : 'Offline'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="chat-header-actions-group">
@@ -9884,6 +10139,118 @@ export function App() {
                 </div>
               )}
 
+              {/* VisionOS Group Circle Info Modal */}
+              {selectedGroupInfo && (
+                <div className="group-create-backdrop" onClick={() => setSelectedGroupInfo(null)}>
+                  <div className="group-create-modal" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
+                    <div className="group-create-header">
+                      <div className="group-create-title">
+                        <span style={{ fontSize: '20px' }}>👥</span>
+                        <span>Group Circle Details</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="profile-drawer-close-btn"
+                        onClick={() => setSelectedGroupInfo(null)}
+                      >
+                        <IconX size={16} />
+                      </button>
+                    </div>
+
+                    <div className="group-create-body" style={{ textAlign: 'center', padding: '20px 16px' }}>
+                      <div style={{ position: 'relative', width: '74px', height: '74px', margin: '0 auto 12px auto' }}>
+                        <img
+                          src={selectedGroupInfo.avatar}
+                          alt={selectedGroupInfo.name}
+                          style={{
+                            width: '74px',
+                            height: '74px',
+                            borderRadius: '50%',
+                            objectFit: 'cover',
+                            border: '2px solid rgba(0, 240, 255, 0.4)',
+                            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
+                          }}
+                        />
+                      </div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>
+                        {selectedGroupInfo.name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+                        Encrypted group channel · {selectedGroupInfo.members.length} participants
+                      </div>
+
+                      <div style={{ textAlign: 'left', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '14px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>
+                          Joined Members ({selectedGroupInfo.members.length})
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto' }}>
+                          {selectedGroupInfo.members.map((mHandle) => {
+                            const cleanH = normalizeHandle(mHandle);
+                            const memberProf = getUserProfile(cleanH);
+                            const isSelf = cleanH === normalizeHandle(currentAuthUser?.handle || myProfile.handle);
+
+                            return (
+                              <div
+                                key={cleanH}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '8px 10px',
+                                  borderRadius: '12px',
+                                  background: 'rgba(255, 255, 255, 0.04)',
+                                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                                  <img
+                                    src={memberProf.avatar}
+                                    alt={memberProf.name}
+                                    style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover' }}
+                                  />
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {memberProf.name} {isSelf && <span style={{ fontSize: '11px', opacity: 0.6 }}>(You)</span>}
+                                    </div>
+                                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                                      @{cleanH}
+                                    </div>
+                                  </div>
+                                </div>
+                                {!isSelf && (
+                                  <button
+                                    type="button"
+                                    className="btn-follow-toggle"
+                                    style={{ padding: '4px 10px', fontSize: '11px' }}
+                                    onClick={() => {
+                                      setSelectedGroupInfo(null);
+                                      navigateToProfile(cleanH);
+                                    }}
+                                  >
+                                    View Profile
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="group-create-footer">
+                      <button
+                        type="button"
+                        className="group-create-cancel-btn"
+                        style={{ width: '100%' }}
+                        onClick={() => setSelectedGroupInfo(null)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
             </div>
           );
         })()}
@@ -10008,10 +10375,45 @@ export function App() {
                 </button>
                 <button
                   type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'save' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('save')}
+                >
+                  🔖 Saves ({notifications.filter((n) => n.type === 'save').length})
+                </button>
+                <button
+                  type="button"
                   className={`notif-filter-pill ${notificationsFilter === 'follow' ? 'active' : ''}`}
                   onClick={() => setNotificationsFilter('follow')}
                 >
                   👤 Follows ({notifications.filter((n) => n.type === 'follow').length})
+                </button>
+                <button
+                  type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'gift' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('gift')}
+                >
+                  🎁 Gifts ({notifications.filter((n) => n.type === 'gift').length})
+                </button>
+                <button
+                  type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'live' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('live')}
+                >
+                  🔴 Live ({notifications.filter((n) => n.type === 'live').length})
+                </button>
+                <button
+                  type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'story' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('story')}
+                >
+                  ✨ Stories ({notifications.filter((n) => n.type === 'story').length})
+                </button>
+                <button
+                  type="button"
+                  className={`notif-filter-pill ${notificationsFilter === 'read' ? 'active' : ''}`}
+                  onClick={() => setNotificationsFilter('read')}
+                >
+                  👁️ Reads ({notifications.filter((n) => n.type === 'read').length})
                 </button>
               </div>
 
@@ -10072,6 +10474,9 @@ export function App() {
                               {notif.type === 'gift' && '🎁'}
                               {notif.type === 'save' && '🔖'}
                               {notif.type === 'share' && '🚀'}
+                              {notif.type === 'live' && '🔴'}
+                              {notif.type === 'story' && '✨'}
+                              {notif.type === 'read' && '👁️'}
                             </span>
                           </div>
 
@@ -10088,12 +10493,15 @@ export function App() {
                                 {notif.actorName}
                               </span>
                               <span className="notif-actor-handle-pill">@{cleanActor}</span>
-                              {notif.type === 'like' && 'liked your dispatch'}
-                              {notif.type === 'comment' && 'commented on your dispatch'}
-                              {notif.type === 'follow' && 'started following you'}
-                              {notif.type === 'gift' && `sent you a gift: ${notif.giftName || 'Virtual Gift'}`}
-                              {notif.type === 'save' && 'saved your dispatch to their bookmarks'}
-                              {notif.type === 'share' && 'shared your dispatch'}
+                              {notif.type === 'like' && ' liked your dispatch'}
+                              {notif.type === 'comment' && ' commented on your dispatch'}
+                              {notif.type === 'follow' && ' started following you'}
+                              {notif.type === 'gift' && ` sent you a gift: ${notif.giftName || 'Virtual Gift'}`}
+                              {notif.type === 'save' && ' saved your dispatch to collections'}
+                              {notif.type === 'share' && ' shared your dispatch'}
+                              {notif.type === 'live' && ' started a LIVE broadcast 🔴'}
+                              {notif.type === 'story' && ' shared a new STORY ✨'}
+                              {notif.type === 'read' && ' opened and read your message 👁️'}
                             </div>
 
                             {notif.commentText && (
@@ -10123,6 +10531,57 @@ export function App() {
                               }}
                             >
                               {isFollowingActor ? 'Following' : 'Follow Back'}
+                            </button>
+                          )}
+
+                          {notif.type === 'live' && (
+                            <button
+                              type="button"
+                              className="notif-action-btn-follow"
+                              style={{ background: 'rgba(239, 68, 68, 0.2)', borderColor: '#ef4444', color: '#ef4444' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markNotificationRead(notif.id);
+                                handleSelectFeedTab('live');
+                              }}
+                            >
+                              Watch Live 🔴
+                            </button>
+                          )}
+
+                          {notif.type === 'story' && (
+                            <button
+                              type="button"
+                              className="notif-action-btn-follow"
+                              style={{ background: 'rgba(0, 240, 255, 0.15)', borderColor: 'var(--brand-cyan)', color: 'var(--brand-cyan)' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markNotificationRead(notif.id);
+                                const sIndex = stories.findIndex((s) => normalizeHandle(s.authorHandle) === cleanActor);
+                                if (sIndex !== -1) {
+                                  setDmActiveStoryIndex(sIndex);
+                                } else {
+                                  setViewedUserHandle(cleanActor);
+                                  setActiveTab('profile');
+                                }
+                              }}
+                            >
+                              View Story ✨
+                            </button>
+                          )}
+
+                          {notif.type === 'read' && (
+                            <button
+                              type="button"
+                              className="notif-action-btn-follow"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                markNotificationRead(notif.id);
+                                setActiveChatUser(getUserProfile(cleanActor));
+                                setActiveTab('messages');
+                              }}
+                            >
+                              Open Chat 💬
                             </button>
                           )}
                         </div>
