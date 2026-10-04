@@ -7123,7 +7123,7 @@ export function App() {
     followersCount: (myProfile.followersList || []).length,
   }), [myProfile.name, myProfile.handle, myProfile.avatar, myProfile.isVerified, myProfile.followersList]);
 
-  const handleCameraGoLive = ({
+  const handleCameraGoLive = async ({
     title,
     category,
     goal,
@@ -7134,7 +7134,20 @@ export function App() {
     goal: string;
     cameraStream?: MediaStream | null;
   }) => {
-    setHostLiveCameraStream(cameraStream || null);
+    let finalStream = cameraStream || null;
+    if (finalStream) {
+      if (finalStream.getAudioTracks().length === 0) {
+        try {
+          const mic = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 48000 },
+          });
+          mic.getAudioTracks().forEach((track) => finalStream!.addTrack(track));
+        } catch (e) {
+          console.warn('Microphone attach notice in handleCameraGoLive:', e);
+        }
+      }
+    }
+    setHostLiveCameraStream(finalStream);
     setIsHostBroadcasting(true);
     const cleanHandle = (myProfile.handle || '').toLowerCase().replace('@', '').trim();
     const streamSessionId = `live-user-${cleanHandle}-${Date.now()}`;

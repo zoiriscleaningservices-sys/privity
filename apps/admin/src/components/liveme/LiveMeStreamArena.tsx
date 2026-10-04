@@ -223,6 +223,48 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const ambientVideoRef = useRef<HTMLVideoElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(userMediaStream || null);
+  const viewerVideoNodeRef = useRef<HTMLVideoElement | null>(null);
+  const viewerAudioNodeRef = useRef<HTMLAudioElement | null>(null);
+  const guestOffscreenVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Unconditionally ensure host always acquires microphone audio tracks
+  useEffect(() => {
+    if (!isHost) return;
+    const ensureHostAudio = async () => {
+      let current = localStreamRef.current || userMediaStream;
+      if (current && current.getAudioTracks().length === 0) {
+        try {
+          const mic = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 48000 },
+          });
+          mic.getAudioTracks().forEach((track) => {
+            current!.addTrack(track);
+          });
+          localStreamRef.current = current;
+          liveStreamSync.updateHostMediaStream(current);
+        } catch (err) {
+          console.warn('Host microphone auto-acquisition notice:', err);
+        }
+      }
+    };
+    ensureHostAudio();
+  }, [isHost, userMediaStream]);
+
+  // Audio unlock helper for viewers (bypasses browser autoplay restrictions on any user gesture)
+  const unlockViewerAudio = useCallback(() => {
+    if (viewerVideoNodeRef.current) {
+      viewerVideoNodeRef.current.muted = false;
+      viewerVideoNodeRef.current.volume = 1.0;
+      viewerVideoNodeRef.current.play().catch(() => {});
+    }
+    if (viewerAudioNodeRef.current) {
+      viewerAudioNodeRef.current.muted = false;
+      viewerAudioNodeRef.current.volume = 1.0;
+      viewerAudioNodeRef.current.play().catch(() => {});
+    }
+    setShowTapToUnmute(false);
+    setIsMuted(false);
+  }, []);
 
   const bindHostVideoRef = useCallback((node: HTMLVideoElement | null) => {
     videoRef.current = node;
@@ -801,12 +843,20 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       if (guestFrameIntervalRef.current) {
         clearInterval(guestFrameIntervalRef.current);
       }
+      if (guestOffscreenVideoRef.current) {
+        guestOffscreenVideoRef.current.remove();
+        guestOffscreenVideoRef.current = null;
+      }
+
       const offscreenVideo = document.createElement('video');
       offscreenVideo.muted = true;
       offscreenVideo.autoplay = true;
       offscreenVideo.playsInline = true;
+      offscreenVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:180px;height:240px;opacity:0.01;pointer-events:none;';
       offscreenVideo.srcObject = stream;
+      document.body.appendChild(offscreenVideo);
       offscreenVideo.play().catch(() => {});
+      guestOffscreenVideoRef.current = offscreenVideo;
 
       const offscreenCanvas = document.createElement('canvas');
       offscreenCanvas.width = 180;
@@ -814,15 +864,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       const offscreenCtx = offscreenCanvas.getContext('2d');
 
       const emitGuestFrame = () => {
-        if (!offscreenCtx || offscreenVideo.videoWidth === 0) return;
+        if (!offscreenCtx) return;
         try {
-          offscreenCtx.drawImage(offscreenVideo, 0, 0, 180, 240);
-          const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.35);
-          liveStreamSync.sendRoomEvent(roomId, {
-            type: 'GUEST_LIVE_FRAME',
-            guestHandle: cleanMyHandle,
-            frame: frameJpeg,
-          });
+          if (offscreenVideo.videoWidth > 0 && offscreenVideo.videoHeight > 0) {
+            offscreenCtx.drawImage(offscreenVideo, 0, 0, 180, 240);
+            const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.35);
+            liveStreamSync.sendRoomEvent(roomId, {
+              type: 'GUEST_LIVE_FRAME',
+              guestHandle: cleanMyHandle,
+              frame: frameJpeg,
+            });
+          }
         } catch {}
       };
       guestFrameIntervalRef.current = setInterval(emitGuestFrame, 300);
@@ -868,6 +920,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     if (guestFrameIntervalRef.current) {
       clearInterval(guestFrameIntervalRef.current);
       guestFrameIntervalRef.current = null;
+    }
+    if (guestOffscreenVideoRef.current) {
+      guestOffscreenVideoRef.current.remove();
+      guestOffscreenVideoRef.current = null;
     }
     if (guestLocalStreamRef.current) {
       guestLocalStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -2652,6 +2708,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         className={`liveme-center-stage ${isPkBattleActive ? 'is-pk-active' : ''}`}
         ref={stageRef}
         onClick={(e) => {
+          unlockViewerAudio();
           const target = e.target as HTMLElement | null;
           if (
             target &&
@@ -2779,6 +2836,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               {remoteP2PStream && (
                 <video
                   ref={(node) => {
+                    viewerVideoNodeRef.current = node;
                     if (node && node.srcObject !== remoteP2PStream) {
                       node.srcObject = remoteP2PStream;
                       node.setAttribute('playsinline', 'true');
@@ -2813,6 +2871,24 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                     filter: activeLiveFilter.cssFilter !== 'none' ? activeLiveFilter.cssFilter : undefined,
                   }}
                   className="liveme-video-canvas"
+                />
+              )}
+
+              {/* Dedicated Remote Audio Playback Engine (Viewers hear host voice directly) */}
+              {remoteP2PStream && (
+                <audio
+                  ref={(node) => {
+                    viewerAudioNodeRef.current = node;
+                    if (node && node.srcObject !== remoteP2PStream) {
+                      node.srcObject = remoteP2PStream;
+                      node.muted = isMuted;
+                      node.volume = 1.0;
+                      node.play().catch(() => {});
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  style={{ display: 'none' }}
                 />
               )}
             </div>
@@ -3795,13 +3871,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           <div
             className="tiktok-tap-to-unmute-badge"
             onClick={() => {
-              setShowTapToUnmute(false);
-              setIsMuted(false);
-              if (videoRef.current) {
-                videoRef.current.muted = false;
-                videoRef.current.volume = 1.0;
-                videoRef.current.play().catch(() => {});
-              }
+              unlockViewerAudio();
               showToast('🔊 Live Sound Unmuted');
             }}
           >

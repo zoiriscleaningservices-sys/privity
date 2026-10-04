@@ -221,7 +221,18 @@ export const LiveGuestStageBox: React.FC<LiveGuestStageBoxProps> = ({
       {/* 2. Real-time WebRTC / Local Camera Video Layer */}
       {((isSelf && localStream) || (!isSelf && remoteStream)) && (
         <video
-          ref={videoRef}
+          ref={(node) => {
+            videoRef.current = node;
+            if (node) {
+              const target = isSelf ? localStream : remoteStream;
+              if (target && node.srcObject !== target) {
+                node.srcObject = target;
+                node.muted = isSelf ? true : isMicMuted;
+                node.volume = 1.0;
+                node.play().catch((err) => console.warn('Guest video play notice:', err));
+              }
+            }
+          }}
           autoPlay
           playsInline
           muted={isSelf ? true : isMicMuted}
@@ -239,6 +250,23 @@ export const LiveGuestStageBox: React.FC<LiveGuestStageBoxProps> = ({
             opacity: isVideoPlaying ? 1 : (guestLiveFrame ? 0 : 1),
             transition: 'opacity 0.2s ease-in-out',
           }}
+        />
+      )}
+
+      {/* 3. Dedicated Remote Guest Audio Playback Engine (Host hears guest voice directly) */}
+      {!isSelf && remoteStream && (
+        <audio
+          ref={(node) => {
+            if (node && node.srcObject !== remoteStream) {
+              node.srcObject = remoteStream;
+              node.muted = isMicMuted;
+              node.volume = 1.0;
+              node.play().catch((err) => console.warn('Guest audio play notice:', err));
+            }
+          }}
+          autoPlay
+          playsInline
+          style={{ display: 'none' }}
         />
       )}
 

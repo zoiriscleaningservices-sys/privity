@@ -628,12 +628,31 @@ export const CameraModal: React.FC<CameraModalProps> = ({
   };
 
   // Go LIVE Click Handler (Screenshot 2)
-  const handleInitiateGoLive = () => {
+  const handleInitiateGoLive = async () => {
     playGoLiveFanfare();
     setLiveCountDown(3);
 
+    // Eagerly acquire microphone with audio enhancements before countdown finishes
+    if (mediaStreamRef.current && mediaStreamRef.current.getAudioTracks().length === 0) {
+      try {
+        const mic = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 48000,
+          },
+        });
+        mic.getAudioTracks().forEach((track) => {
+          mediaStreamRef.current?.addTrack(track);
+        });
+      } catch (err) {
+        console.warn('Microphone permission notice on Go Live:', err);
+      }
+    }
+
     let count = 3;
-    const countdown = setInterval(() => {
+    const countdown = setInterval(async () => {
       count -= 1;
       if (count > 0) {
         setLiveCountDown(count);
@@ -643,6 +662,22 @@ export const CameraModal: React.FC<CameraModalProps> = ({
         setLiveCountDown(null);
         playCountdownBeep(true);
         const liveStreamToHandOver = mediaStreamRef.current;
+        // Make sure audio tracks are attached
+        if (liveStreamToHandOver && liveStreamToHandOver.getAudioTracks().length === 0) {
+          try {
+            const mic = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                sampleRate: 48000,
+              },
+            });
+            mic.getAudioTracks().forEach((track) => {
+              liveStreamToHandOver.addTrack(track);
+            });
+          } catch {}
+        }
         // Detach stream reference so stopCameraStream won't kill active tracks during handover
         mediaStreamRef.current = null;
         if (videoRef.current) {

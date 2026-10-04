@@ -870,9 +870,21 @@ class LiveStreamSyncService {
           }
 
           // Receive guest tracks so host receives guest audio and video
+          const incomingGuestStream = new MediaStream();
           pc.ontrack = (event) => {
-            const guestStream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
-            this.dispatchGuestStream(cleanGuestH, guestStream);
+            if (event.track) {
+              if (!incomingGuestStream.getTracks().some((t) => t.id === event.track.id)) {
+                incomingGuestStream.addTrack(event.track);
+              }
+            }
+            if (event.streams && event.streams[0]) {
+              event.streams[0].getTracks().forEach((t) => {
+                if (!incomingGuestStream.getTracks().some((it) => it.id === t.id)) {
+                  incomingGuestStream.addTrack(t);
+                }
+              });
+            }
+            this.dispatchGuestStream(cleanGuestH, incomingGuestStream);
           };
 
           pc.onicecandidate = (event) => {
