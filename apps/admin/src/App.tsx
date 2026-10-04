@@ -12710,6 +12710,13 @@ export function App() {
           initialCoHostMode={isCoHostInviteAccepted}
           userMediaStream={hostLiveCameraStream}
           customStreamer={activeLiveStream as any}
+          currentUser={{
+            name: currentAuthUser?.name || myProfile.name || 'Member',
+            handle: (currentAuthUser?.handle || myProfile.handle || '').startsWith('@')
+              ? (currentAuthUser?.handle || myProfile.handle || '')
+              : `@${currentAuthUser?.handle || myProfile.handle || 'member'}`,
+            avatar: currentAuthUser?.avatar || myProfile.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
+          }}
           onClose={(opts?: { wasEnded?: boolean; isHost?: boolean }) => {
             setIsCoHostInviteAccepted(false);
             if (opts?.wasEnded || opts?.isHost || isHostBroadcasting) {
@@ -12773,11 +12780,6 @@ export function App() {
               hostLiveCameraStream.getTracks().forEach((t) => t.stop());
               setHostLiveCameraStream(null);
             }
-          }}
-          currentUser={{
-            name: myProfile.name,
-            handle: myProfile.handle,
-            avatar: myProfile.avatar,
           }}
           userCoins={userSparksBalance}
           onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}

@@ -60,11 +60,7 @@ export interface LiveMeStreamArenaProps {
 export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   onClose,
   initialStreamerId,
-  currentUser = {
-    name: 'Member',
-    handle: '',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
-  },
+  currentUser: initialCurrentUser,
   userCoins,
   onCoinsChange,
   showToast,
@@ -75,6 +71,58 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   customStreamer,
   initialCoHostMode = false,
 }) => {
+  // Resolved robust user profile with fallback to localStorage so handle is never empty
+  const currentUser = useMemo(() => {
+    let handle = (initialCurrentUser?.handle || '').trim();
+    let name = initialCurrentUser?.name || '';
+    let avatar = initialCurrentUser?.avatar || '';
+
+    if (!handle) {
+      try {
+        const storedHost = localStorage.getItem('privity_current_live_host');
+        if (storedHost) {
+          const parsed = JSON.parse(storedHost);
+          handle = parsed.creatorHandle || parsed.handle || '';
+          name = name || parsed.creatorName || parsed.name || '';
+          avatar = avatar || parsed.creatorAvatar || parsed.avatar || '';
+        }
+      } catch {}
+    }
+    if (!handle) {
+      try {
+        const authUser = localStorage.getItem('privity_auth_user');
+        if (authUser) {
+          const parsed = JSON.parse(authUser);
+          handle = parsed.handle || '';
+          name = name || parsed.name || '';
+          avatar = avatar || parsed.avatar || '';
+        }
+      } catch {}
+    }
+    if (!handle) {
+      try {
+        const profile = localStorage.getItem('privity_user_profile');
+        if (profile) {
+          const parsed = JSON.parse(profile);
+          handle = parsed.handle || '';
+          name = name || parsed.name || '';
+          avatar = avatar || parsed.avatar || '';
+        }
+      } catch {}
+    }
+
+    if (!handle) {
+      handle = '@member';
+    } else if (!handle.startsWith('@')) {
+      handle = `@${handle}`;
+    }
+
+    return {
+      name: name || 'Creator',
+      handle,
+      avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
+    };
+  }, [initialCurrentUser]);
   // Catalog view toggle
   const [showCatalog, setShowCatalog] = useState(false);
 
@@ -1587,7 +1635,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               });
             }
 
-            // Real-time Co-Host Frame Relay (Instantly renders host in rival's box with 0ms delay)
+            // Real-time Co-Host Frame Relay (Instantly renders in rival's box and audience screens with 0ms delay)
             if (isCoHostConnectedRef.current && pkRivalRef.current?.handle) {
               const cleanRivalH = (pkRivalRef.current.handle || '').replace(/^@+/, '').toLowerCase().trim();
               const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
@@ -1598,6 +1646,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   targetHandle: cleanRivalH,
                   frame: frameJpeg,
                 });
+                if (roomId && roomId !== cleanRivalH) {
+                  liveStreamSync.sendRoomEvent(roomId, {
+                    type: 'COHOST_LIVE_FRAME',
+                    senderHandle: cleanMyH,
+                    targetHandle: cleanRivalH,
+                    frame: frameJpeg,
+                  });
+                }
                 try {
                   const cohostBus = new BroadcastChannel('privity_cohost_frames');
                   cohostBus.postMessage({
@@ -3970,44 +4026,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 ))}
               </div>
 
-              {/* Center Match Control Hub (Shown when Co-Host connected BEFORE match starts) */}
-              {isCoHostConnected && !isPkBattleActive && (
-                <div className="liveme-cohost-match-hub">
-                  <div className="liveme-cohost-status-badge">
-                    <span className="liveme-cohost-status-dot" />
-                    <span>Co-Host Connected</span>
-                  </div>
-                  {isBattleRequestPending ? (
-                    <div className="liveme-cohost-challenge-pending">
-                      <div className="liveme-challenge-pulse">
-                        <span className="liveme-pulse-dot" />
-                        <span>Challenging @{pkRival.handle.replace(/^@+/, '')}...</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="liveme-cancel-challenge-btn"
-                        onClick={handleCancelBattleRequest}
-                      >
-                        ✕ Cancel Challenge
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="liveme-start-match-btn"
-                      onClick={handleRequestBattle}
-                      title="Request 3-Minute PK Battle with synchronized scores and speed challenges"
-                    >
-                      <span>🥊</span>
-                      <span>START MATCH</span>
-                    </button>
-                  )}
+              {/* Battle Challenge Pending Status Chip (Top Floating, never blocks video center) */}
+              {isBattleRequestPending && (
+                <div className="liveme-top-challenge-pill">
+                  <span className="liveme-pulse-dot" />
+                  <span>Challenging @{pkRival.handle.replace(/^@+/, '')} to PK Battle...</span>
                   <button
                     type="button"
-                    className="liveme-disconnect-cohost-btn"
-                    onClick={handleDisconnectCoHost}
+                    className="liveme-challenge-cancel-chip"
+                    onClick={handleCancelBattleRequest}
                   >
-                    ✕ Disconnect
+                    ✕ Cancel
                   </button>
                 </div>
               )}
@@ -4034,12 +4063,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                         if (node && node.srcObject !== remoteCoHostStream) {
                           node.srcObject = remoteCoHostStream;
                           node.setAttribute('playsinline', 'true');
+                          node.setAttribute('webkit-playsinline', 'true');
+                          node.muted = true;
                           node.play().catch(() => {});
                         }
                       }}
                       autoPlay
                       playsInline
-                      muted={false}
+                      muted
                       className="liveme-pk-video-layer"
                       style={{ objectFit: 'cover', width: '100%', height: '100%' }}
                     />
@@ -4049,7 +4080,15 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                           node.srcObject = remoteCoHostStream;
                           node.muted = false;
                           node.volume = 1.0;
-                          node.play().catch(() => {});
+                          node.play().catch(() => {
+                            const unlock = () => {
+                              node.play().catch(() => {});
+                              window.removeEventListener('click', unlock);
+                              window.removeEventListener('touchstart', unlock);
+                            };
+                            window.addEventListener('click', unlock, { once: true });
+                            window.addEventListener('touchstart', unlock, { once: true });
+                          });
                         }
                       }}
                       autoPlay
@@ -4452,6 +4491,20 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 </div>
               ))}
             </div>
+
+            {/* Disconnect Co-Host Badge Pill (Shown in header when co-host connected) */}
+            {isCoHostConnected && (
+              <button
+                type="button"
+                className="liveme-cohost-disconnect-pill"
+                onClick={handleDisconnectCoHost}
+                title="Disconnect Co-Host"
+              >
+                <span className="liveme-cohost-green-dot" />
+                <span>Co-Host</span>
+                <span className="liveme-cohost-x-icon">✕</span>
+              </button>
+            )}
 
             {/* Audience Count Pill */}
             <div
@@ -4960,8 +5013,22 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 <button
                   type="button"
                   className={`tiktok-tool-btn battle ${(isCoHostConnected || isPkBattleActive) ? 'active' : ''}`}
-                  onClick={() => setIsCoHostModalOpen(true)}
-                  title="Co-host with creators & Battles"
+                  onClick={() => {
+                    if (isCoHostConnected && !isPkBattleActive) {
+                      handleRequestBattle();
+                    } else if (isPkBattleActive) {
+                      showToast('🥊 PK Battle is active! Cheer your side!');
+                    } else {
+                      setIsCoHostModalOpen(true);
+                    }
+                  }}
+                  title={
+                    isCoHostConnected && !isPkBattleActive
+                      ? '🥊 Tap PK to challenge co-host to 3-minute battle!'
+                      : isPkBattleActive
+                      ? 'PK Battle in progress'
+                      : 'Co-host with creators & Battles'
+                  }
                 >
                   <svg viewBox="0 0 28 28" width="22" height="22" fill="none">
                     <defs>
@@ -5002,21 +5069,52 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 </button>
               </>
             ) : (
-              /* Viewer Left: Request to Join Stage as Guest */
-              <button
-                type="button"
-                className={`tiktok-tool-btn join-stage ${isOnStageAsGuest ? 'on-stage' : isGuestRequestPending ? 'pending' : ''}`}
-                onClick={handleRequestJoinStage}
-                title={
-                  isOnStageAsGuest
-                    ? 'You are on stage as guest! Click to leave stage'
-                    : isGuestRequestPending
-                    ? 'Stage request pending host approval...'
-                    : 'Request to join stage and talk with host'
-                }
-              >
-                {isOnStageAsGuest ? '🎙️' : isGuestRequestPending ? '⏳' : '🎤'}
-              </button>
+              /* Viewer Left: Request to Join Stage as Guest OR Battle if Co-Host Connected */
+              isCoHostConnected ? (
+                <button
+                  type="button"
+                  className={`tiktok-tool-btn battle ${isPkBattleActive ? 'active' : ''}`}
+                  onClick={() => {
+                    if (!isPkBattleActive) {
+                      handleRequestBattle();
+                    } else {
+                      showToast('🥊 PK Battle is active! Cheer your side!');
+                    }
+                  }}
+                  title="🥊 Tap PK to challenge host to 3-minute battle!"
+                >
+                  <svg viewBox="0 0 28 28" width="22" height="22" fill="none">
+                    <defs>
+                      <linearGradient id="tkBattleGradViewer" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#ec4899" />
+                        <stop offset="100%" stopColor="#06b6d4" />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d="M8.5 9C6.01472 9 4 11.0147 4 13.5C4 15.9853 6.01472 18 8.5 18C10.7423 18 12.336 16.3813 14 14C15.664 11.6187 17.2577 10 19.5 10C21.9853 10 24 12.0147 24 14.5C24 16.9853 21.9853 19 19.5 19C17.2577 19 15.664 17.3813 14 15C12.336 12.6187 10.7423 11 8.5 11"
+                      stroke="url(#tkBattleGradViewer)"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span className="badge-pill">PK</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`tiktok-tool-btn join-stage ${isOnStageAsGuest ? 'on-stage' : isGuestRequestPending ? 'pending' : ''}`}
+                  onClick={handleRequestJoinStage}
+                  title={
+                    isOnStageAsGuest
+                      ? 'You are on stage as guest! Click to leave stage'
+                      : isGuestRequestPending
+                      ? 'Stage request pending host approval...'
+                      : 'Request to join stage and talk with host'
+                  }
+                >
+                  {isOnStageAsGuest ? '🎙️' : isGuestRequestPending ? '⏳' : '🎤'}
+                </button>
+              )
             )}
 
             {/* Center: Chat Input Form (Type... with Smiley) */}

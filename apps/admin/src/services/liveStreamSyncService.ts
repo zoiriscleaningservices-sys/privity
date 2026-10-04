@@ -40,21 +40,43 @@ export interface EndedStreamEntry {
   creatorHandle: string;
 }
 
+export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
+
 export function getRoomIdFromHandle(raw: string): string {
   if (!raw) return 'live';
   let cleaned = raw.toLowerCase().trim();
   if (cleaned.startsWith('@')) cleaned = cleaned.substring(1);
   if (cleaned.startsWith('live-user-')) {
-    const after = cleaned.replace('live-user-', '');
-    cleaned = after.split('-')[0] || after;
+    cleaned = cleaned.replace('live-user-', '');
   }
   if (cleaned.startsWith('privity-live-')) {
-    const after = cleaned.replace('privity-live-', '');
-    cleaned = after.split('-')[0] || after;
+    cleaned = cleaned.replace('privity-live-', '');
   }
   if (cleaned.startsWith('stream-')) {
-    const after = cleaned.replace('stream-', '');
-    cleaned = after.split('-')[0] || after;
+    cleaned = cleaned.replace('stream-', '');
   }
   return cleaned.replace(/[^a-z0-9]/g, '') || 'live';
 }
@@ -828,11 +850,7 @@ class LiveStreamSyncService {
             try { pc.close(); } catch {}
           }
           pc = new RTCPeerConnection({
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-              { urls: 'stun:stun.cloudflare.com:3478' },
-            ],
+            iceServers: DEFAULT_ICE_SERVERS,
           });
           this.hostPeerConnections.set(evt.viewerId, pc);
 
@@ -894,13 +912,7 @@ class LiveStreamSyncService {
             try { pc.close(); } catch {}
           }
           pc = new RTCPeerConnection({
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' },
-              { urls: 'stun:stun2.l.google.com:19302' },
-              { urls: 'stun:stun.cloudflare.com:3478' },
-              { urls: 'stun:global.stun.twilio.com:3478' },
-            ],
+            iceServers: DEFAULT_ICE_SERVERS,
           });
           this.hostPeerConnections.set(connKey, pc);
 
@@ -1147,11 +1159,7 @@ class LiveStreamSyncService {
     // 1. Direct WebRTC Signaling over MQTT Room
     try {
       const pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun.cloudflare.com:3478' },
-        ],
+        iceServers: DEFAULT_ICE_SERVERS,
       });
       rtcPeerConnection = pc;
 
@@ -1300,13 +1308,7 @@ class LiveStreamSyncService {
 
     try {
       pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun.cloudflare.com:3478' },
-          { urls: 'stun:global.stun.twilio.com:3478' },
-        ],
+        iceServers: DEFAULT_ICE_SERVERS,
       });
 
       // 1. Add all guest media tracks (camera & microphone) with ultra-HD bitrate
@@ -1489,22 +1491,33 @@ class LiveStreamSyncService {
 
   private dispatchRoomEvent(streamId: string, event: any) {
     if (!event) return;
-    const eventKey = event._eid || (
-      (event.type || '') + '_' +
-      streamId + '_' +
-      (event.user?.handle || event.senderHandle || '') + '_' +
-      (event.timestamp || '') + '_' +
-      (event.count ?? '') + '_' +
-      (event.delta ?? '')
-    );
-    if (eventKey && this.recentEventKeys.has(eventKey)) {
-      return;
-    }
-    if (eventKey) {
-      this.recentEventKeys.add(eventKey);
-      setTimeout(() => {
-        this.recentEventKeys.delete(eventKey);
-      }, 2500);
+
+    // NEVER deduplicate high-frequency streaming frames, video relays, or WebRTC signaling
+    const isFrameOrRTC =
+      event.type === 'COHOST_LIVE_FRAME' ||
+      event.type === 'LIVE_FRAME' ||
+      event.type === 'COHOST_FRAME' ||
+      event.type?.startsWith('GUEST_RTC_') ||
+      event.type?.startsWith('RTC_') ||
+      !!event.candidate ||
+      !!event.offer ||
+      !!event.answer;
+
+    if (!isFrameOrRTC) {
+      const eventKey = event._eid || (
+        event.type && (event.timestamp || event.count !== undefined || event.delta !== undefined)
+          ? `${event.type}_${streamId}_${event.user?.handle || event.senderHandle || ''}_${event.timestamp || ''}_${event.count ?? ''}_${event.delta ?? ''}`
+          : null
+      );
+      if (eventKey && this.recentEventKeys.has(eventKey)) {
+        return;
+      }
+      if (eventKey) {
+        this.recentEventKeys.add(eventKey);
+        setTimeout(() => {
+          this.recentEventKeys.delete(eventKey);
+        }, 1500);
+      }
     }
 
     const set = this.roomSubscribers.get(streamId);
