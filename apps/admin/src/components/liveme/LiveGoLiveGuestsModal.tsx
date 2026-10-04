@@ -112,8 +112,13 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
 
   const handleInvite = (targetHandle: string, targetName: string, targetAvatar: string) => {
     const cleanTargetHandle = targetHandle.replace(/^@/, '').toLowerCase().trim();
+    const isAlreadyInvited = !!invitedMap[cleanTargetHandle];
     setInvitedMap((prev) => ({ ...prev, [cleanTargetHandle]: true }));
-    showToast(`📩 Guest invite sent to ${targetName}!`);
+    showToast(
+      isAlreadyInvited
+        ? `📩 Re-sent guest invite to ${targetName}!`
+        : `📩 Guest invite sent to ${targetName}!`
+    );
 
     const viewerObj: RoomViewer = {
       id: cleanTargetHandle,
@@ -129,9 +134,9 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
       onInviteGuest(viewerObj);
     }
 
-    // Broadcast over MQTT and Supabase
+    // Broadcast over MQTT to target room, current host room, and local bus
     const roomId = currentHostHandle.replace(/^@/, '').toLowerCase().trim();
-    liveStreamSync.sendRoomEvent(roomId, {
+    const guestEvt = {
       type: 'GUEST_INVITE',
       senderHandle: currentHostHandle,
       senderName: currentHostName,
@@ -139,7 +144,14 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
       targetHandle: cleanTargetHandle,
       targetName,
       timestamp: Date.now(),
-    });
+    };
+    liveStreamSync.sendRoomEvent(cleanTargetHandle, guestEvt);
+    liveStreamSync.sendRoomEvent(roomId, guestEvt);
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(guestEvt);
+      bus.close();
+    } catch {}
   };
 
   return (
@@ -302,9 +314,9 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
                             type="button"
                             className={`tiktok-btn-invite ${isInvited ? 'invited' : ''}`}
                             onClick={() => handleInvite(viewer.handle, viewer.name, viewer.avatar)}
-                            disabled={isInvited}
+                            title={isInvited ? 'Invite sent. Tap to re-invite anytime!' : 'Invite to Stage'}
                           >
-                            {isInvited ? 'Invited' : 'Invite'}
+                            {isInvited ? 'Invite Again 🔁' : 'Invite'}
                           </button>
                         )}
                       </div>
@@ -340,9 +352,9 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
                         type="button"
                         className={`tiktok-btn-invite ${isInvited ? 'invited' : ''}`}
                         onClick={() => handleInvite(friend.handle, friend.name, friend.avatar)}
-                        disabled={isInvited}
+                        title={isInvited ? 'Invite sent. Tap to re-invite anytime!' : 'Invite to Stage'}
                       >
-                        {isInvited ? 'Invited' : 'Invite'}
+                        {isInvited ? 'Invite Again 🔁' : 'Invite'}
                       </button>
                     </div>
                   </div>

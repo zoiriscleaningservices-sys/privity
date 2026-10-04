@@ -4553,6 +4553,60 @@ export function App() {
     liveStreamSync.getStreamersList()
   );
 
+  // Global Incoming Co-Host & Stage Guest Invitation
+  const [globalIncomingInvite, setGlobalIncomingInvite] = useState<{
+    type: 'cohost' | 'guest';
+    senderName: string;
+    senderHandle: string;
+    senderAvatar: string;
+    senderStreamer?: any;
+    targetHandle?: string;
+    timestamp: number;
+  } | null>(null);
+  const [isCoHostInviteAccepted, setIsCoHostInviteAccepted] = useState(false);
+
+  // Global Room Listener for incoming live invitations (Co-Host / Stage Guest)
+  useEffect(() => {
+    const myCleanHandle = (myProfile.handle || '').replace(/^@+/, '').toLowerCase().trim();
+    if (!myCleanHandle) return;
+
+    const handleIncomingInviteEvent = (evt: any) => {
+      if (!evt) return;
+      if (evt.type === 'COHOST_INVITE' || evt.type === 'GUEST_INVITE') {
+        const targetClean = (evt.targetHandle || '').replace(/^@+/, '').toLowerCase().trim();
+        if (targetClean && targetClean !== myCleanHandle) return;
+
+        // If user is not already actively in a live stream arena, show global invite banner
+        if (!activeLiveStream) {
+          setGlobalIncomingInvite({
+            type: evt.type === 'COHOST_INVITE' ? 'cohost' : 'guest',
+            senderName: evt.senderName || 'Creator',
+            senderHandle: (evt.senderHandle || '@host').replace(/^@+/, ''),
+            senderAvatar: evt.senderAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+            senderStreamer: evt.senderStreamer,
+            targetHandle: myCleanHandle,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    };
+
+    const unsubRoom = liveStreamSync.subscribeToRoom(myCleanHandle, handleIncomingInviteEvent);
+
+    let syncBus: BroadcastChannel | null = null;
+    try {
+      syncBus = new BroadcastChannel('privity_sync_bus');
+      syncBus.onmessage = (e) => {
+        handleIncomingInviteEvent(e.data);
+      };
+    } catch {}
+
+    return () => {
+      unsubRoom();
+      if (syncBus) syncBus.close();
+    };
+  }, [myProfile.handle, activeLiveStream]);
+
   useEffect(() => {
     // If not actively broadcasting on this tab upon mount/refresh, ensure any dead host state is cleared
     if (!isHostBroadcasting && !hostLiveCameraStream) {
@@ -12530,14 +12584,134 @@ export function App() {
       {/* 4. MODALS & LIGHTBOXES                                   */}
       {/* ======================================================== */}
 
+      {/* Global Incoming Co-Host / Guest Invite Banner when not in Arena */}
+      {globalIncomingInvite && !activeLiveStream && (
+        <div
+          className="tiktok-incoming-invite-banner"
+          style={{ position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)', maxWidth: '440px', width: 'calc(100% - 32px)', zIndex: 99999 }}
+        >
+          <img
+            src={globalIncomingInvite.senderAvatar}
+            alt={globalIncomingInvite.senderName}
+            className="invite-avatar"
+          />
+          <div className="invite-text">
+            <span className="invite-name">{globalIncomingInvite.senderName}</span>
+            <span className="invite-sub">
+              {globalIncomingInvite.type === 'cohost' ? 'Invited you to Co-Host Live! 🤝' : 'Invited you to Stage as Guest! 🎤'}
+            </span>
+          </div>
+          <div className="invite-actions">
+            <button
+              type="button"
+              className="invite-accept-btn"
+              onClick={() => {
+                const invite = globalIncomingInvite;
+                setGlobalIncomingInvite(null);
+                const cleanSenderH = invite.senderHandle.replace(/^@+/, '').toLowerCase().trim();
+                const targetStreamer =
+                  networkLiveStreamers.find((s) => (s.handle || '').replace(/^@+/, '').toLowerCase().trim() === cleanSenderH) ||
+                  networkLiveStreamers.find((s) => s.id === `stream-${cleanSenderH}` || s.id === `live-user-${cleanSenderH}`) ||
+                  LIVEME_STREAMERS.find((s) => (s.handle || '').replace(/^@+/, '').toLowerCase().trim() === cleanSenderH) ||
+                  invite.senderStreamer || {
+                    id: `stream-${cleanSenderH}`,
+                    creatorHandle: cleanSenderH,
+                    creatorName: invite.senderName,
+                    creatorAvatar: invite.senderAvatar,
+                    name: invite.senderName,
+                    handle: `@${cleanSenderH}`,
+                    avatar: invite.senderAvatar,
+                    title: 'Live Co-Host Duel',
+                    description: 'Live broadcast',
+                    viewersCount: 1,
+                    likesCount: 50,
+                    category: 'Co-Host',
+                    videoStreamUrl: '',
+                    previewUrl: invite.senderAvatar,
+                    posterUrl: invite.senderAvatar,
+                    isVerified: true,
+                    diamonds: 0,
+                    dailyRank: 'Top 10',
+                    multiGuests: [],
+                    participants: [],
+                    tags: ['CoHost'],
+                    topContributors: [],
+                  };
+
+                setIsHostBroadcasting(false);
+                setIsCoHostInviteAccepted(invite.type === 'cohost');
+                setActiveLiveStream(targetStreamer as any);
+                setMinimizedLiveStream(null);
+
+                const cleanMyH = (myProfile.handle || '').replace(/^@+/, '').toLowerCase().trim();
+                const acceptEvt = {
+                  type: invite.type === 'cohost' ? 'COHOST_INVITE_ACCEPTED' : 'GUEST_INVITE_ACCEPTED',
+                  senderHandle: `@${cleanMyH}`,
+                  senderName: myProfile.name,
+                  senderAvatar: myProfile.avatar,
+                  coHostHandle: `@${cleanMyH}`,
+                  coHostName: myProfile.name,
+                  coHostAvatar: myProfile.avatar,
+                  targetHandle: cleanSenderH,
+                  rivalStreamer: {
+                    id: `stream-${cleanMyH}`,
+                    name: myProfile.name,
+                    handle: `@${cleanMyH}`,
+                    avatar: myProfile.avatar,
+                    videoStreamUrl: '',
+                    posterUrl: myProfile.avatar,
+                    viewersCount: 1,
+                    diamonds: 0,
+                  },
+                };
+                liveStreamSync.sendRoomEvent(cleanSenderH, acceptEvt);
+                try {
+                  const bus = new BroadcastChannel('privity_sync_bus');
+                  bus.postMessage(acceptEvt);
+                  bus.close();
+                } catch {}
+              }}
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              className="invite-decline-btn"
+              onClick={() => {
+                const invite = globalIncomingInvite;
+                setGlobalIncomingInvite(null);
+                const cleanSenderH = invite.senderHandle.replace(/^@+/, '').toLowerCase().trim();
+                const cleanMyH = (myProfile.handle || '').replace(/^@+/, '').toLowerCase().trim();
+                const declineEvt = {
+                  type: invite.type === 'cohost' ? 'COHOST_INVITE_DECLINED' : 'GUEST_INVITE_DECLINED',
+                  senderHandle: `@${cleanMyH}`,
+                  senderName: myProfile.name,
+                  targetHandle: cleanSenderH,
+                };
+                liveStreamSync.sendRoomEvent(cleanSenderH, declineEvt);
+                try {
+                  const bus = new BroadcastChannel('privity_sync_bus');
+                  bus.postMessage(declineEvt);
+                  bus.close();
+                } catch {}
+              }}
+            >
+              Decline
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 100% FAITHFUL LIVEME STREAM ARENA REPLICATION */}
       {activeLiveStream && (
         <LiveMeStreamArena
           initialStreamerId={activeLiveStream.id}
           isHostBroadcast={isHostBroadcasting}
+          initialCoHostMode={isCoHostInviteAccepted}
           userMediaStream={hostLiveCameraStream}
           customStreamer={activeLiveStream as any}
           onClose={(opts?: { wasEnded?: boolean; isHost?: boolean }) => {
+            setIsCoHostInviteAccepted(false);
             if (opts?.wasEnded || opts?.isHost || isHostBroadcasting) {
               // Live has ended or host is closing: NEVER minimize!
               setMinimizedLiveStream(null);
@@ -12575,6 +12749,7 @@ export function App() {
             setActiveLiveStream(null);
           }}
           onEndBroadcast={() => {
+            setIsCoHostInviteAccepted(false);
             if (activeLiveStream?.id) {
               const targetHandle = (activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '';
               liveStreamSync.markStreamEnded(activeLiveStream.id, targetHandle);

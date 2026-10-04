@@ -43,8 +43,18 @@ export function getRoomIdFromHandle(raw: string): string {
   if (!raw) return 'live';
   let cleaned = raw.toLowerCase().trim();
   if (cleaned.startsWith('@')) cleaned = cleaned.substring(1);
-  if (cleaned.startsWith('live-user-')) cleaned = cleaned.replace('live-user-', '');
-  if (cleaned.startsWith('privity-live-')) cleaned = cleaned.replace('privity-live-', '');
+  if (cleaned.startsWith('live-user-')) {
+    const after = cleaned.replace('live-user-', '');
+    cleaned = after.split('-')[0] || after;
+  }
+  if (cleaned.startsWith('privity-live-')) {
+    const after = cleaned.replace('privity-live-', '');
+    cleaned = after.split('-')[0] || after;
+  }
+  if (cleaned.startsWith('stream-')) {
+    const after = cleaned.replace('stream-', '');
+    cleaned = after.split('-')[0] || after;
+  }
   return cleaned.replace(/[^a-z0-9]/g, '') || 'live';
 }
 
@@ -628,6 +638,18 @@ class LiveStreamSyncService {
           console.warn('Privity live error replacing tracks on pc:', e);
         }
       });
+    }
+  }
+
+  public updateHostStats(stats: { viewersCount?: number; likesCount?: number; diamonds?: number }) {
+    if (this.currentHostSession) {
+      if (typeof stats.viewersCount === 'number') this.currentHostSession.viewersCount = Math.max(0, stats.viewersCount);
+      if (typeof stats.likesCount === 'number') this.currentHostSession.likesCount = Math.max(0, stats.likesCount);
+      if (typeof stats.diamonds === 'number') (this.currentHostSession as any).diamonds = Math.max(0, stats.diamonds);
+      this.currentHostSession.lastHeartbeat = Date.now();
+      this.saveCachedStreams();
+      this.notifySubscribers();
+      this.announceStream(this.currentHostSession, 'STREAM_HEARTBEAT');
     }
   }
 
@@ -1394,6 +1416,10 @@ class LiveStreamSyncService {
       streamerId: roomId,
       frame: frameData,
     });
+  }
+
+  public subscribeToRoom(streamIdOrHandle: string, onEvent: (event: any) => void): () => void {
+    return this.subscribeToRoomEvents(streamIdOrHandle, onEvent);
   }
 
   public subscribeToRoomEvents(streamIdOrHandle: string, onEvent: (event: any) => void): () => void {

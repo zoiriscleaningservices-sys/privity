@@ -9,7 +9,7 @@ export interface LiveCoHostCreatorsModalProps {
   currentHostHandle: string;
   currentHostAvatar: string;
   onStartBattle?: (rival: LiveMeStreamer) => void;
-  onInviteSent?: (targetHandle: string) => void;
+  onInviteSent?: (targetHandle: string, creatorStreamer?: LiveMeStreamer) => void;
   showToast: (msg: string) => void;
 }
 
@@ -50,8 +50,23 @@ export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = (
       setActiveNetworkStreams(streams);
     });
 
-    return unsub;
-  }, [isOpen]);
+    const cleanMyHandle = currentHostHandle.replace(/^@+/, '').toLowerCase().trim();
+    const unsubRoom = liveStreamSync.subscribeToRoomEvents(cleanMyHandle, (evt) => {
+      if (evt?.type === 'COHOST_INVITE_DECLINED' && evt.senderHandle) {
+        const decliner = evt.senderHandle.replace(/^@+/, '').toLowerCase().trim();
+        setInvitedHandles((prev) => {
+          const next = { ...prev };
+          delete next[decliner];
+          return next;
+        });
+      }
+    });
+
+    return () => {
+      unsub();
+      unsubRoom();
+    };
+  }, [isOpen, currentHostHandle]);
 
   // STRICTLY filter to ACTUAL people who are live right now.
   // ZERO preset people. ZERO offline accounts.
@@ -86,13 +101,18 @@ export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = (
   if (!isOpen) return null;
 
   // Broadcast real-time Co-Host invitation over MQTT & Supabase Realtime
-  // Does NOT auto-connect or auto-start: recipient must Accept or Decline!
+  // Can be sent again and again!
   const sendCoHostInvitation = (creator: RealLiveCreatorItem) => {
     const cleanTarget = creator.handle.replace(/^@+/, '').toLowerCase().trim();
     const cleanMyHandle = currentHostHandle.replace(/^@+/, '').toLowerCase().trim();
+    const isAlreadyInvited = !!invitedHandles[cleanTarget];
 
     setInvitedHandles((prev) => ({ ...prev, [cleanTarget]: true }));
-    showToast(`💌 Co-host invitation sent to ${creator.name}! Waiting for them to accept...`);
+    showToast(
+      isAlreadyInvited
+        ? `💌 Re-sent co-host invitation to ${creator.name}! Waiting for them to accept...`
+        : `💌 Co-host invitation sent to ${creator.name}! Waiting for them to accept...`
+    );
 
     const inviteEvent = {
       type: 'COHOST_INVITE',
@@ -116,11 +136,16 @@ export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = (
       },
     };
 
-    // Broadcast across target room and current room
+    // Broadcast across target room, current room, and bus
     liveStreamSync.sendRoomEvent(cleanTarget, inviteEvent);
     liveStreamSync.sendRoomEvent(cleanMyHandle, inviteEvent);
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(inviteEvent);
+      bus.close();
+    } catch {}
 
-    onInviteSent?.(cleanTarget);
+    onInviteSent?.(cleanTarget, creator.streamer);
   };
 
   const handleQuickInvite = () => {
@@ -303,9 +328,9 @@ export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = (
                           type="button"
                           className={`tiktok-btn-invite ${isInvited ? 'invited' : ''}`}
                           onClick={() => sendCoHostInvitation(creator)}
-                          disabled={isInvited}
+                          title={isInvited ? 'Invitation pending. Tap to re-invite anytime!' : 'Invite to Co-Host'}
                         >
-                          {isInvited ? 'Invited ⏳' : 'Invite'}
+                          {isInvited ? 'Invite Again 🔁' : 'Invite'}
                         </button>
                       </div>
                     </div>
