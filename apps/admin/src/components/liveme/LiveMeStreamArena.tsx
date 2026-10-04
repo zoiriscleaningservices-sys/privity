@@ -444,6 +444,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     };
   }, [isHost, cameraFacing, isMicMuted, isVideoOff]);
 
+  // PK Battle & Co-Host Connection States
+  const [isCoHostConnected, setIsCoHostConnected] = useState(false);
+  const isCoHostConnectedRef = useRef(isCoHostConnected);
+  isCoHostConnectedRef.current = isCoHostConnected;
+  const [remoteCoHostStream, setRemoteCoHostStream] = useState<MediaStream | null>(null);
+  const [remoteCoHostFrame, setRemoteCoHostFrame] = useState<string | null>(null);
+  const [speedChallenge, setSpeedChallenge] = useState<{ type: 'double' | 'triple'; timeLeft: number } | null>(null);
+  const [speedMultiplier, setSpeedMultiplier] = useState<number>(1);
+  const speedMultiplierRef = useRef<number>(1);
+  speedMultiplierRef.current = speedMultiplier;
+
   // PK Battle Duel State (Default false: Stream starts in full-screen solo mode!)
   const [isPkBattleActive, setIsPkBattleActive] = useState(false);
   const [isPkMatchModalOpen, setIsPkMatchModalOpen] = useState(false);
@@ -458,15 +469,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     senderHandle: string;
     senderAvatar: string;
     timestamp: number;
+    senderStreamer?: any;
   } | null>(null);
-  const [floatingGuestPrompt, setFloatingGuestPrompt] = useState<{
-    name: string;
-    handle: string;
-    avatar: string;
-  } | null>(null);
-  const [hostPkScore, setHostPkScore] = useState(3);
-  const [rivalPkScore, setRivalPkScore] = useState(4);
-  const [battleRoundTimer, setBattleRoundTimer] = useState(121);
+  const [hostPkScore, setHostPkScore] = useState(0);
+  const [rivalPkScore, setRivalPkScore] = useState(0);
+  const [battleRoundTimer, setBattleRoundTimer] = useState(180);
   const [battleWinner, setBattleWinner] = useState<'host' | 'rival' | 'draw' | null>(null);
   const [pkDamageFloating, setPkDamageFloating] = useState<Array<{ id: number; text: string; color: string }>>([]);
 
@@ -491,6 +498,81 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   });
   const pkRivalRef = useRef(pkRival);
   pkRivalRef.current = pkRival;
+
+  // PK Battle Round Timer countdown (ticking down from 180s to 0s when isPkBattleActive is true)
+  useEffect(() => {
+    if (!isPkBattleActive) return;
+
+    const interval = setInterval(() => {
+      setBattleRoundTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          const finalHost = hostPkScoreRef.current;
+          const finalRival = rivalPkScoreRef.current;
+          const winner = finalHost > finalRival ? 'host' : finalHost < finalRival ? 'rival' : 'draw';
+          setBattleWinner(winner);
+
+          const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+          const rivalRoomId = (pkRivalRef.current?.handle || '').replace(/^@+/, '');
+          const endEvt = {
+            type: 'PK_BATTLE_END',
+            winner,
+            finalHostScore: finalHost,
+            finalRivalScore: finalRival,
+          };
+          liveStreamSync.sendRoomEvent(roomId, endEvt);
+          if (rivalRoomId) liveStreamSync.sendRoomEvent(rivalRoomId, endEvt);
+
+          return 0;
+        }
+
+        const nextTimer = prev - 1;
+        battleRoundTimerRef.current = nextTimer;
+
+        // Trigger random Speed Challenge (Doubles / Triples / None) at around 140s remaining (40s into match)
+        if (nextTimer === 140 && isHost) {
+          const rand = Math.random();
+          const pick: 'double' | 'triple' | null = rand < 0.40 ? 'double' : rand < 0.72 ? 'triple' : null;
+          if (pick) {
+            const challengeEvt = {
+              type: 'PK_SPEED_CHALLENGE',
+              challengeType: pick,
+              multiplier: pick === 'double' ? 2 : 3,
+              duration: 30,
+            };
+            const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+            const rivalRoomId = (pkRivalRef.current?.handle || '').replace(/^@+/, '');
+            liveStreamSync.sendRoomEvent(roomId, challengeEvt);
+            if (rivalRoomId) liveStreamSync.sendRoomEvent(rivalRoomId, challengeEvt);
+          }
+        }
+
+        return nextTimer;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isPkBattleActive, isHost, currentStreamer.id, currentUser.handle]);
+
+  // Speed Challenge Timer countdown
+  useEffect(() => {
+    if (!speedChallenge) return;
+
+    const interval = setInterval(() => {
+      setSpeedChallenge((prev) => {
+        if (!prev) return null;
+        if (prev.timeLeft <= 1) {
+          setSpeedMultiplier(1);
+          speedMultiplierRef.current = 1;
+          showToastRef.current('🏁 Speed Challenge completed! Multiplier reset to 1X.');
+          return null;
+        }
+        return { ...prev, timeLeft: prev.timeLeft - 1 };
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [speedChallenge]);
 
   // Followed creators map (Synchronized with global privity_following_v5)
   const [followedMap, setFollowedMap] = useState<Record<string, boolean>>(() => {
@@ -1627,7 +1709,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       if (!evt) return;
 
       if (evt.type === 'LIVE_FRAME' && evt.frame) {
-        setRemoteLiveFrame(evt.frame);
+        const rivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        const frameSrc = (evt.streamerId || '').toLowerCase().trim();
+        if (isCoHostConnectedRef.current && rivalH && frameSrc.includes(rivalH)) {
+          setRemoteCoHostFrame(evt.frame);
+        } else {
+          setRemoteLiveFrame(evt.frame);
+        }
       } else if (evt.type === 'LIVE_LIKE') {
         const sid = currentStreamer.id;
         setStreamerLikesMap((prev) => {
@@ -1705,11 +1793,6 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           const nextCount = prev + 1;
           if (isHost) {
             showToastRef.current(`👋 ${evt.user.name} joined your live stream!`);
-            setFloatingGuestPrompt({
-              name: evt.user.name,
-              handle: userHandle,
-              avatar: evt.user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
-            });
             immediateFrameCaptureRef.current?.();
             liveStreamSync.sendRoomEvent(roomId, {
               type: 'LIVE_STATS',
@@ -1759,20 +1842,50 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           setRoomContributors(evt.topContributors);
         }
       } else if (evt.type === 'PK_BATTLE_START') {
+        setIsCoHostConnected(true);
+        isCoHostConnectedRef.current = true;
         setIsPkBattleActive(true);
         isPkBattleActiveRef.current = true;
         if (evt.rival) {
           setPkRival(evt.rival);
           pkRivalRef.current = evt.rival;
         }
-        if (typeof evt.hostScore === 'number') setHostPkScore(evt.hostScore);
-        if (typeof evt.rivalScore === 'number') setRivalPkScore(evt.rivalScore);
-        if (typeof evt.roundTimer === 'number') setBattleRoundTimer(evt.roundTimer);
+        setHostPkScore(typeof evt.hostScore === 'number' ? evt.hostScore : 0);
+        setRivalPkScore(typeof evt.rivalScore === 'number' ? evt.rivalScore : 0);
+        setBattleRoundTimer(typeof evt.roundTimer === 'number' ? evt.roundTimer : 180);
         setBattleWinner(null);
-        showToastRef.current(`⚔️ LIVE Battle Started! Battling @${evt.rival?.handle || 'Rival'}!`);
+        setSpeedMultiplier(1);
+        speedMultiplierRef.current = 1;
+        setSpeedChallenge(null);
+        showToastRef.current(`🥊 LIVE PK Match Started! Cheer your creator and send gifts!`);
+      } else if (evt.type === 'PK_SPEED_CHALLENGE' && evt.challengeType) {
+        const mult = evt.multiplier || (evt.challengeType === 'double' ? 2 : 3);
+        setSpeedMultiplier(mult);
+        speedMultiplierRef.current = mult;
+        setSpeedChallenge({
+          type: evt.challengeType,
+          timeLeft: evt.duration || 30,
+        });
+        showToastRef.current(
+          evt.challengeType === 'double'
+            ? '⚡ 2X SPEED CHALLENGE ACTIVATED! All points DOUBLED! (30s)'
+            : '🔥 3X SPEED CHALLENGE ACTIVATED! All points TRIPLED! (30s)'
+        );
       } else if (evt.type === 'PK_BATTLE_UPDATE') {
-        if (typeof evt.hostScore === 'number') setHostPkScore(evt.hostScore);
-        if (typeof evt.rivalScore === 'number') setRivalPkScore(evt.rivalScore);
+        const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        if (evt.senderHandle && evt.senderHandle.replace(/^@+/, '').toLowerCase().trim() !== myClean) {
+          if (typeof evt.hostScore === 'number') {
+            setRivalPkScore(evt.hostScore);
+            rivalPkScoreRef.current = evt.hostScore;
+          }
+          if (typeof evt.rivalScore === 'number') {
+            setHostPkScore(evt.rivalScore);
+            hostPkScoreRef.current = evt.rivalScore;
+          }
+        } else {
+          if (typeof evt.hostScore === 'number') setHostPkScore(evt.hostScore);
+          if (typeof evt.rivalScore === 'number') setRivalPkScore(evt.rivalScore);
+        }
         if (typeof evt.roundTimer === 'number') setBattleRoundTimer(evt.roundTimer);
         if (evt.hit) triggerPkHit(evt.hit.text, evt.hit.color);
       } else if (evt.type === 'PK_BATTLE_END') {
@@ -1780,7 +1893,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         setTimeout(() => {
           setIsPkBattleActive(false);
           isPkBattleActiveRef.current = false;
-        }, 3500);
+          setSpeedChallenge(null);
+          setSpeedMultiplier(1);
+          speedMultiplierRef.current = 1;
+        }, 3800);
       } else if (evt.type === 'LIVE_ENDED') {
         if (!isHost) {
           setLiveEndedData({
@@ -2006,18 +2122,60 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           return next;
         });
       } else if (evt.type === 'COHOST_INVITE') {
-        const myCleanHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
-        const targetCleanHandle = (evt.targetHandle || '').toLowerCase().replace('@', '').trim();
+        const myCleanHandle = (currentUser?.handle || '').toLowerCase().replace(/^@+/, '').trim();
+        const targetCleanHandle = (evt.targetHandle || '').toLowerCase().replace(/^@+/, '').trim();
         if (targetCleanHandle === myCleanHandle || (!isHost && !evt.targetHandle)) {
           setIncomingInvite({
             type: 'cohost',
             senderName: evt.senderName || 'Host',
-            senderHandle: evt.senderHandle || '@host',
-            senderAvatar: evt.senderAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+            senderHandle: (evt.senderHandle || '@host').replace(/^@+/, ''),
+            senderAvatar: evt.senderAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
             timestamp: Date.now(),
+            senderStreamer: evt.senderStreamer,
           });
-          showToastRef.current(`⚡ ${evt.senderName || 'Host'} invited you to Co-Host Battle!`);
+          showToastRef.current(`⚡ ${evt.senderName || 'Host'} invited you to Co-Host!`);
         }
+      } else if (evt.type === 'COHOST_INVITE_DECLINED') {
+        showToastRef.current(`❌ @${(evt.senderHandle || evt.senderName || 'Creator').replace(/^@+/, '')} declined the co-host invitation.`);
+      } else if (evt.type === 'COHOST_INVITE_ACCEPTED') {
+        const cleanRivalH = (evt.coHostHandle || evt.senderHandle || '').replace(/^@+/, '').trim();
+        const rivalObj: LiveMeStreamer = evt.rivalStreamer || {
+          id: `stream-${cleanRivalH}`,
+          name: evt.coHostName || evt.senderName || cleanRivalH,
+          handle: `@${cleanRivalH}`,
+          avatar: evt.coHostAvatar || evt.senderAvatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
+          title: 'Co-Host Live Duel',
+          description: 'Co-Host live broadcast',
+          viewersCount: 5,
+          likesCount: 100,
+          category: 'Co-Host',
+          videoStreamUrl: '',
+          posterUrl: evt.coHostAvatar || evt.senderAvatar,
+          isVerified: true,
+          diamonds: 100,
+          totalViews: '1.2K',
+          popularity: 'Trending',
+          tags: ['CoHost', 'Battle'],
+          topContributors: [],
+        };
+        setPkRival(rivalObj);
+        pkRivalRef.current = rivalObj;
+        setIsCoHostConnected(true);
+        isCoHostConnectedRef.current = true;
+        setIsPkBattleActive(false);
+        isPkBattleActiveRef.current = false;
+        setHostPkScore(0);
+        setRivalPkScore(0);
+        setBattleRoundTimer(180);
+        setBattleWinner(null);
+        showToastRef.current(`🤝 Connected with @${cleanRivalH} in Co-Host Live! Tap 'Start Match' to begin PK Battle!`);
+      } else if (evt.type === 'COHOST_DISCONNECTED') {
+        setIsCoHostConnected(false);
+        isCoHostConnectedRef.current = false;
+        setIsPkBattleActive(false);
+        isPkBattleActiveRef.current = false;
+        setRemoteCoHostStream(null);
+        showToastRef.current(`Co-host session ended with @${(evt.senderHandle || 'Creator').replace(/^@+/, '')}`);
       } else if (evt.type === 'GUEST_INVITE') {
         const myCleanHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
         const targetCleanHandle = (evt.targetHandle || '').toLowerCase().replace('@', '').trim();
@@ -2116,21 +2274,181 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     } else {
       spawnHeartReaction();
     }
-    const nextScore = hostPkScore + 5;
+    if (!isPkBattleActiveRef.current) return;
+
+    const points = 5 * speedMultiplierRef.current;
+    const nextScore = hostPkScoreRef.current + points;
     setHostPkScore(nextScore);
     hostPkScoreRef.current = nextScore;
-    triggerPkHit('+5 CHEER! ♥', '#f43f5e');
+    const hitText = `+${points} CHEER! ♥${speedMultiplierRef.current > 1 ? ` (${speedMultiplierRef.current}X)` : ''}`;
+    triggerPkHit(hitText, '#f43f5e');
 
     const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    const rivalRoomId = (pkRivalRef.current?.handle || '').replace(/^@+/, '');
+    const updateEvt = {
+      type: 'PK_BATTLE_UPDATE',
+      hostScore: nextScore,
+      rivalScore: rivalPkScoreRef.current,
+      senderHandle: `@${(currentUser.handle || '').replace(/^@+/, '')}`,
+      roundTimer: battleRoundTimerRef.current,
+      hit: { text: hitText, color: '#f43f5e' },
+    };
     try {
-      liveStreamSync.sendRoomEvent(roomId, {
-        type: 'PK_BATTLE_UPDATE',
-        hostScore: nextScore,
-        rivalScore: rivalPkScoreRef.current,
-        roundTimer: battleRoundTimerRef.current,
-        hit: { text: '+5 CHEER! ♥', color: '#f43f5e' },
-      });
+      liveStreamSync.sendRoomEvent(roomId, updateEvt);
+      if (rivalRoomId) liveStreamSync.sendRoomEvent(rivalRoomId, updateEvt);
     } catch {}
+  };
+
+  // Co-Host Match Control Handlers
+  const handleStartPkMatch = () => {
+    const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+    const cleanRivalH = (pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
+
+    setIsPkBattleActive(true);
+    isPkBattleActiveRef.current = true;
+    setHostPkScore(0);
+    hostPkScoreRef.current = 0;
+    setRivalPkScore(0);
+    rivalPkScoreRef.current = 0;
+    setBattleRoundTimer(180);
+    battleRoundTimerRef.current = 180;
+    setBattleWinner(null);
+    setSpeedMultiplier(1);
+    speedMultiplierRef.current = 1;
+    setSpeedChallenge(null);
+
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    const startEvt = {
+      type: 'PK_BATTLE_START',
+      roundTimer: 180,
+      hostScore: 0,
+      rivalScore: 0,
+      hostHandle: `@${cleanMyH}`,
+      rivalHandle: `@${cleanRivalH}`,
+      startedBy: cleanMyH,
+      rival: {
+        id: `stream-${cleanMyH}`,
+        name: currentUser.name,
+        handle: `@${cleanMyH}`,
+        avatar: currentUser.avatar,
+        posterUrl: currentUser.avatar,
+      },
+    };
+
+    liveStreamSync.sendRoomEvent(roomId, startEvt);
+    if (cleanRivalH) liveStreamSync.sendRoomEvent(cleanRivalH, startEvt);
+
+    showToast('🥊 LIVE Match Started! Cheer your creator and send gifts!');
+  };
+
+  const handleDisconnectCoHost = () => {
+    const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+    const cleanRivalH = (pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
+
+    const discEvt = {
+      type: 'COHOST_DISCONNECTED',
+      senderHandle: `@${cleanMyH}`,
+      targetHandle: cleanRivalH,
+    };
+
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    liveStreamSync.sendRoomEvent(roomId, discEvt);
+    if (cleanRivalH) liveStreamSync.sendRoomEvent(cleanRivalH, discEvt);
+
+    setIsCoHostConnected(false);
+    isCoHostConnectedRef.current = false;
+    setIsPkBattleActive(false);
+    isPkBattleActiveRef.current = false;
+    setRemoteCoHostStream(null);
+    showToast('Co-host session disconnected.');
+  };
+
+  const handleAcceptCoHostInvite = (invite: NonNullable<typeof incomingInvite>) => {
+    setIncomingInvite(null);
+    const cleanSenderH = invite.senderHandle.replace(/^@+/, '').toLowerCase().trim();
+    const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+
+    const rivalStreamer: LiveMeStreamer = invite.senderStreamer || {
+      id: `stream-${cleanSenderH}`,
+      name: invite.senderName,
+      handle: `@${cleanSenderH}`,
+      avatar: invite.senderAvatar,
+      title: 'Co-Host Live Duel',
+      description: 'Co-Host live stream',
+      viewersCount: 12,
+      likesCount: 2000,
+      category: 'Co-Host',
+      videoStreamUrl: '',
+      posterUrl: invite.senderAvatar,
+      isVerified: true,
+      diamonds: 300,
+      totalViews: '1.5K',
+      popularity: 'Trending',
+      tags: ['CoHost', 'Battle'],
+      topContributors: [],
+    };
+
+    setPkRival(rivalStreamer);
+    pkRivalRef.current = rivalStreamer;
+    setIsCoHostConnected(true);
+    isCoHostConnectedRef.current = true;
+    setIsPkBattleActive(false);
+    isPkBattleActiveRef.current = false;
+    setHostPkScore(0);
+    setRivalPkScore(0);
+    setBattleRoundTimer(180);
+    setBattleWinner(null);
+
+    const acceptEvt = {
+      type: 'COHOST_INVITE_ACCEPTED',
+      senderHandle: `@${cleanMyH}`,
+      senderName: currentUser.name,
+      senderAvatar: currentUser.avatar,
+      coHostHandle: `@${cleanMyH}`,
+      coHostName: currentUser.name,
+      coHostAvatar: currentUser.avatar,
+      targetHandle: cleanSenderH,
+      rivalStreamer: {
+        id: `stream-${cleanMyH}`,
+        name: currentUser.name,
+        handle: `@${cleanMyH}`,
+        avatar: currentUser.avatar,
+        videoStreamUrl: '',
+        posterUrl: currentUser.avatar,
+        viewersCount: liveViewersCountRef.current || 1,
+        diamonds: diamondsEarnedRef.current || 0,
+      },
+    };
+
+    liveStreamSync.sendRoomEvent(cleanSenderH, acceptEvt);
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    liveStreamSync.sendRoomEvent(roomId, acceptEvt);
+
+    if (localStreamRef.current) {
+      liveStreamSync.connectGuestStage(cleanSenderH, cleanMyH, localStreamRef.current, (remoteStream) => {
+        setRemoteCoHostStream(remoteStream);
+      });
+    }
+
+    showToast(`🤝 Connected with ${invite.senderName} in Co-Host Live! Tap 'Start Match' to begin PK Battle!`);
+  };
+
+  const handleDeclineCoHostInvite = (invite: NonNullable<typeof incomingInvite>) => {
+    setIncomingInvite(null);
+    const cleanSenderH = invite.senderHandle.replace(/^@+/, '').toLowerCase().trim();
+    const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+
+    const declineEvt = {
+      type: 'COHOST_INVITE_DECLINED',
+      senderHandle: `@${cleanMyH}`,
+      senderName: currentUser.name,
+      targetHandle: cleanSenderH,
+    };
+
+    liveStreamSync.sendRoomEvent(cleanSenderH, declineEvt);
+    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    liveStreamSync.sendRoomEvent(roomId, declineEvt);
+    showToast(`Declined invitation from ${invite.senderName}.`);
   };
 
   // Host Controls: Flip Camera
@@ -2445,10 +2763,25 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     });
 
     // In PK battle, add huge points and trigger damage burst
-    if (isPkBattleActive) {
-      const dmg = totalCost * 2;
-      setHostPkScore((prev) => prev + dmg);
-      triggerPkHit(`+${dmg.toLocaleString()} GIFT CRIT! 🔥`, '#ec4899');
+    if (isPkBattleActiveRef.current) {
+      const dmg = totalCost * 2 * speedMultiplierRef.current;
+      const nextScore = hostPkScoreRef.current + dmg;
+      setHostPkScore(nextScore);
+      hostPkScoreRef.current = nextScore;
+      const hitText = `+${dmg.toLocaleString()} GIFT CRIT! 🔥${speedMultiplierRef.current > 1 ? ` (${speedMultiplierRef.current}X)` : ''}`;
+      triggerPkHit(hitText, '#ec4899');
+
+      const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+      const rivalRoomId = (pkRivalRef.current?.handle || '').replace(/^@+/, '');
+      const updateEvt = {
+        type: 'PK_BATTLE_UPDATE',
+        hostScore: nextScore,
+        rivalScore: rivalPkScoreRef.current,
+        senderHandle: `@${(currentUser.handle || '').replace(/^@+/, '')}`,
+        hit: { text: hitText, color: '#ec4899' },
+      };
+      liveStreamSync.sendRoomEvent(roomId, updateEvt);
+      if (rivalRoomId) liveStreamSync.sendRoomEvent(rivalRoomId, updateEvt);
     }
 
     // Add diamonds to host
@@ -2723,8 +3056,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           }
         }}
       >
-        {/* Solo Video Feed (Active when PK Battle is toggled off) */}
-        {!isPkBattleActive && (
+        {/* Solo Video Feed (Active when NOT co-host connected and NOT in PK battle) */}
+        {!isCoHostConnected && !isPkBattleActive && (
           isHost ? (
             <>
               <video
@@ -2896,35 +3229,46 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         )}
 
         {/* ================================================================ */}
-        {/* PK BATTLE DUAL SPLIT-SCREEN (100% EXACT TIKTOK LIVE SPEC)        */}
         {/* ================================================================ */}
-        {isPkBattleActive && (
+        {/* CO-HOST / PK BATTLE DUAL SPLIT-SCREEN (TIKTOK LIVE SPEC)         */}
+        {/* ================================================================ */}
+        {(isCoHostConnected || isPkBattleActive) && (
           <div className="liveme-pk-stage-wrap">
-            {/* Split Tug-of-War Score Bar (Edge-to-Edge) */}
-            <div className="liveme-pk-tug-bar-dock">
-              <div className="liveme-pk-bar-track">
-                {/* Host Pink Half */}
-                <div className="liveme-pk-bar-host" style={{ width: `${hostPkPercentage}%` }}>
-                  <span className="liveme-pk-score-large">{hostPkScore}</span>
+            {/* Split Tug-of-War Score Bar (Only visible when PK Match has started) */}
+            {isPkBattleActive && (
+              <div className="liveme-pk-tug-bar-dock">
+                <div className="liveme-pk-bar-track">
+                  {/* Host Pink Half */}
+                  <div className="liveme-pk-bar-host" style={{ width: `${hostPkPercentage}%` }}>
+                    <span className="liveme-pk-score-large">{hostPkScore}</span>
+                  </div>
+
+                  {/* Center Collision & Timer Badge */}
+                  <div className="liveme-pk-center-badge">
+                    <span className="liveme-pk-clash-icon">🥊</span>
+                    <span className="liveme-pk-timer-digits">
+                      {formatBattleTimer(battleRoundTimer)}
+                    </span>
+                  </div>
+
+                  {/* Rival Cyan Half */}
+                  <div className="liveme-pk-bar-rival" style={{ width: `${100 - hostPkPercentage}%` }}>
+                    <span className="liveme-pk-score-large">{rivalPkScore}</span>
+                  </div>
                 </div>
 
-                {/* Center Collision & Timer Badge */}
-                <div className="liveme-pk-center-badge">
-                  <span className="liveme-pk-clash-icon">🥊</span>
-                  <span className="liveme-pk-timer-digits">
-                    {formatBattleTimer(battleRoundTimer)}
-                  </span>
-                </div>
-
-                {/* Rival Cyan Half */}
-                <div className="liveme-pk-bar-rival" style={{ width: `${100 - hostPkPercentage}%` }}>
-                  <span className="liveme-pk-score-large">{rivalPkScore}</span>
-                </div>
+                {/* Speed Challenge Banner (Doubles 2X / Triples 3X) */}
+                {speedChallenge && (
+                  <div className="liveme-speed-challenge-banner">
+                    <span>{speedChallenge.type === 'double' ? '⚡ 2X SPEED CHALLENGE' : '🔥 3X SPEED CHALLENGE'}</span>
+                    <span style={{ opacity: 0.9 }}>({speedChallenge.timeLeft}s)</span>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
 
             {/* Split Video Stage: Edge-to-Edge (Left 50% & Right 50%) */}
-            <div className="liveme-pk-split-grid">
+            <div className="liveme-pk-split-grid" style={{ position: 'relative' }}>
               {/* Left Half Box: Host */}
               <div
                 className="liveme-pk-half-box host"
@@ -2932,9 +3276,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 title="Tap to Cheer Host! +5 Points"
               >
                 {/* Top Corner Win Streak Badge */}
-                <div className="liveme-pk-win-badge left">
-                  <span>WIN x 0</span>
-                </div>
+                {isPkBattleActive && (
+                  <div className="liveme-pk-win-badge left">
+                    <span>WIN x 0</span>
+                  </div>
+                )}
 
                 {/* Host Video Stream (Webcam or Video) */}
                 {isHost ? (
@@ -3011,7 +3357,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   onClick={() => handleOpenUserProfile(currentUser.handle, { name: currentUser.name, avatar: currentUser.avatar })}
                   style={{ cursor: 'pointer' }}
                 >
-                  <span>@{currentUser.handle}</span>
+                  <span>@{currentUser.handle.replace(/^@+/, '')}</span>
                 </div>
 
                 {/* Floating Damage Cheer Numbers */}
@@ -3022,23 +3368,90 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 ))}
               </div>
 
+              {/* Center Match Control Hub (Shown when Co-Host connected BEFORE match starts) */}
+              {isCoHostConnected && !isPkBattleActive && (
+                <div className="liveme-cohost-match-hub">
+                  <div className="liveme-cohost-status-badge">
+                    <span className="liveme-cohost-status-dot" />
+                    <span>Co-Host Connected</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="liveme-start-match-btn"
+                    onClick={handleStartPkMatch}
+                    title="Start 3-Minute PK Battle with synchronized scores and speed challenges"
+                  >
+                    <span>🥊</span>
+                    <span>START MATCH</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="liveme-disconnect-cohost-btn"
+                    onClick={handleDisconnectCoHost}
+                  >
+                    ✕ Disconnect
+                  </button>
+                </div>
+              )}
+
               {/* Right Half Box: Rival Streamer */}
               <div className="liveme-pk-half-box rival">
                 {/* Top Corner Win Streak Badge */}
-                <div className="liveme-pk-win-badge right">
-                  <span>WIN x 4</span>
-                </div>
+                {isPkBattleActive && (
+                  <div className="liveme-pk-win-badge right">
+                    <span>WIN x 4</span>
+                  </div>
+                )}
 
-                {/* Rival Video Stream */}
-                <video
-                  src={pkRival.videoStreamUrl}
-                  poster={pkRival.posterUrl || pkRival.avatar}
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  className="liveme-pk-video-layer"
-                />
+                {/* Rival / Co-Host Video & Real-Time Audio */}
+                {remoteCoHostStream ? (
+                  <>
+                    <video
+                      ref={(node) => {
+                        if (node && node.srcObject !== remoteCoHostStream) {
+                          node.srcObject = remoteCoHostStream;
+                          node.setAttribute('playsinline', 'true');
+                          node.play().catch(() => {});
+                        }
+                      }}
+                      autoPlay
+                      playsInline
+                      muted={false}
+                      className="liveme-pk-video-layer"
+                      style={{ objectFit: 'cover', width: '100%', height: '100%' }}
+                    />
+                    <audio
+                      ref={(node) => {
+                        if (node && node.srcObject !== remoteCoHostStream) {
+                          node.srcObject = remoteCoHostStream;
+                          node.muted = false;
+                          node.volume = 1.0;
+                          node.play().catch(() => {});
+                        }
+                      }}
+                      autoPlay
+                      playsInline
+                      style={{ display: 'none' }}
+                    />
+                  </>
+                ) : remoteCoHostFrame ? (
+                  <img
+                    src={remoteCoHostFrame}
+                    alt="Co-Host Live"
+                    className="liveme-pk-video-layer"
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  <video
+                    src={pkRival.videoStreamUrl || 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4'}
+                    poster={pkRival.posterUrl || pkRival.avatar}
+                    autoPlay
+                    loop
+                    muted={false}
+                    playsInline
+                    className="liveme-pk-video-layer"
+                  />
+                )}
 
                 {/* Bottom Right Streamer Tag with Follow Pill */}
                 <div
@@ -3046,13 +3459,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   onClick={() => handleOpenUserProfile(pkRival.handle, { name: pkRival.name, avatar: pkRival.avatar })}
                   style={{ cursor: 'pointer' }}
                 >
-                  <span>@{pkRival.handle}</span>
+                  <span>@{pkRival.handle.replace(/^@+/, '')}</span>
                   <button
                     type="button"
                     className="liveme-pk-follow-plus"
                     onClick={(e) => {
                       e.stopPropagation();
-                      showToast(`Followed @${pkRival.handle}!`);
+                      handleToggleFollow(pkRival.handle);
                     }}
                   >
                     +
@@ -3061,90 +3474,92 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               </div>
             </div>
 
-            {/* Contributor Chairs Row directly under the two boxes (Accurate #1, #2, #3 Chairs) */}
-            <div className="liveme-pk-dual-chairs-bar">
-              {/* Host Chairs (Left 50%): Rank 3, Rank 2, Rank 1 leading into center clash */}
-              <div className="liveme-pk-chairs-half left">
-                {[2, 1, 0].map((chairIndex) => {
-                  const contrib = roomContributors[chairIndex];
-                  const rank = (chairIndex === 0 ? 1 : chairIndex === 1 ? 2 : 3) as 1 | 2 | 3;
-                  const rankLabel = rank === 1 ? '👑1' : rank === 2 ? '🥈2' : '🥉3';
-                  const title = rank === 1 ? 'Top Gifter (#1)' : `#${rank} Gifter`;
+            {/* Contributor Chairs Row directly under the two boxes (ONLY shown when PK match has started) */}
+            {isPkBattleActive && (
+              <div className="liveme-pk-dual-chairs-bar">
+                {/* Host Chairs (Left 50%): Rank 3, Rank 2, Rank 1 leading into center clash */}
+                <div className="liveme-pk-chairs-half left">
+                  {[2, 1, 0].map((chairIndex) => {
+                    const contrib = roomContributors[chairIndex];
+                    const rank = (chairIndex === 0 ? 1 : chairIndex === 1 ? 2 : 3) as 1 | 2 | 3;
+                    const rankLabel = rank === 1 ? '👑1' : rank === 2 ? '🥈2' : '🥉3';
+                    const title = rank === 1 ? 'Top Gifter (#1)' : `#${rank} Gifter`;
 
-                  if (contrib) {
+                    if (contrib) {
+                      return (
+                        <div
+                          key={contrib.id || chairIndex}
+                          className={`liveme-pk-chair-slot rank-${rank}`}
+                          title={`${title}: ${contrib.name} (${contrib.contribution.toLocaleString()} 💎)`}
+                          onClick={() =>
+                            handleOpenUserProfile(contrib.name, {
+                              name: contrib.name,
+                              avatar: contrib.avatar,
+                              contribution: contrib.contribution,
+                            })
+                          }
+                        >
+                          <img src={contrib.avatar} alt={contrib.name} />
+                          <span className="liveme-chair-crown">{rankLabel}</span>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div
-                        key={contrib.id || chairIndex}
-                        className={`liveme-pk-chair-slot rank-${rank}`}
-                        title={`${title}: ${contrib.name} (${contrib.contribution.toLocaleString()} 💎)`}
-                        onClick={() =>
-                          handleOpenUserProfile(contrib.name, {
-                            name: contrib.name,
-                            avatar: contrib.avatar,
-                            contribution: contrib.contribution,
-                          })
-                        }
+                        key={`empty-host-${rank}`}
+                        className="liveme-pk-chair-slot empty"
+                        title={`No.${rank} Chair (Empty - Send gifts to claim this chair!)`}
                       >
-                        <img src={contrib.avatar} alt={contrib.name} />
-                        <span className="liveme-chair-crown">{rankLabel}</span>
+                        <span className="chair-icon">🪑</span>
+                        <span className="chair-empty-number">No.{rank}</span>
                       </div>
                     );
-                  }
+                  })}
+                </div>
 
-                  return (
-                    <div
-                      key={`empty-host-${rank}`}
-                      className="liveme-pk-chair-slot empty"
-                      title={`No.${rank} Chair (Empty - Send gifts to claim this chair!)`}
-                    >
-                      <span className="chair-icon">🪑</span>
-                      <span className="chair-empty-number">No.{rank}</span>
-                    </div>
-                  );
-                })}
-              </div>
+                {/* Rival Chairs (Right 50%): Rank 1, Rank 2, Rank 3 */}
+                <div className="liveme-pk-chairs-half right">
+                  {[0, 1, 2].map((chairIndex) => {
+                    const rivalContribs = pkRival.topContributors || [];
+                    const contrib = rivalContribs[chairIndex];
+                    const rank = (chairIndex === 0 ? 1 : chairIndex === 1 ? 2 : 3) as 1 | 2 | 3;
+                    const rankLabel = rank === 1 ? '👑1' : rank === 2 ? '🥈2' : '🥉3';
+                    const title = rank === 1 ? 'Rival Top Gifter (#1)' : `Rival #${rank} Gifter`;
 
-              {/* Rival Chairs (Right 50%): Rank 1, Rank 2, Rank 3 */}
-              <div className="liveme-pk-chairs-half right">
-                {[0, 1, 2].map((chairIndex) => {
-                  const rivalContribs = pkRival.topContributors || [];
-                  const contrib = rivalContribs[chairIndex];
-                  const rank = (chairIndex === 0 ? 1 : chairIndex === 1 ? 2 : 3) as 1 | 2 | 3;
-                  const rankLabel = rank === 1 ? '👑1' : rank === 2 ? '🥈2' : '🥉3';
-                  const title = rank === 1 ? 'Rival Top Gifter (#1)' : `Rival #${rank} Gifter`;
+                    if (contrib) {
+                      return (
+                        <div
+                          key={contrib.id || chairIndex}
+                          className={`liveme-pk-chair-slot rank-${rank}`}
+                          title={`${title}: ${contrib.name}`}
+                          onClick={() =>
+                            handleOpenUserProfile(contrib.name, {
+                              name: contrib.name,
+                              avatar: contrib.avatar,
+                            })
+                          }
+                        >
+                          <img src={contrib.avatar} alt={contrib.name} />
+                          <span className="liveme-chair-crown">{rankLabel}</span>
+                        </div>
+                      );
+                    }
 
-                  if (contrib) {
                     return (
                       <div
-                        key={contrib.id || chairIndex}
-                        className={`liveme-pk-chair-slot rank-${rank}`}
-                        title={`${title}: ${contrib.name}`}
-                        onClick={() =>
-                          handleOpenUserProfile(contrib.name, {
-                            name: contrib.name,
-                            avatar: contrib.avatar,
-                          })
-                        }
+                        key={`empty-rival-${rank}`}
+                        className="liveme-pk-chair-slot empty"
+                        title={`No.${rank} Rival Chair (Empty)`}
                       >
-                        <img src={contrib.avatar} alt={contrib.name} />
-                        <span className="liveme-chair-crown">{rankLabel}</span>
+                        <span className="chair-icon">🪑</span>
+                        <span className="chair-empty-number">No.{rank}</span>
                       </div>
                     );
-                  }
-
-                  return (
-                    <div
-                      key={`empty-rival-${rank}`}
-                      className="liveme-pk-chair-slot empty"
-                      title={`No.${rank} Rival Chair (Empty)`}
-                    >
-                      <span className="chair-icon">🪑</span>
-                      <span className="chair-empty-number">No.{rank}</span>
-                    </div>
-                  );
-                })}
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Victory Celebration Banner */}
             {battleWinner === 'host' && (
@@ -3830,42 +4245,6 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
         {/* ================================================================ */}
         {/* 6. UNIFIED MODERN BOTTOM CONTROLS BAR                             */}
-        {/* ================================================================ */}
-        {/* Floating In-Stream Guest Prompt Matching Screenshot 4 */}
-        {floatingGuestPrompt && isHost && !isFilterTrayOpen && (
-          <div className="tiktok-floating-guest-pill">
-            <img src={floatingGuestPrompt.avatar} alt="" className="pill-avatar" />
-            <span className="pill-text">Invite {floatingGuestPrompt.name} to join as a guest</span>
-            <button
-              type="button"
-              className="pill-invite-btn"
-              onClick={() => {
-                handleInviteGuest({
-                  id: floatingGuestPrompt.handle,
-                  name: floatingGuestPrompt.name,
-                  handle: floatingGuestPrompt.handle,
-                  avatar: floatingGuestPrompt.avatar,
-                  level: 25,
-                  badge: 'VIP Fan ⭐',
-                  contribution: 0,
-                  isFollowing: true,
-                });
-                setFloatingGuestPrompt(null);
-              }}
-            >
-              Invite
-            </button>
-            <button
-              type="button"
-              className="pill-dismiss-btn"
-              onClick={() => setFloatingGuestPrompt(null)}
-              aria-label="Dismiss guest prompt"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-
         {/* Tap to Unmute Overlay for Viewers */}
         {showTapToUnmute && !isHost && (
           <div
@@ -3891,7 +4270,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 {/* Host Left 1: Battle / Co-Host Matchmaker (Dual Infinity Gradient Rings) */}
                 <button
                   type="button"
-                  className={`tiktok-tool-btn battle ${isPkBattleActive ? 'active' : ''}`}
+                  className={`tiktok-tool-btn battle ${(isCoHostConnected || isPkBattleActive) ? 'active' : ''}`}
                   onClick={() => setIsCoHostModalOpen(true)}
                   title="Co-host with creators & Battles"
                 >
@@ -3909,7 +4288,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                       strokeLinecap="round"
                     />
                   </svg>
-                  {isPkBattleActive && <span className="badge-pill">PK</span>}
+                  {(isCoHostConnected || isPkBattleActive) && <span className="badge-pill">PK</span>}
                 </button>
 
                 {/* Host Left 2: Guests / Multi-Guest Icon */}
@@ -4394,28 +4773,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       {/* ================================================================ */}
       {/* 9A. TIKTOK CO-HOST WITH CREATORS & BATTLES MODAL (SCREENSHOT 1) */}
       {/* ================================================================ */}
+      {/* ================================================================ */}
+      {/* 9A. TIKTOK CO-HOST WITH CREATORS & BATTLES MODAL (SCREENSHOT 1) */}
+      {/* ================================================================ */}
       <LiveCoHostCreatorsModal
         isOpen={isCoHostModalOpen}
         onClose={() => setIsCoHostModalOpen(false)}
         currentHostName={currentUser.name}
         currentHostHandle={currentUser.handle}
         currentHostAvatar={currentUser.avatar}
-        onStartBattle={(rival) => {
-          setPkRival(rival);
-          setIsPkBattleActive(true);
-          isPkBattleActiveRef.current = true;
-          setHostPkScore(3);
-          setRivalPkScore(4);
-          setBattleRoundTimer(121);
-          setBattleWinner(null);
-          const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-          liveStreamSync.sendRoomEvent(roomId, {
-            type: 'PK_BATTLE_START',
-            rival,
-            hostScore: 3,
-            rivalScore: 4,
-            roundTimer: 121,
-          });
+        onInviteSent={(targetHandle) => {
+          showToast(`Invitation dispatched to @${targetHandle.replace(/^@+/, '')}!`);
         }}
         showToast={showToast}
       />
@@ -4453,8 +4821,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             <span className="invite-name">{incomingInvite.senderName}</span>
             <span className="invite-sub">
               {incomingInvite.type === 'cohost'
-                ? 'invited you to Co-Host & Battle!'
-                : 'invited you to join as a Guest!'}
+                ? `(@${incomingInvite.senderHandle.replace(/^@+/, '')}) invited you to Co-Host!`
+                : `(@${incomingInvite.senderHandle.replace(/^@+/, '')}) invited you to join as Guest!`}
             </span>
           </div>
           <div className="invite-actions">
@@ -4463,35 +4831,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               className="invite-accept-btn"
               onClick={() => {
                 const invite = incomingInvite;
-                setIncomingInvite(null);
                 if (invite.type === 'cohost') {
-                  const rivalStreamer: LiveMeStreamer = {
-                    id: `rival-${invite.senderHandle}`,
-                    name: invite.senderName,
-                    handle: invite.senderHandle.startsWith('@') ? invite.senderHandle : `@${invite.senderHandle}`,
-                    avatar: invite.senderAvatar,
-                    title: 'Live PK Battle',
-                    description: 'PK battle stream duel',
-                    viewersCount: 24,
-                    likesCount: 5000,
-                    category: 'Battle',
-                    videoStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-                    posterUrl: invite.senderAvatar,
-                    isVerified: true,
-                    diamonds: 500,
-                    totalViews: '2.5K',
-                    popularity: 'Hot',
-                    tags: ['Battle', 'CoHost'],
-                    topContributors: [],
-                  };
-                  setPkRival(rivalStreamer);
-                  setIsPkBattleActive(true);
-                  isPkBattleActiveRef.current = true;
-                  setHostPkScore(3);
-                  setRivalPkScore(4);
-                  setBattleRoundTimer(121);
-                  showToast(`⚔️ Connected with ${invite.senderName} for Live Battle!`);
+                  handleAcceptCoHostInvite(invite);
                 } else {
+                  setIncomingInvite(null);
                   handleStartGuestStage();
                 }
               }}
@@ -4501,10 +4844,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             <button
               type="button"
               className="invite-decline-btn"
-              onClick={() => setIncomingInvite(null)}
+              onClick={() => {
+                const invite = incomingInvite;
+                if (invite.type === 'cohost') {
+                  handleDeclineCoHostInvite(invite);
+                } else {
+                  setIncomingInvite(null);
+                }
+              }}
               aria-label="Decline invitation"
             >
-              ✕
+              Decline
             </button>
           </div>
         </div>

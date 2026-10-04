@@ -6736,15 +6736,139 @@
 .tiktok-incoming-invite-banner .invite-decline-btn {
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.25);
   font-size: 12px;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 999px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: all 0.2s;
+}
+
+.tiktok-incoming-invite-banner .invite-decline-btn:hover {
+  background: rgba(239, 68, 68, 0.6);
+  border-color: rgba(239, 68, 68, 0.8);
+}
+
+/* Co-Host Match Control Hub (Active when split screen connected WITHOUT match) */
+.liveme-cohost-match-hub {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1.5px solid rgba(254, 44, 85, 0.55);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  padding: 16px 22px;
+  border-radius: 22px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.75), 0 0 28px rgba(254, 44, 85, 0.35);
+  animation: cohostHubPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+  user-select: none;
+}
+
+@keyframes cohostHubPop {
+  from { transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+.liveme-cohost-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #38bdf8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.liveme-cohost-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.liveme-start-match-btn {
+  background: linear-gradient(135deg, #fe2c55 0%, #ff0050 50%, #f43f5e 100%);
+  color: #ffffff;
+  border: none;
+  font-size: 15px;
+  font-weight: 900;
+  padding: 10px 24px;
+  border-radius: 9999px;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(254, 44, 85, 0.6), 0 0 12px rgba(255, 0, 80, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0.03em;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.liveme-start-match-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 24px rgba(254, 44, 85, 0.8), 0 0 16px rgba(255, 0, 80, 0.6);
+}
+
+.liveme-start-match-btn:active {
+  transform: scale(0.96);
+}
+
+.liveme-disconnect-cohost-btn {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.liveme-disconnect-cohost-btn:hover {
+  background: rgba(239, 68, 68, 0.35);
+  color: #ffffff;
+  border-color: rgba(239, 68, 68, 0.6);
+}
+
+/* Speed Challenge Flash Banner */
+.liveme-speed-challenge-banner {
+  position: absolute;
+  top: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #ffffff;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 25;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.6);
+  animation: speedPulse 0.9s infinite alternate;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+@keyframes speedPulse {
+  from { transform: translateX(-50%) scale(1); filter: brightness(1); }
+  to { transform: translateX(-50%) scale(1.06); filter: brightness(1.2); }
 }
 
 /* Tap to Unmute Overlay */

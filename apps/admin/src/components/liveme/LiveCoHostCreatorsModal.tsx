@@ -1,7 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { LiveMeStreamer } from './types';
 import { liveStreamSync } from '../../services/liveStreamSyncService';
-import { authService, UserAccount } from '../../services/authService';
 
 export interface LiveCoHostCreatorsModalProps {
   isOpen: boolean;
@@ -9,11 +8,12 @@ export interface LiveCoHostCreatorsModalProps {
   currentHostName: string;
   currentHostHandle: string;
   currentHostAvatar: string;
-  onStartBattle: (rival: LiveMeStreamer) => void;
+  onStartBattle?: (rival: LiveMeStreamer) => void;
+  onInviteSent?: (targetHandle: string) => void;
   showToast: (msg: string) => void;
 }
 
-interface RealCreatorItem {
+interface RealLiveCreatorItem {
   id: string;
   name: string;
   handle: string;
@@ -21,8 +21,7 @@ interface RealCreatorItem {
   badge: string;
   badgeColor: string;
   viewers: number;
-  cohosts: string[];
-  canInvite: boolean;
+  streamer: LiveMeStreamer;
 }
 
 export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = ({
@@ -31,197 +30,116 @@ export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = (
   currentHostName,
   currentHostHandle,
   currentHostAvatar,
-  onStartBattle,
+  onInviteSent,
   showToast,
 }) => {
   const [selectedTopic, setSelectedTopic] = useState<'Music' | 'Chatting' | 'Gaming' | 'Dance'>('Music');
   const [isQuickScanning, setIsQuickScanning] = useState(false);
   const [invitedHandles, setInvitedHandles] = useState<Record<string, boolean>>({});
-  const [nudgedHandles, setNudgedHandles] = useState<Record<string, boolean>>({});
-  const [showMoreFriends, setShowMoreFriends] = useState(false);
+  const [activeNetworkStreams, setActiveNetworkStreams] = useState<LiveMeStreamer[]>(() =>
+    liveStreamSync.getStreamersList()
+  );
 
-  // Load real registered accounts and real active broadcasters from the system
-  const { realFriends, realSuggested } = useMemo(() => {
-    const cleanCurrentHandle = currentHostHandle.replace(/^@/, '').toLowerCase().trim();
-    const allAccounts: Record<string, UserAccount> = authService.getAllAccounts();
-    const networkStreamers = liveStreamSync.getStreamersList();
+  // Subscribe to real-time live network broadcasters when modal is open
+  useEffect(() => {
+    if (!isOpen) return;
+    setActiveNetworkStreams(liveStreamSync.getStreamersList());
+    liveStreamSync.queryNetworkStreams();
 
-    // Collect followed handles from localStorage
-    let followedHandles: string[] = [];
-    try {
-      const storedFollowing = localStorage.getItem('privity_following_v5');
-      if (storedFollowing) {
-        followedHandles = Object.keys(JSON.parse(storedFollowing)).map((h) => h.replace(/^@/, '').toLowerCase());
-      }
-    } catch {}
-
-    const friends: RealCreatorItem[] = [];
-    const suggested: RealCreatorItem[] = [];
-
-    // 1. Process active network broadcasters
-    networkStreamers.forEach((streamer) => {
-      const h = streamer.handle.replace(/^@/, '').toLowerCase().trim();
-      if (h === cleanCurrentHandle || streamer.isHost) return;
-
-      const item: RealCreatorItem = {
-        id: streamer.id || h,
-        name: streamer.name,
-        handle: streamer.handle.startsWith('@') ? streamer.handle : `@${streamer.handle}`,
-        avatar: streamer.avatar,
-        badge: streamer.diamonds > 200 ? 'C5' : streamer.diamonds > 100 ? 'B1' : 'A1',
-        badgeColor: streamer.diamonds > 200 ? '#f97316' : '#38bdf8',
-        viewers: streamer.viewersCount || 1,
-        cohosts: [],
-        canInvite: true,
-      };
-
-      if (followedHandles.includes(h)) {
-        friends.push(item);
-      } else {
-        suggested.push(item);
-      }
+    const unsub = liveStreamSync.subscribeToActiveStreams((streams) => {
+      setActiveNetworkStreams(streams);
     });
 
-    // 2. Process registered user accounts
-    Object.values(allAccounts).forEach((acc) => {
-      const h = acc.handle.replace(/^@/, '').toLowerCase().trim();
-      if (h === cleanCurrentHandle) return;
-      if (friends.some((f) => f.handle.toLowerCase() === `@${h}`) || suggested.some((s) => s.handle.toLowerCase() === `@${h}`)) {
-        return;
-      }
+    return unsub;
+  }, [isOpen]);
 
-      const item: RealCreatorItem = {
-        id: acc.id || h,
-        name: acc.name,
-        handle: acc.handle.startsWith('@') ? acc.handle : `@${acc.handle}`,
-        avatar: acc.avatar,
-        badge: acc.level >= 10 ? 'B2' : 'C1',
-        badgeColor: acc.level >= 10 ? '#38bdf8' : '#f97316',
-        viewers: Math.max(1, acc.followers || 0),
-        cohosts: [],
-        canInvite: true,
-      };
+  // STRICTLY filter to ACTUAL people who are live right now.
+  // ZERO preset people. ZERO offline accounts.
+  const cleanCurrentHandle = (currentHostHandle || '').replace(/^@+/, '').toLowerCase().trim();
 
-      if (followedHandles.includes(h)) {
-        friends.push(item);
-      } else {
-        suggested.push(item);
-      }
-    });
-
-    // Fallback real creators if platform is in initial scratch state
-    if (friends.length === 0 && suggested.length === 0) {
-      suggested.push(
-        {
-          id: 'nicole',
-          name: 'Nicole Miller',
-          handle: '@nicole',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-          badge: 'C5',
-          badgeColor: '#f97316',
-          viewers: 14,
-          cohosts: [],
-          canInvite: true,
-        },
-        {
-          id: 'alex',
-          name: 'Alex Rivera',
-          handle: '@alex',
-          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-          badge: 'B1',
-          badgeColor: '#38bdf8',
-          viewers: 8,
-          cohosts: [],
-          canInvite: true,
-        },
-        {
-          id: 'carlos',
-          name: 'Carlos Perez',
-          handle: '@carlos',
-          avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-          badge: 'A2',
-          badgeColor: '#ec4899',
-          viewers: 22,
-          cohosts: [],
-          canInvite: true,
+  const realLiveCreators: RealLiveCreatorItem[] = useMemo(() => {
+    return activeNetworkStreams
+      .filter((s) => {
+        const h = (s.handle || s.id || '').replace(/^@+/, '').toLowerCase().trim();
+        // Exclude self and host session
+        if (!h || h === cleanCurrentHandle || s.isHost) {
+          return false;
         }
-      );
-    }
-
-    return { realFriends: friends, realSuggested: suggested };
-  }, [currentHostHandle]);
+        return true;
+      })
+      .map((streamer) => {
+        const cleanH = streamer.handle.replace(/^@+/, '').toLowerCase().trim();
+        const cleanName = streamer.name.replace(' (LIVE NOW 🔴)', '').trim();
+        return {
+          id: streamer.id || cleanH,
+          name: cleanName,
+          handle: `@${cleanH}`,
+          avatar: streamer.avatar || streamer.posterUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
+          badge: streamer.diamonds > 200 ? 'C5' : streamer.diamonds > 100 ? 'B1' : 'A1',
+          badgeColor: streamer.diamonds > 200 ? '#f97316' : '#38bdf8',
+          viewers: Math.max(1, streamer.viewersCount || 1),
+          streamer,
+        };
+      });
+  }, [activeNetworkStreams, cleanCurrentHandle]);
 
   if (!isOpen) return null;
 
   // Broadcast real-time Co-Host invitation over MQTT & Supabase Realtime
-  const sendCoHostInvitation = (targetHandle: string, targetName: string, targetAvatar: string) => {
-    const cleanTargetHandle = targetHandle.replace(/^@/, '').toLowerCase().trim();
-    setInvitedHandles((prev) => ({ ...prev, [cleanTargetHandle]: true }));
-    showToast(`💌 Co-host invitation sent to ${targetName}!`);
+  // Does NOT auto-connect or auto-start: recipient must Accept or Decline!
+  const sendCoHostInvitation = (creator: RealLiveCreatorItem) => {
+    const cleanTarget = creator.handle.replace(/^@+/, '').toLowerCase().trim();
+    const cleanMyHandle = currentHostHandle.replace(/^@+/, '').toLowerCase().trim();
 
-    // Broadcast across active stream room so recipient sees floating invite
-    const roomId = currentHostHandle.replace(/^@/, '').toLowerCase().trim();
-    liveStreamSync.sendRoomEvent(roomId, {
+    setInvitedHandles((prev) => ({ ...prev, [cleanTarget]: true }));
+    showToast(`💌 Co-host invitation sent to ${creator.name}! Waiting for them to accept...`);
+
+    const inviteEvent = {
       type: 'COHOST_INVITE',
-      senderHandle: currentHostHandle,
+      senderHandle: `@${cleanMyHandle}`,
       senderName: currentHostName,
       senderAvatar: currentHostAvatar,
-      targetHandle: cleanTargetHandle,
-      targetName,
+      targetHandle: cleanTarget,
+      targetName: creator.name,
       timestamp: Date.now(),
-    });
-
-    const candidateStreamer: LiveMeStreamer = {
-      id: cleanTargetHandle,
-      name: targetName,
-      handle: targetHandle.startsWith('@') ? targetHandle : `@${targetHandle}`,
-      avatar: targetAvatar,
-      title: 'Co-Host Live Battle',
-      description: 'Live battle duel arena',
-      viewersCount: Math.floor(Math.random() * 20) + 5,
-      likesCount: 1200,
-      category: 'Co-Host',
-      videoStreamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      posterUrl: targetAvatar,
-      isVerified: true,
-      diamonds: 450,
-      totalViews: '1.5K',
-      popularity: 'Trending',
-      tags: ['CoHost', 'Battle'],
-      topContributors: [],
+      senderStreamer: {
+        id: `stream-${cleanMyHandle}`,
+        name: currentHostName,
+        handle: `@${cleanMyHandle}`,
+        avatar: currentHostAvatar,
+        videoStreamUrl: '',
+        posterUrl: currentHostAvatar,
+        isVerified: true,
+        category: 'Co-Host',
+        viewersCount: 1,
+        likesCount: 0,
+      },
     };
 
-    // When connection completes
-    setTimeout(() => {
-      onStartBattle(candidateStreamer);
-      onClose();
-      showToast(`⚔️ Connected with ${targetName} for Co-Host Battle!`);
-    }, 2000);
-  };
+    // Broadcast across target room and current room
+    liveStreamSync.sendRoomEvent(cleanTarget, inviteEvent);
+    liveStreamSync.sendRoomEvent(cleanMyHandle, inviteEvent);
 
-  const handleNudge = (targetHandle: string, targetName: string) => {
-    const cleanTargetHandle = targetHandle.replace(/^@/, '').toLowerCase().trim();
-    setNudgedHandles((prev) => ({ ...prev, [cleanTargetHandle]: true }));
-    showToast(`🔔 Nudged ${targetName} to battle!`);
+    onInviteSent?.(cleanTarget);
   };
 
   const handleQuickInvite = () => {
+    if (realLiveCreators.length === 0) {
+      showToast('📡 No other creators are currently live right now.');
+      return;
+    }
+
     setIsQuickScanning(true);
-    showToast(`🔍 Quick matching active ${selectedTopic} creator...`);
+    showToast(`🔍 Quick matching active live creators in ${selectedTopic}...`);
 
     setTimeout(() => {
       setIsQuickScanning(false);
-      const pool = realSuggested.length > 0 ? realSuggested : realFriends;
-      const target = pool[Math.floor(Math.random() * pool.length)];
+      const target = realLiveCreators[Math.floor(Math.random() * realLiveCreators.length)];
       if (target) {
-        sendCoHostInvitation(target.handle, target.name, target.avatar);
-      } else {
-        showToast('No active creators available for quick battle right now.');
+        sendCoHostInvitation(target);
       }
-    }, 1200);
+    }, 900);
   };
-
-  const displayedFriends = showMoreFriends ? realFriends : realFriends.slice(0, 3);
 
   return (
     <div className="tiktok-sheet-backdrop" onClick={onClose}>
@@ -231,14 +149,32 @@ export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = (
 
         {/* Sheet Header */}
         <div className="tiktok-cohost-header">
-          <h2 className="tiktok-cohost-title">Co-host with creators</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h2 className="tiktok-cohost-title">Co-host with LIVE creators</h2>
+            <span
+              style={{
+                background: 'rgba(239, 68, 68, 0.2)',
+                color: '#ef4444',
+                fontSize: 10,
+                fontWeight: 800,
+                padding: '2px 8px',
+                borderRadius: 9999,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
+              REAL-TIME ({realLiveCreators.length})
+            </span>
+          </div>
           <button
             type="button"
             className="tiktok-sheet-dots-btn"
-            onClick={() => showToast('⚙️ Co-host privacy & match preferences')}
-            aria-label="Co-host options"
+            onClick={onClose}
+            aria-label="Close"
           >
-            •••
+            ✕
           </button>
         </div>
 
@@ -270,7 +206,7 @@ export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = (
               <div className={`tiktok-radar-ring ring-2 ${isQuickScanning ? 'pulse' : ''}`} />
               <div className={`tiktok-radar-ring ring-3 ${isQuickScanning ? 'pulse' : ''}`} />
               <div className="tiktok-radar-avatar">
-                <span className="tiktok-radar-qmark">?</span>
+                <span className="tiktok-radar-qmark">📡</span>
               </div>
             </div>
 
@@ -278,139 +214,105 @@ export const LiveCoHostCreatorsModal: React.FC<LiveCoHostCreatorsModalProps> = (
             <button
               type="button"
               className="tiktok-btn-primary-pink"
-              disabled={isQuickScanning}
+              disabled={isQuickScanning || realLiveCreators.length === 0}
               onClick={handleQuickInvite}
             >
-              {isQuickScanning ? 'Matching...' : 'Invite'}
+              {isQuickScanning
+                ? 'Matching...'
+                : realLiveCreators.length === 0
+                ? 'No other creators live'
+                : 'Quick Match & Invite'}
             </button>
           </div>
 
-          {/* Section: Friends */}
-          {realFriends.length > 0 && (
-            <div className="tiktok-cohost-section">
-              <h4 className="tiktok-section-heading">Friends ({realFriends.length})</h4>
+          {/* Section: Real Live Creators */}
+          <div className="tiktok-cohost-section">
+            <h4 className="tiktok-section-heading">
+              Active Live Broadcasters ({realLiveCreators.length})
+            </h4>
+
+            {realLiveCreators.length === 0 ? (
+              <div
+                style={{
+                  padding: '30px 20px',
+                  textAlign: 'center',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  borderRadius: 16,
+                  border: '1px dashed rgba(255, 255, 255, 0.15)',
+                  margin: '10px 0',
+                }}
+              >
+                <div style={{ fontSize: 32, marginBottom: 8 }}>📡</div>
+                <div style={{ color: '#ffffff', fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                  No other creators are live right now
+                </div>
+                <div style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: 12, lineHeight: 1.5, maxWidth: 300, margin: '0 auto' }}>
+                  Only actual people broadcasting live appear here in real time. When another host goes LIVE on Privity, you can invite them directly to co-host!
+                </div>
+              </div>
+            ) : (
               <div className="tiktok-creator-list">
-                {displayedFriends.map((friend) => {
-                  const cleanH = friend.handle.replace(/^@/, '').toLowerCase().trim();
+                {realLiveCreators.map((creator) => {
+                  const cleanH = creator.handle.replace(/^@+/, '').toLowerCase().trim();
+                  const isInvited = invitedHandles[cleanH];
+
                   return (
-                    <div key={friend.id} className="tiktok-creator-row">
+                    <div key={creator.id} className="tiktok-creator-row">
                       <div className="tiktok-creator-avatar-wrap">
-                        <img src={friend.avatar} alt={friend.name} className="tiktok-creator-avatar" />
+                        <img src={creator.avatar} alt={creator.name} className="tiktok-creator-avatar" />
+                        <span
+                          style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            right: 0,
+                            width: 10,
+                            height: 10,
+                            borderRadius: '50%',
+                            background: '#22c55e',
+                            border: '2px solid #000',
+                          }}
+                        />
                       </div>
 
                       <div className="tiktok-creator-details">
                         <div className="tiktok-creator-name-row">
-                          <span className="tiktok-creator-name" title={friend.name}>
-                            {friend.name}
+                          <span className="tiktok-creator-name" title={creator.name}>
+                            {creator.name}
                           </span>
                         </div>
 
                         <div className="tiktok-creator-meta-row">
                           <span
                             className="tiktok-diamond-badge"
-                            style={{ background: friend.badgeColor }}
+                            style={{ background: creator.badgeColor }}
                           >
-                            💎 {friend.badge}
+                            💎 {creator.badge}
                           </span>
                           <span className="tiktok-viewers-badge">
-                            👤 {friend.viewers}
+                            👤 {creator.viewers} live
                           </span>
                         </div>
 
                         <div className="tiktok-cohost-badge-row">
-                          <span className="tiktok-cohost-text">Available to Battle</span>
+                          <span className="tiktok-cohost-text">@{cleanH} · Ready to Connect</span>
                         </div>
                       </div>
 
                       <div className="tiktok-creator-action">
-                        {friend.canInvite ? (
-                          <button
-                            type="button"
-                            className={`tiktok-btn-invite ${invitedHandles[cleanH] ? 'invited' : ''}`}
-                            onClick={() => sendCoHostInvitation(friend.handle, friend.name, friend.avatar)}
-                            disabled={invitedHandles[cleanH]}
-                          >
-                            {invitedHandles[cleanH] ? 'Invited' : 'Invite'}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className={`tiktok-btn-nudge ${nudgedHandles[cleanH] ? 'nudged' : ''}`}
-                            onClick={() => handleNudge(friend.handle, friend.name)}
-                            disabled={nudgedHandles[cleanH]}
-                          >
-                            {nudgedHandles[cleanH] ? 'Nudged' : 'Nudge'}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className={`tiktok-btn-invite ${isInvited ? 'invited' : ''}`}
+                          onClick={() => sendCoHostInvitation(creator)}
+                          disabled={isInvited}
+                        >
+                          {isInvited ? 'Invited ⏳' : 'Invite'}
+                        </button>
                       </div>
                     </div>
                   );
                 })}
               </div>
-
-              {/* See more toggle */}
-              {!showMoreFriends && realFriends.length > 3 && (
-                <button
-                  type="button"
-                  className="tiktok-see-more-btn"
-                  onClick={() => setShowMoreFriends(true)}
-                >
-                  See more ⌄
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Section: Suggested creators */}
-          <div className="tiktok-cohost-section">
-            <h4 className="tiktok-section-heading">Suggested creators ({realSuggested.length})</h4>
-            <div className="tiktok-creator-list">
-              {realSuggested.map((creator) => {
-                const cleanH = creator.handle.replace(/^@/, '').toLowerCase().trim();
-                return (
-                  <div key={creator.id} className="tiktok-creator-row">
-                    <div className="tiktok-creator-avatar-wrap">
-                      <img src={creator.avatar} alt={creator.name} className="tiktok-creator-avatar" />
-                    </div>
-
-                    <div className="tiktok-creator-details">
-                      <div className="tiktok-creator-name-row">
-                        <span className="tiktok-creator-name" title={creator.name}>
-                          {creator.name}
-                        </span>
-                      </div>
-
-                      <div className="tiktok-creator-meta-row">
-                        <span
-                          className="tiktok-diamond-badge"
-                          style={{ background: creator.badgeColor }}
-                        >
-                          💎 {creator.badge}
-                        </span>
-                        <span className="tiktok-viewers-badge">
-                          👤 {creator.viewers}
-                        </span>
-                      </div>
-
-                      <div className="tiktok-cohost-badge-row">
-                        <span className="tiktok-cohost-text">{creator.handle}</span>
-                      </div>
-                    </div>
-
-                    <div className="tiktok-creator-action">
-                      <button
-                        type="button"
-                        className={`tiktok-btn-invite ${invitedHandles[cleanH] ? 'invited' : ''}`}
-                        onClick={() => sendCoHostInvitation(creator.handle, creator.name, creator.avatar)}
-                        disabled={invitedHandles[cleanH]}
-                      >
-                        {invitedHandles[cleanH] ? 'Invited' : 'Invite'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            )}
           </div>
         </div>
       </div>
