@@ -4,6 +4,7 @@ import { LIVEME_STREAMERS } from './liveMeData';
 import { LiveMeStreamer } from './types';
 import { IconArrowLeft, IconSearch, IconX } from '../Icons';
 import { liveStreamSync } from '../../services/liveStreamSyncService';
+import { onSupabaseBroadcast } from '../../services/supabaseClient';
 
 const IconFlame: React.FC<{ size?: number; color?: string }> = ({ size = 12, color = '#f97316' }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
@@ -93,11 +94,17 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     try {
       syncBus = new BroadcastChannel('privity_sync_bus');
       syncBus.onmessage = (e) => {
-        if (e.data?.type === 'LIVE_HOST_STARTED') {
-          setActiveHost(e.data.host);
-        } else if (e.data?.type === 'LIVE_HOST_ENDED') {
+        const action = e.data?.action || e.data?.type;
+        const host = e.data?.host || e.data?.stream;
+        if (action === 'LIVE_HOST_STARTED' || action === 'LIVE_STARTED' || action === 'STREAM_ACTIVE') {
+          if (host) {
+            setActiveHost(host);
+            setNetworkStreamers(liveStreamSync.getStreamersList());
+          }
+        } else if (action === 'LIVE_HOST_ENDED' || action === 'LIVE_ENDED' || action === 'STREAM_ENDED') {
           setActiveHost(null);
-          const handle = (e.data.handle || '').toLowerCase().replace('@', '').trim();
+          setNetworkStreamers(liveStreamSync.getStreamersList());
+          const handle = (e.data?.handle || e.data?.creatorHandle || '').toLowerCase().replace('@', '').trim();
           if (handle) {
             setLiveFramesMap((prev) => {
               const next = { ...prev };
@@ -109,12 +116,45 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       };
     } catch {}
 
+    const unsubSupabase = onSupabaseBroadcast((payload: any) => {
+      if (!payload) return;
+      const action = payload.action || payload.type;
+      if (action === 'STREAM_ACTIVE' || action === 'LIVE_STARTED' || action === 'LIVE_HOST_STARTED') {
+        const host = payload.stream || payload.host;
+        if (host) {
+          const normH = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
+          liveStreamSync.clearStreamEnded(host.id, normH);
+          setNetworkStreamers(liveStreamSync.getStreamersList());
+        }
+      } else if (action === 'STREAM_ENDED' || action === 'LIVE_ENDED' || action === 'LIVE_HOST_ENDED') {
+        const sid = payload.streamId;
+        const h = (payload.creatorHandle || payload.handle || '').toLowerCase().replace('@', '').trim();
+        liveStreamSync.markStreamEnded(sid, h);
+        setNetworkStreamers(liveStreamSync.getStreamersList());
+        setActiveHost((prev: any) => {
+          if (!prev) return null;
+          const prevH = (prev.creatorHandle || prev.handle || '').toLowerCase().replace('@', '').trim();
+          if (prev.id === sid || (h && prevH === h)) return null;
+          return prev;
+        });
+        if (h) {
+          setLiveFramesMap((prev) => {
+            const next = { ...prev };
+            delete next[h];
+            return next;
+          });
+        }
+      }
+    });
+
     const handleStorage = (e: StorageEvent) => {
       if (
         e.key === 'privity_is_host_broadcasting' ||
         e.key === 'privity_current_live_host' ||
+        e.key === 'privity_remote_active_streams' ||
         e.key === 'privity_ended_streams_v2'
       ) {
+        setNetworkStreamers(liveStreamSync.getStreamersList());
         const isB = localStorage.getItem('privity_is_host_broadcasting') === 'true';
         const saved = localStorage.getItem('privity_current_live_host');
         if (isB && saved) {
@@ -142,6 +182,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     return () => {
       if (frameBus) frameBus.close();
       if (syncBus) syncBus.close();
+      unsubSupabase();
       window.removeEventListener('storage', handleStorage);
     };
   }, []);

@@ -2063,7 +2063,9 @@ export function App() {
         setOnlineUsersMap((prev) => ({ ...prev, [senderCandidate]: Date.now() }));
       }
 
-      switch (event.action) {
+      const actionType = event.action || event.type;
+
+      switch (actionType) {
         case 'PRESENCE_PING': {
           const clean = normalizeHandle(event.handle);
           if (clean) {
@@ -3214,19 +3216,23 @@ export function App() {
         }
 
         case 'LIVE_STARTED':
-        case 'LIVE_HEARTBEAT': {
-          const { host } = event;
-          if (!host || !host.id || host.isLive === false) return;
+        case 'LIVE_HOST_STARTED':
+        case 'STREAM_ACTIVE':
+        case 'LIVE_HEARTBEAT':
+        case 'STREAM_HEARTBEAT': {
+          const host = event.host || event.stream;
+          if (!host || (!host.id && !host.creatorHandle) || host.isLive === false) return;
           const cleanHostHandle = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
-          liveStreamSync.clearStreamEnded(host.id, cleanHostHandle);
-          liveStreamSync.notifyStreamStarted(host);
+          const hostId = host.id || `live-user-${cleanHostHandle}`;
+          liveStreamSync.clearStreamEnded(hostId, cleanHostHandle);
+          liveStreamSync.notifyStreamStarted({ ...host, id: hostId, creatorHandle: cleanHostHandle });
           setNetworkLiveStreamers((prev) => {
             const filtered = prev.filter((s) => {
               const sHandle = ((s as any).creatorHandle || s.handle || '').toLowerCase().replace('@', '').trim();
-              return s.id !== host.id && sHandle !== cleanHostHandle;
+              return s.id !== hostId && sHandle !== cleanHostHandle;
             });
             const streamItem: LiveMeStreamer = {
-              id: host.id,
+              id: hostId,
               handle: cleanHostHandle,
               name: `${(host.creatorName || host.name || 'Host').replace(' (LIVE NOW 🔴)', '')} (LIVE NOW 🔴)`,
               avatar: host.creatorAvatar || host.avatar || '',
@@ -3251,9 +3257,9 @@ export function App() {
 
           // Accurate Notification if this is a new live broadcast from another user
           const myCleanLower = (cleanMyHandle || '').toLowerCase();
-          if (event.action === 'LIVE_STARTED' && cleanHostHandle && cleanHostHandle !== myCleanLower) {
+          if ((actionType === 'LIVE_STARTED' || actionType === 'LIVE_HOST_STARTED' || actionType === 'STREAM_ACTIVE') && cleanHostHandle && cleanHostHandle !== myCleanLower) {
             const notif: AppNotification = {
-              id: `notif-live-${host.id}-${cleanHostHandle}`,
+              id: `notif-live-${hostId}-${cleanHostHandle}`,
               type: 'live',
               actorHandle: cleanHostHandle,
               actorName: host.creatorName || host.name || cleanHostHandle,
@@ -3551,8 +3557,11 @@ export function App() {
           break;
         }
 
-        case 'LIVE_ENDED': {
-          const { streamId, handle } = event;
+        case 'LIVE_ENDED':
+        case 'LIVE_HOST_ENDED':
+        case 'STREAM_ENDED': {
+          const streamId = event.streamId || (event.stream && event.stream.id) || '';
+          const handle = event.handle || event.hostHandle || event.creatorHandle || '';
           if (!streamId && !handle) return;
           const cleanTarget = (handle || '').toLowerCase().replace('@', '').trim();
           try {
@@ -3818,6 +3827,14 @@ export function App() {
             setNotifications(parsed);
           }
         } catch {}
+      } else if (
+        e.key === 'privity_remote_active_streams' ||
+        e.key === 'privity_current_live_host' ||
+        e.key === 'privity_is_host_broadcasting' ||
+        e.key === 'privity_ended_streams_v2'
+      ) {
+        const streams = liveStreamSync.getStreamersList();
+        setNetworkLiveStreamers(streams);
       }
     };
     window.addEventListener('storage', handleStorageEvent);
@@ -7260,7 +7277,7 @@ export function App() {
       localStorage.setItem('privity_is_host_broadcasting', 'true');
       localStorage.setItem('privity_active_live_session', JSON.stringify(userStream));
       const bus = new BroadcastChannel('privity_sync_bus');
-      bus.postMessage({ type: 'LIVE_HOST_STARTED', host: hostMeta });
+      bus.postMessage({ type: 'LIVE_HOST_STARTED', action: 'LIVE_STARTED', host: hostMeta });
       bus.postMessage({ type: 'LIVE_ROOM_RESET', hostHandle: cleanHandle, roomId: cleanHandle });
       bus.close();
       liveStreamSync.sendRoomEvent(cleanHandle, { type: 'LIVE_ROOM_RESET', hostHandle: cleanHandle, roomId: cleanHandle });
@@ -7273,6 +7290,10 @@ export function App() {
         action: 'LIVE_ROOM_RESET',
         roomId: cleanHandle,
         hostHandle: cleanHandle,
+      });
+      broadcastViaSupabase({
+        action: 'STREAM_ACTIVE',
+        stream: hostMeta,
       });
     } catch {}
 
@@ -12833,6 +12854,7 @@ export function App() {
               if (streamId) localStorage.removeItem(`privity_live_chat_${streamId}`);
               const bus = new BroadcastChannel('privity_sync_bus');
               bus.postMessage({ type: 'LIVE_ROOM_RESET', hostHandle: targetHandle, roomId: streamId });
+              bus.postMessage({ type: 'LIVE_HOST_ENDED', action: 'LIVE_ENDED', streamId, handle: targetHandle, creatorHandle: targetHandle });
               bus.close();
             } catch {}
             if (activeLiveStream?.id) {
@@ -12847,6 +12869,14 @@ export function App() {
                 roomId: streamId,
                 hostHandle: targetHandle,
               });
+              try {
+                broadcastViaSupabase({
+                  action: 'STREAM_ENDED',
+                  streamId: activeLiveStream.id,
+                  creatorHandle: targetHandle,
+                  handle: targetHandle,
+                });
+              } catch {}
             }
             setActiveLiveStream(null);
             setMinimizedLiveStream(null);

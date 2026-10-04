@@ -116,12 +116,13 @@ class LiveStreamSyncService {
     try {
       onSupabaseBroadcast((payload: any) => {
         if (!payload) return;
-        if (payload.action === 'ROOM_EVENT' && payload.streamId && payload.event) {
+        const action = payload.action || payload.type;
+        if (action === 'ROOM_EVENT' && payload.streamId && payload.event) {
           this.dispatchRoomEvent(payload.streamId, payload.event);
-        } else if (payload.action === 'STREAM_ACTIVE' && payload.stream) {
-          this.handleIncomingStream(payload.stream);
-        } else if (payload.action === 'STREAM_ENDED') {
-          this.handleStreamEnded(payload.streamId, payload.creatorHandle);
+        } else if ((action === 'STREAM_ACTIVE' || action === 'LIVE_STARTED' || action === 'LIVE_HOST_STARTED') && (payload.stream || payload.host)) {
+          this.handleIncomingStream(payload.stream || payload.host);
+        } else if (action === 'STREAM_ENDED' || action === 'LIVE_ENDED' || action === 'LIVE_HOST_ENDED') {
+          this.handleStreamEnded(payload.streamId, payload.creatorHandle || payload.handle);
         }
       });
     } catch {}
@@ -193,13 +194,15 @@ class LiveStreamSyncService {
       this.broadcastBus = new BroadcastChannel('privity_sync_bus');
       this.broadcastBus.onmessage = (e) => {
         if (!e.data) return;
-        if (e.data.type === 'LIVE_HOST_STARTED' && e.data.host) {
-          const normHandle = (e.data.host.creatorHandle || '').toLowerCase().replace('@', '').trim();
-          this.clearStreamEnded(e.data.host.id, normHandle);
-          this.handleIncomingStream(e.data.host);
-        } else if (e.data.type === 'LIVE_HOST_ENDED') {
-          this.handleStreamEnded(e.data.streamId || '', e.data.handle);
-        } else if (e.data.type === 'LIVE_ROOM_EVENT' && e.data.streamId) {
+        const action = e.data.action || e.data.type;
+        const host = e.data.host || e.data.stream;
+        if ((action === 'LIVE_HOST_STARTED' || action === 'LIVE_STARTED' || action === 'STREAM_ACTIVE') && host) {
+          const normHandle = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
+          this.clearStreamEnded(host.id, normHandle);
+          this.handleIncomingStream(host);
+        } else if (action === 'LIVE_HOST_ENDED' || action === 'LIVE_ENDED' || action === 'STREAM_ENDED') {
+          this.handleStreamEnded(e.data.streamId || '', e.data.handle || e.data.creatorHandle);
+        } else if ((action === 'LIVE_ROOM_EVENT' || action === 'ROOM_EVENT') && e.data.streamId) {
           this.dispatchRoomEvent(e.data.streamId, e.data.event);
         }
       };
@@ -754,6 +757,7 @@ class LiveStreamSyncService {
     try {
       this.broadcastBus?.postMessage({
         type: 'LIVE_HOST_STARTED',
+        action: 'LIVE_STARTED',
         host: this.currentHostSession,
       });
     } catch {}
@@ -858,6 +862,17 @@ class LiveStreamSyncService {
             this.hostMediaStream.getTracks().forEach((track) => {
               if (this.hostMediaStream) pc!.addTrack(track, this.hostMediaStream);
             });
+            try {
+              pc.getSenders().forEach((sender) => {
+                if (sender.track?.kind === 'video') {
+                  const params = sender.getParameters();
+                  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+                  params.encodings[0].maxBitrate = 4000000;
+                  params.encodings[0].networkPriority = 'high';
+                  sender.setParameters(params).catch(() => {});
+                }
+              });
+            } catch {}
           }
 
           pc.onicecandidate = (event) => {
@@ -1086,10 +1101,21 @@ class LiveStreamSyncService {
       } catch {}
 
       try {
+        broadcastViaSupabase({
+          action: 'STREAM_ENDED',
+          streamId,
+          creatorHandle: handle,
+          handle: normHandle,
+        });
+      } catch {}
+
+      try {
         this.broadcastBus?.postMessage({
           type: 'LIVE_HOST_ENDED',
+          action: 'LIVE_ENDED',
           streamId,
           handle: normHandle,
+          creatorHandle: normHandle,
         });
       } catch {}
 
@@ -1216,7 +1242,7 @@ class LiveStreamSyncService {
         }
       });
 
-      pc.createOffer().then(async (offer) => {
+      pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true }).then(async (offer) => {
         if (isCleanedUp) return;
         await pc.setLocalDescription(offer);
         this.sendRoomEvent(roomId, {
@@ -1446,13 +1472,23 @@ class LiveStreamSyncService {
     this.dispatchRoomEvent(roomId, event);
   }
 
-  public sendVideoFrame(streamIdOrHandle: string, frameData: string) {
+  private lastFrameSentTime: Record<string, number> = {};
+
+  public sendVideoFrame(streamIdOrHandle: string, frameData: string, forceNetwork = false) {
     const roomId = getRoomIdFromHandle(streamIdOrHandle);
-    this.sendRoomEvent(roomId, {
-      type: 'LIVE_FRAME',
-      streamerId: roomId,
-      frame: frameData,
-    });
+    const now = Date.now();
+    const lastSent = this.lastFrameSentTime[roomId] || 0;
+
+    // Only emit over network (MQTT/Supabase) at most once every 3000ms as a fallback preview
+    // Local BroadcastChannel handles high-frequency smooth rendering with 0 network overhead
+    if (forceNetwork || now - lastSent >= 3000) {
+      this.lastFrameSentTime[roomId] = now;
+      this.sendRoomEvent(roomId, {
+        type: 'LIVE_FRAME',
+        streamerId: roomId,
+        frame: frameData,
+      });
+    }
   }
 
   public subscribeToRoom(streamIdOrHandle: string, onEvent: (event: any) => void): () => void {

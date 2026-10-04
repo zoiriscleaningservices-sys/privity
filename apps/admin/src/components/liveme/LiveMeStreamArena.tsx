@@ -208,6 +208,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       frameChannel = new BroadcastChannel('privity_live_frames');
       frameChannel.onmessage = (e) => {
         if (e.data?.type === 'FRAME' && e.data.frame) {
+          // If direct WebRTC video is actively decoding and rendering, bypass frame state to prevent main-thread re-renders
+          if (viewerVideoNodeRef.current && !viewerVideoNodeRef.current.paused && viewerVideoNodeRef.current.readyState >= 2) {
+            return;
+          }
           setRemoteLiveFrame(e.data.frame);
         }
       };
@@ -1816,22 +1820,31 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     if (!isHost && !isCoHostConnected) return;
     const roomId = getRoomIdFromHandle(currentUser.handle);
 
+    // Optimized resolution (320x480) for lightweight memory IPC and instant encoding
     const offscreenCanvas = document.createElement('canvas');
-    offscreenCanvas.width = 540;
-    offscreenCanvas.height = 960;
-    const offscreenCtx = offscreenCanvas.getContext('2d');
+    offscreenCanvas.width = 320;
+    offscreenCanvas.height = 480;
+    const offscreenCtx = offscreenCanvas.getContext('2d', { alpha: false });
     let frameChannel: BroadcastChannel | null = null;
+    let cohostChannel: BroadcastChannel | null = null;
     try {
       frameChannel = new BroadcastChannel('privity_live_frames');
+      cohostChannel = new BroadcastChannel('privity_cohost_frames');
     } catch {}
+
+    let lastCohostNetTime = 0;
 
     const captureAndEmitFrame = () => {
       if (videoRef.current && offscreenCtx && !isVideoOff) {
         try {
           if (videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
-            offscreenCtx.drawImage(videoRef.current, 0, 0, 540, 960);
-            const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.82);
+            offscreenCtx.drawImage(videoRef.current, 0, 0, 320, 480);
+            const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.55);
+            
+            // Send to liveStreamSync (throttled internally to 3s for network preview, so no MQTT congestion)
             liveStreamSync.sendVideoFrame(roomId, frameJpeg);
+
+            // Emit to local in-memory IPC for same-device instant 0ms preview
             if (frameChannel) {
               frameChannel.postMessage({
                 type: 'FRAME',
@@ -1840,35 +1853,40 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               });
             }
 
-            // Real-time Co-Host Frame Relay (Instantly renders in rival's box and audience screens with 0ms delay)
+            // Real-time Co-Host Frame Relay
             if (isCoHostConnectedRef.current && pkRivalRef.current?.handle) {
               const cleanRivalH = (pkRivalRef.current.handle || '').replace(/^@+/, '').toLowerCase().trim();
               const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
               if (cleanRivalH && cleanRivalH !== cleanMyH) {
-                liveStreamSync.sendRoomEvent(cleanRivalH, {
-                  type: 'COHOST_LIVE_FRAME',
-                  senderHandle: cleanMyH,
-                  targetHandle: cleanRivalH,
-                  frame: frameJpeg,
-                });
-                if (roomId && roomId !== cleanRivalH) {
-                  liveStreamSync.sendRoomEvent(roomId, {
-                    type: 'COHOST_LIVE_FRAME',
-                    senderHandle: cleanMyH,
-                    targetHandle: cleanRivalH,
-                    frame: frameJpeg,
-                  });
-                }
-                try {
-                  const cohostBus = new BroadcastChannel('privity_cohost_frames');
-                  cohostBus.postMessage({
+                // In-memory BroadcastChannel has 0 network cost and instant delivery
+                if (cohostChannel) {
+                  cohostChannel.postMessage({
                     type: 'COHOST_FRAME',
                     senderHandle: cleanMyH,
                     targetHandle: cleanRivalH,
                     frame: frameJpeg,
                   });
-                  cohostBus.close();
-                } catch {}
+                }
+
+                // Throttle network room event for co-host frame to once every 2.5s (WebRTC is the real-time carrier)
+                const now = Date.now();
+                if (now - lastCohostNetTime >= 2500) {
+                  lastCohostNetTime = now;
+                  liveStreamSync.sendRoomEvent(cleanRivalH, {
+                    type: 'COHOST_LIVE_FRAME',
+                    senderHandle: cleanMyH,
+                    targetHandle: cleanRivalH,
+                    frame: frameJpeg,
+                  });
+                  if (roomId && roomId !== cleanRivalH) {
+                    liveStreamSync.sendRoomEvent(roomId, {
+                      type: 'COHOST_LIVE_FRAME',
+                      senderHandle: cleanMyH,
+                      targetHandle: cleanRivalH,
+                      frame: frameJpeg,
+                    });
+                  }
+                }
               }
             }
           }
@@ -1877,12 +1895,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     };
 
     immediateFrameCaptureRef.current = captureAndEmitFrame;
-    const frameSyncInterval = setInterval(captureAndEmitFrame, 180);
+    const frameSyncInterval = setInterval(captureAndEmitFrame, 120);
 
     return () => {
       clearInterval(frameSyncInterval);
       immediateFrameCaptureRef.current = null;
       if (frameChannel) frameChannel.close();
+      if (cohostChannel) cohostChannel.close();
     };
   }, [isHost, isCoHostConnected, currentUser.handle, isVideoOff]);
 
@@ -2220,9 +2239,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         const rivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
         const frameSrc = (evt.streamerId || '').toLowerCase().trim();
         if (isCoHostConnectedRef.current && rivalH && frameSrc.includes(rivalH)) {
-          setRemoteCoHostFrame(evt.frame);
+          if (!remoteCoHostStream) {
+            setRemoteCoHostFrame(evt.frame);
+          }
         } else {
-          setRemoteLiveFrame(evt.frame);
+          if (!isP2PVideoActive) {
+            setRemoteLiveFrame(evt.frame);
+          }
         }
       } else if (evt.type === 'LIVE_LIKE') {
         const sid = currentStreamer.id;
@@ -2895,7 +2918,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         const senderH = (evt.senderHandle || '').replace(/^@+/, '').toLowerCase().trim();
         const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
         if (senderH && senderH !== myClean && (senderH === rivalH || !rivalH)) {
-          setRemoteCoHostFrame(evt.frame);
+          if (!remoteCoHostStream) {
+            setRemoteCoHostFrame(evt.frame);
+          }
         }
       } else if (evt.type === 'COHOST_DISCONNECTED') {
         setIsCoHostConnected(false);
@@ -3580,7 +3605,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     try {
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage(resetEvt);
-      bus.postMessage({ type: 'LIVE_HOST_ENDED', streamId: currentStreamer.id, handle: currentUser.handle });
+      bus.postMessage({
+        type: 'LIVE_HOST_ENDED',
+        action: 'LIVE_ENDED',
+        streamId: currentStreamer.id,
+        handle: currentUser.handle,
+        creatorHandle: currentUser.handle,
+      });
       bus.close();
       localStorage.removeItem('privity_current_live_host');
       localStorage.removeItem('privity_is_host_broadcasting');
@@ -3589,9 +3620,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     } catch {}
     try {
       broadcastSyncEvent({
+        action: 'LIVE_ENDED',
+        streamId: currentStreamer.id,
+        handle: currentUser.handle,
+        creatorHandle: currentUser.handle,
+      });
+      broadcastSyncEvent({
         action: 'LIVE_ROOM_RESET',
         roomId,
         hostHandle: cleanHostH,
+      });
+      broadcastViaSupabase({
+        action: 'STREAM_ENDED',
+        streamId: currentStreamer.id,
+        creatorHandle: currentUser.handle,
+        handle: currentUser.handle,
       });
     } catch {}
 
