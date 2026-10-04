@@ -30,6 +30,12 @@ import { LiveGuestStageBox } from './LiveGuestStageBox';
 import { broadcastViaSupabase, onSupabaseBroadcast } from '../../services/supabaseClient';
 import './liveme.css';
 
+const broadcastSyncEvent = (payload: any) => {
+  try {
+    broadcastViaSupabase(payload);
+  } catch {}
+};
+
 export interface LiveBroadcastSummaryData {
   durationSeconds: number;
   viewersPeak: number;
@@ -717,6 +723,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     level: number;
     badge?: string;
   }>>([]);
+  const activeJoinBannerRef = useRef(activeJoinBanner);
+  activeJoinBannerRef.current = activeJoinBanner;
   const joinBannerTimeoutRef = useRef<any>(null);
 
   const triggerJoinFlyIn = useCallback((user: { name: string; handle: string; avatar?: string; level?: number; badge?: string }) => {
@@ -728,7 +736,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       level: user.level || getDeterministicLevel(user.handle),
       badge: user.badge || (user.level && user.level >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐'),
     };
-    if (!activeJoinBanner && joinBannerQueueRef.current.length === 0) {
+    if (!activeJoinBannerRef.current && joinBannerQueueRef.current.length === 0) {
       setActiveJoinBanner(entry);
       if (joinBannerTimeoutRef.current) clearTimeout(joinBannerTimeoutRef.current);
       joinBannerTimeoutRef.current = setTimeout(() => {
@@ -740,7 +748,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     } else {
       joinBannerQueueRef.current.push(entry);
     }
-  }, [activeJoinBanner]);
+  }, []);
 
   // Process join banner queue
   useEffect(() => {
@@ -1354,7 +1362,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [selectedGiftId, setSelectedGiftId] = useState<string>('rose');
   const [selectedCombo, setSelectedCombo] = useState<number>(1);
 
-  // Chat state with permanent localStorage persistence per room ID
+  // Chat state: loaded clean from persistent storage (excluding old join/system notices)
   const [chatMessages, setChatMessages] = useState<LiveMeChatMessage[]>(() => {
     try {
       const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
@@ -1362,7 +1370,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          // Strictly filter out any join rows or system spam from persistent storage
+          return parsed.filter((m: any) => !m.isJoin && !m.isSystem);
         }
       }
     } catch {}
@@ -1381,23 +1390,31 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [chatInput, setChatInput] = useState('');
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-persist chat messages for this room
+  // Auto-persist ONLY real user chat messages for this room (never join notices or system entries)
   useEffect(() => {
     try {
       const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
       if (chatMessages && chatMessages.length > 0) {
-        localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(chatMessages.slice(-80)));
+        const realChatOnly = chatMessages.filter((m) => !m.isJoin && !m.isSystem);
+        if (realChatOnly.length > 0) {
+          localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(realChatOnly.slice(-60)));
+        }
       }
     } catch {}
   }, [chatMessages, currentStreamer.handle, currentStreamer.id]);
 
-  // Viewer join presence, flying badge swoosh, and join chat notice
+  const hasJoinedRoomRef = useRef<string | null>(null);
+
+  // Viewer join presence: executes EXACTLY ONCE per stream entry, never repeats while staying
   useEffect(() => {
     if (!isHost) {
       const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      if (!canonicalRoom || hasJoinedRoomRef.current === canonicalRoom) return;
+      hasJoinedRoomRef.current = canonicalRoom;
+
       const userLevel = getDeterministicLevel(currentUser.handle);
 
-      // 1. Immediately trigger the spectator's own flying banner and badge on entry!
+      // 1. Immediately trigger the spectator's own flying banner and badge on entry (ONCE)!
       triggerJoinFlyIn({
         name: currentUser.name,
         handle: currentUser.handle,
@@ -1406,7 +1423,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
       });
 
-      // 2. Add local join notification in chat stream
+      // 2. Add local join notification in chat stream (in-memory ONLY, never in localStorage)
       const joinMsg: LiveMeChatMessage = {
         id: `join-${Date.now()}-${Math.random()}`,
         user: currentUser.name,
@@ -1420,11 +1437,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         timestamp: Date.now(),
       };
       setChatMessages((prev) => {
-        const next = [...prev.slice(-49), joinMsg];
-        try {
-          localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(next.slice(-80)));
-        } catch {}
-        return next;
+        if (prev.some((m) => m.isJoin && m.handle === joinMsg.handle)) return prev;
+        return [...prev.slice(-49), joinMsg];
       });
 
       // 3. Audio chime for fly-in banner
@@ -1444,7 +1458,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         osc.stop(ctx.currentTime + 0.4);
       } catch {}
 
-      // 4. Send LIVE_JOIN to room & sync bus
+      // 4. Send LIVE_JOIN to room & sync bus (ONCE)
       const joinEvt = {
         _eid: `join_${currentUser.handle}_${Date.now()}`,
         type: 'LIVE_JOIN',
@@ -1487,7 +1501,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           bus.close();
         } catch {}
 
-        if (isCoHostConnectedRef.current) {
+        if (isCoHostConnectedRef.current || isPkBattleActiveRef.current) {
           const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
           const cleanRivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
           const discEvt = {
@@ -1499,6 +1513,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           if (cleanRivalH && cleanRivalH !== cleanMyH) {
             liveStreamSync.sendRoomEvent(cleanRivalH, discEvt);
           }
+          try {
+            const bus = new BroadcastChannel('privity_sync_bus');
+            bus.postMessage(discEvt);
+            bus.close();
+          } catch {}
+          try {
+            broadcastSyncEvent({
+              action: 'COHOST_DISCONNECTED',
+              senderHandle: `@${cleanMyH}`,
+              targetHandle: cleanRivalH,
+              roomId: canonicalRoom,
+            });
+          } catch {}
         }
       };
 
@@ -1506,16 +1533,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       window.addEventListener('pagehide', handleUnload);
 
       return () => {
+        hasJoinedRoomRef.current = null;
         window.removeEventListener('beforeunload', handleUnload);
         window.removeEventListener('pagehide', handleUnload);
         handleUnload();
       };
     }
-  }, [isHost, currentStreamer.id, currentStreamer.handle, currentUser.name, currentUser.handle, currentUser.avatar, triggerJoinFlyIn]);
+  }, [isHost, currentStreamer.id, currentStreamer.handle, currentUser.handle]);
 
   // Clean Co-Host disconnect helper (used whenever leaving or ending)
   const broadcastCohostDisconnect = useCallback(() => {
-    if (!isCoHostConnectedRef.current) return;
+    if (!isCoHostConnectedRef.current && !isPkBattleActiveRef.current) return;
     const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
     const cleanRivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
     const discEvt = {
@@ -1535,6 +1563,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage(discEvt);
       bus.close();
+    } catch {}
+    try {
+      broadcastSyncEvent({
+        action: 'COHOST_DISCONNECTED',
+        senderHandle: `@${cleanMyH}`,
+        targetHandle: cleanRivalH,
+        roomId,
+      });
     } catch {}
   }, [currentUser.handle, currentStreamer.handle, currentStreamer.id]);
 
@@ -1740,10 +1776,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     };
 
     try {
+      const cleanH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+      localStorage.removeItem(`privity_live_chat_${roomId}`);
+      if (cleanH) localStorage.removeItem(`privity_live_chat_${cleanH}`);
       localStorage.setItem('privity_current_live_host', JSON.stringify(hostMeta));
       localStorage.setItem('privity_is_host_broadcasting', 'true');
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_HOST_STARTED', host: hostMeta });
+      bus.postMessage({ type: 'LIVE_ROOM_RESET', hostHandle: cleanH, roomId });
+      bus.close();
+      liveStreamSync.sendRoomEvent(roomId, { type: 'LIVE_ROOM_RESET', hostHandle: cleanH, roomId });
+      if (cleanH && cleanH !== roomId) {
+        liveStreamSync.sendRoomEvent(cleanH, { type: 'LIVE_ROOM_RESET', hostHandle: cleanH, roomId });
+      }
     } catch {}
 
     // Start network host broadcast across ALL devices worldwide via MQTT & WebRTC
@@ -1978,13 +2023,49 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             type: d.challengeType,
             timeLeft: d.duration || 30,
           });
+        } else if (d.type === 'PK_BATTLE_END') {
+          setBattleWinner(d.winner || null);
+          setTimeout(() => {
+            setIsPkBattleActive(false);
+            isPkBattleActiveRef.current = false;
+            setSpeedChallenge(null);
+            setSpeedMultiplier(1);
+            speedMultiplierRef.current = 1;
+          }, 3800);
+        } else if (d.type === 'COHOST_DISCONNECTED') {
+          setIsCoHostConnected(false);
+          isCoHostConnectedRef.current = false;
+          setIsPkBattleActive(false);
+          isPkBattleActiveRef.current = false;
+          setRemoteCoHostStream(null);
+          setRemoteCoHostFrame(null);
+          showToastRef.current(`Co-host session ended with @${(d.senderHandle || 'Creator').replace(/^@+/, '')}`);
+        } else if (d.type === 'LIVE_ROOM_RESET') {
+          const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+          const hostH = (d.hostHandle || currentStreamer.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          try {
+            localStorage.removeItem(`privity_live_chat_${canonicalRoom}`);
+            if (hostH) localStorage.removeItem(`privity_live_chat_${hostH}`);
+          } catch {}
+          setChatMessages([
+            {
+              id: `welcome-${Date.now()}`,
+              user: 'Privity System',
+              handle: 'system',
+              text: 'Welcome to the live room! Say hello and send gifts to support the host 💎',
+              isSystem: true,
+              timestamp: Date.now(),
+            },
+          ]);
+          setActiveAudience([]);
+          setLiveViewersCount(0);
         }
       };
     } catch {}
     return () => {
       if (syncBus) syncBus.close();
     };
-  }, [currentUser.handle]);
+  }, [currentUser.handle, currentStreamer.handle, currentStreamer.id]);
 
   // 3. BROADCAST DURATION CLOCK (100% PURE REAL TIME - ZERO FAKE AUDIENCE)
   useEffect(() => {
@@ -2178,19 +2259,48 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           const next = [...prev.slice(-49), evt.message];
           try {
             const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
-            localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(next.slice(-80)));
+            const realOnly = next.filter((m) => !m.isJoin && !m.isSystem);
+            if (realOnly.length > 0) {
+              localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(realOnly.slice(-60)));
+            }
           } catch {}
           return next;
         });
+      } else if (evt.type === 'LIVE_ROOM_RESET') {
+        const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+        const hostH = (evt.hostHandle || currentStreamer.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        try {
+          localStorage.removeItem(`privity_live_chat_${canonicalRoom}`);
+          if (hostH) localStorage.removeItem(`privity_live_chat_${hostH}`);
+        } catch {}
+        setChatMessages([
+          {
+            id: `welcome-${Date.now()}`,
+            user: 'Privity System',
+            handle: 'system',
+            text: 'Welcome to the live room! Say hello and send gifts to support the host 💎',
+            isSystem: true,
+            timestamp: Date.now(),
+          },
+        ]);
+        setActiveAudience([]);
+        setLiveViewersCount(0);
       } else if (evt.type === 'LIVE_JOIN' && evt.user) {
         const cleanViewerHandle = (evt.user.handle || evt.user.name || '').replace(/^@+/, '').toLowerCase().trim();
         const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        const myCleanName = (currentUser?.name || '').toLowerCase().trim();
+        const evtName = (evt.user.name || '').toLowerCase().trim();
 
         // Host never counts themselves as a viewer
         if (isHost && cleanViewerHandle === myClean) return;
 
         // If spectator themselves just joined, avoid duplicate trigger since triggered locally
-        if (!isHost && cleanViewerHandle === myClean) return;
+        if (!isHost && (cleanViewerHandle === myClean || evtName === myCleanName)) return;
+
+        // If viewer is already in active audience, avoid duplicate join notice or banner
+        if (activeAudienceRef.current.some((v) => v.handle.replace(/^@+/, '').toLowerCase().trim() === cleanViewerHandle)) {
+          return;
+        }
 
         const userLevel = evt.user.level || getDeterministicLevel(cleanViewerHandle);
 
@@ -2215,7 +2325,12 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           isJoin: true,
           timestamp: Date.now(),
         };
-        setChatMessages((prev) => [...prev.slice(-35), joinMsg]);
+        setChatMessages((prev) => {
+          if (prev.some((m) => m.isJoin && (m.handle || '').replace(/^@+/, '').toLowerCase().trim() === cleanViewerHandle)) {
+            return prev;
+          }
+          return [...prev.slice(-35), joinMsg];
+        });
 
         // Add to active audience list (tracked uniquely by handle)
         setActiveAudience((prev) => {
@@ -2442,6 +2557,24 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           speedMultiplierRef.current = 1;
         }, 3800);
       } else if (evt.type === 'LIVE_ENDED') {
+        const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+        const hostH = (evt.hostHandle || currentStreamer.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        try {
+          localStorage.removeItem(`privity_live_chat_${canonicalRoom}`);
+          if (hostH) localStorage.removeItem(`privity_live_chat_${hostH}`);
+        } catch {}
+        setChatMessages([
+          {
+            id: `welcome-${Date.now()}`,
+            user: 'Privity System',
+            handle: 'system',
+            text: 'This LIVE broadcast has ended. Thank you for watching!',
+            isSystem: true,
+            timestamp: Date.now(),
+          },
+        ]);
+        setActiveAudience([]);
+        setLiveViewersCount(0);
         if (!isHost) {
           setLiveEndedData({
             hostName: evt.hostName || currentStreamer.name,
@@ -2821,8 +2954,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   // Redundant Sub-100ms Cross-Device Realtime via Supabase Broadcast
   useEffect(() => {
     const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+
     const unsub = onSupabaseBroadcast((payload) => {
-      if (!payload || payload.roomId !== roomId) return;
+      if (!payload) return;
+      const targetMatches = !payload.targetHandle || payload.targetHandle.replace(/^@+/, '').toLowerCase().trim() === cleanMyH;
+      const roomMatches = payload.roomId === roomId || payload.roomId === cleanMyH || payload.roomId === currentStreamer.id;
+      if (!roomMatches && !targetMatches) return;
+
       if (payload.action === 'LIVE_LIKE') {
         const sid = currentStreamer.id;
         const incomingLikes = typeof payload.totalLikes === 'number' ? payload.totalLikes : null;
@@ -2851,6 +2990,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           setFloatingHearts((prev) => prev.filter((h) => h.id !== heart.id));
         }, 2200);
       } else if (payload.action === 'LIVE_JOIN' && payload.user) {
+        const cleanViewerHandle = (payload.user.handle || payload.user.name || '').replace(/^@+/, '').toLowerCase().trim();
+        const myCleanName = (currentUser?.name || '').toLowerCase().trim();
+        const evtName = (payload.user.name || '').toLowerCase().trim();
+
+        if (isHost && cleanViewerHandle === cleanMyH) return;
+        if (!isHost && (cleanViewerHandle === cleanMyH || evtName === myCleanName)) return;
+        if (activeAudienceRef.current.some((v) => v.handle.replace(/^@+/, '').toLowerCase().trim() === cleanViewerHandle)) return;
+
         triggerJoinFlyIn({
           name: payload.user.name,
           handle: payload.user.handle,
@@ -2864,10 +3011,70 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (payload.diamonds) {
           setDiamondsEarned((prev) => prev + payload.diamonds);
         }
+      } else if (payload.action === 'PK_BATTLE_START') {
+        const d = payload.payload || payload;
+        setIsBattleRequestPending(false);
+        setIncomingBattleRequest(null);
+        setIsCoHostConnected(true);
+        isCoHostConnectedRef.current = true;
+        setIsPkBattleActive(true);
+        isPkBattleActiveRef.current = true;
+        setHostPkScore(0);
+        hostPkScoreRef.current = 0;
+        setRivalPkScore(0);
+        rivalPkScoreRef.current = 0;
+        setBattleRoundTimer(typeof d.roundTimer === 'number' ? d.roundTimer : 180);
+        battleRoundTimerRef.current = typeof d.roundTimer === 'number' ? d.roundTimer : 180;
+        setBattleWinner(null);
+        setSpeedMultiplier(1);
+        speedMultiplierRef.current = 1;
+        setSpeedChallenge(null);
+        if (d.speedChallenge) scheduledSpeedChallengeRef.current = d.speedChallenge;
+        const startedBy = (d.startedBy || '').replace(/^@+/, '').toLowerCase().trim();
+        if (startedBy && startedBy !== cleanMyH && d.initiatorStreamer) {
+          setPkRival(d.initiatorStreamer);
+          pkRivalRef.current = d.initiatorStreamer;
+        }
+      } else if (payload.action === 'PK_BATTLE_END') {
+        const winner = payload.payload?.winner || payload.winner || null;
+        setBattleWinner(winner);
+        setTimeout(() => {
+          setIsPkBattleActive(false);
+          isPkBattleActiveRef.current = false;
+          setSpeedChallenge(null);
+          setSpeedMultiplier(1);
+          speedMultiplierRef.current = 1;
+        }, 3800);
+      } else if (payload.action === 'COHOST_DISCONNECTED') {
+        setIsCoHostConnected(false);
+        isCoHostConnectedRef.current = false;
+        setIsPkBattleActive(false);
+        isPkBattleActiveRef.current = false;
+        setRemoteCoHostStream(null);
+        setRemoteCoHostFrame(null);
+        showToastRef.current(`Co-host session ended with @${(payload.senderHandle || 'Creator').replace(/^@+/, '')}`);
+      } else if (payload.action === 'LIVE_ROOM_RESET') {
+        const hostH = (payload.hostHandle || currentStreamer.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        try {
+          localStorage.removeItem(`privity_live_chat_${roomId}`);
+          if (hostH) localStorage.removeItem(`privity_live_chat_${hostH}`);
+        } catch {}
+        setChatMessages([
+          {
+            id: `welcome-${Date.now()}`,
+            user: 'Privity System',
+            handle: 'system',
+            text: 'Welcome to the live room! Say hello and send gifts to support the host 💎',
+            isSystem: true,
+            timestamp: Date.now(),
+          },
+        ]);
+        setActiveAudience([]);
+        setLiveViewersCount(0);
       }
     });
     return unsub;
-  }, [currentStreamer.handle, currentStreamer.id, triggerJoinFlyIn]);
+  }, [currentStreamer.handle, currentStreamer.id, currentUser.handle, triggerJoinFlyIn]);
 
   // Trigger floating PK Hit Damage text
   const triggerPkHit = (text: string, color = '#fbbf24') => {
@@ -2994,6 +3201,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     setIsBattleRequestPending(false);
 
     // Initialize battle state on acceptor side
+    setIsCoHostConnected(true);
+    isCoHostConnectedRef.current = true;
     setIsPkBattleActive(true);
     isPkBattleActiveRef.current = true;
 
@@ -3066,6 +3275,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage(startEvt);
       bus.close();
+    } catch {}
+    try {
+      broadcastSyncEvent({
+        action: 'PK_BATTLE_START',
+        roomId,
+        targetHandle: cleanRivalH,
+        payload: startEvt,
+      });
     } catch {}
 
     showToast('🥊 Battle Challenge Accepted! 3-minute PK Battle starts NOW!');
@@ -3320,12 +3537,28 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
   // Host Controls: End Broadcast cleanly (Broadcasts LIVE_ENDED so viewers see graceful 3s countdown)
   const handleEndBroadcastClick = () => {
+    broadcastCohostDisconnect();
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
 
     const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+    const cleanHostH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+
+    try {
+      localStorage.removeItem(`privity_live_chat_${roomId}`);
+      if (cleanHostH) localStorage.removeItem(`privity_live_chat_${cleanHostH}`);
+    } catch {}
+
+    const resetEvt = { type: 'LIVE_ROOM_RESET', hostHandle: cleanHostH, roomId };
+    try {
+      liveStreamSync.sendRoomEvent(roomId, resetEvt);
+      if (cleanHostH && cleanHostH !== roomId) {
+        liveStreamSync.sendRoomEvent(cleanHostH, resetEvt);
+      }
+    } catch {}
+
     try {
       liveStreamSync.sendRoomEvent(roomId, {
         type: 'LIVE_ENDED',
@@ -3346,12 +3579,34 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     liveStreamSync.stopHostBroadcast();
     try {
       const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(resetEvt);
       bus.postMessage({ type: 'LIVE_HOST_ENDED', streamId: currentStreamer.id, handle: currentUser.handle });
+      bus.close();
       localStorage.removeItem('privity_current_live_host');
       localStorage.removeItem('privity_is_host_broadcasting');
       localStorage.removeItem('privity_active_live_session');
       localStorage.removeItem('privity_remote_active_streams');
     } catch {}
+    try {
+      broadcastSyncEvent({
+        action: 'LIVE_ROOM_RESET',
+        roomId,
+        hostHandle: cleanHostH,
+      });
+    } catch {}
+
+    setChatMessages([
+      {
+        id: `welcome-${Date.now()}`,
+        user: 'Privity System',
+        handle: 'system',
+        text: 'Welcome to the live room! Say hello and send gifts to support the host 💎',
+        isSystem: true,
+        timestamp: Date.now(),
+      },
+    ]);
+    setActiveAudience([]);
+    setLiveViewersCount(0);
 
     setIsSummaryOpen(true);
   };
@@ -5717,42 +5972,141 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         roundTimer={battleRoundTimer}
         onStartPkBattle={(rival) => {
           setPkRival(rival);
+          pkRivalRef.current = rival;
+          setIsCoHostConnected(true);
+          isCoHostConnectedRef.current = true;
           setIsPkBattleActive(true);
           isPkBattleActiveRef.current = true;
-          setHostPkScore(3);
-          setRivalPkScore(4);
-          setBattleRoundTimer(121);
+          setHostPkScore(0);
+          hostPkScoreRef.current = 0;
+          setRivalPkScore(0);
+          rivalPkScoreRef.current = 0;
+          setBattleRoundTimer(180);
+          battleRoundTimerRef.current = 180;
           setBattleWinner(null);
+          setSpeedMultiplier(1);
+          speedMultiplierRef.current = 1;
+          setSpeedChallenge(null);
+
+          const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          const cleanRivalH = (rival.handle || '').replace(/^@+/, '').toLowerCase().trim();
           const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-          liveStreamSync.sendRoomEvent(roomId, {
+          const startEvt = {
             type: 'PK_BATTLE_START',
-            rival,
-            hostScore: 3,
-            rivalScore: 4,
-            roundTimer: 121,
-          });
+            roundTimer: 180,
+            scores: { [cleanMyH]: 0, [cleanRivalH]: 0 },
+            hostScore: 0,
+            rivalScore: 0,
+            hostHandle: `@${cleanMyH}`,
+            rivalHandle: `@${cleanRivalH}`,
+            startedBy: cleanMyH,
+            initiatorStreamer: {
+              id: `stream-${cleanMyH}`,
+              name: currentUser.name,
+              handle: `@${cleanMyH}`,
+              avatar: currentUser.avatar,
+              posterUrl: currentUser.avatar,
+            },
+          };
+          liveStreamSync.sendRoomEvent(roomId, startEvt);
+          if (cleanRivalH && cleanRivalH !== cleanMyH) {
+            liveStreamSync.sendRoomEvent(cleanRivalH, startEvt);
+          }
+          try {
+            const bus = new BroadcastChannel('privity_sync_bus');
+            bus.postMessage(startEvt);
+            bus.close();
+          } catch {}
+          try {
+            broadcastSyncEvent({
+              action: 'PK_BATTLE_START',
+              roomId,
+              targetHandle: cleanRivalH,
+              payload: startEvt,
+            });
+          } catch {}
         }}
         onEndPkBattle={() => {
           setIsPkBattleActive(false);
           isPkBattleActiveRef.current = false;
+          const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          const cleanRivalH = (pkRivalRef.current?.handle || pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
           const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-          liveStreamSync.sendRoomEvent(roomId, {
+          const endEvt = {
             type: 'PK_BATTLE_END',
-          });
+            senderHandle: `@${cleanMyH}`,
+          };
+          liveStreamSync.sendRoomEvent(roomId, endEvt);
+          if (cleanRivalH && cleanRivalH !== cleanMyH) {
+            liveStreamSync.sendRoomEvent(cleanRivalH, endEvt);
+          }
+          try {
+            const bus = new BroadcastChannel('privity_sync_bus');
+            bus.postMessage(endEvt);
+            bus.close();
+          } catch {}
+          try {
+            broadcastSyncEvent({
+              action: 'PK_BATTLE_END',
+              roomId,
+              targetHandle: cleanRivalH,
+              payload: endEvt,
+            });
+          } catch {}
         }}
         onRematch={() => {
-          setHostPkScore(3);
-          setRivalPkScore(4);
-          setBattleRoundTimer(121);
+          setIsCoHostConnected(true);
+          isCoHostConnectedRef.current = true;
+          setIsPkBattleActive(true);
+          isPkBattleActiveRef.current = true;
+          setHostPkScore(0);
+          hostPkScoreRef.current = 0;
+          setRivalPkScore(0);
+          rivalPkScoreRef.current = 0;
+          setBattleRoundTimer(180);
+          battleRoundTimerRef.current = 180;
           setBattleWinner(null);
+          setSpeedMultiplier(1);
+          speedMultiplierRef.current = 1;
+          setSpeedChallenge(null);
+
+          const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          const cleanRivalH = (pkRivalRef.current?.handle || pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
           const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-          liveStreamSync.sendRoomEvent(roomId, {
+          const startEvt = {
             type: 'PK_BATTLE_START',
-            rival: pkRival,
-            hostScore: 3,
-            rivalScore: 4,
-            roundTimer: 121,
-          });
+            roundTimer: 180,
+            scores: { [cleanMyH]: 0, [cleanRivalH]: 0 },
+            hostScore: 0,
+            rivalScore: 0,
+            hostHandle: `@${cleanMyH}`,
+            rivalHandle: `@${cleanRivalH}`,
+            startedBy: cleanMyH,
+            initiatorStreamer: {
+              id: `stream-${cleanMyH}`,
+              name: currentUser.name,
+              handle: `@${cleanMyH}`,
+              avatar: currentUser.avatar,
+              posterUrl: currentUser.avatar,
+            },
+          };
+          liveStreamSync.sendRoomEvent(roomId, startEvt);
+          if (cleanRivalH && cleanRivalH !== cleanMyH) {
+            liveStreamSync.sendRoomEvent(cleanRivalH, startEvt);
+          }
+          try {
+            const bus = new BroadcastChannel('privity_sync_bus');
+            bus.postMessage(startEvt);
+            bus.close();
+          } catch {}
+          try {
+            broadcastSyncEvent({
+              action: 'PK_BATTLE_START',
+              roomId,
+              targetHandle: cleanRivalH,
+              payload: startEvt,
+            });
+          } catch {}
         }}
         showToast={showToast}
         activeAudience={activeAudience}
@@ -6020,6 +6374,12 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               className="liveme-summary-done-btn"
               onClick={() => {
                 setIsSummaryOpen(false);
+                const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+                const cleanHost = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+                try {
+                  localStorage.removeItem(`privity_live_chat_${canonicalRoom}`);
+                  if (cleanHost) localStorage.removeItem(`privity_live_chat_${cleanHost}`);
+                } catch {}
                 if (onEndBroadcast) {
                   onEndBroadcast({
                     durationSeconds: streamDurationSec,

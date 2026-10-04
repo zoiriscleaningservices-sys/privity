@@ -3555,6 +3555,10 @@ export function App() {
           const { streamId, handle } = event;
           if (!streamId && !handle) return;
           const cleanTarget = (handle || '').toLowerCase().replace('@', '').trim();
+          try {
+            if (cleanTarget) localStorage.removeItem(`privity_live_chat_${cleanTarget}`);
+            if (streamId) localStorage.removeItem(`privity_live_chat_${streamId}`);
+          } catch {}
           liveStreamSync.notifyStreamEnded(streamId || '', cleanTarget);
           setNetworkLiveStreamers((prev) => {
             return prev.filter((s) => {
@@ -7250,14 +7254,25 @@ export function App() {
     };
 
     try {
+      localStorage.removeItem(`privity_live_chat_${cleanHandle}`);
+      localStorage.removeItem(`privity_live_chat_${streamSessionId}`);
       localStorage.setItem('privity_current_live_host', JSON.stringify(hostMeta));
       localStorage.setItem('privity_is_host_broadcasting', 'true');
       localStorage.setItem('privity_active_live_session', JSON.stringify(userStream));
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage({ type: 'LIVE_HOST_STARTED', host: hostMeta });
+      bus.postMessage({ type: 'LIVE_ROOM_RESET', hostHandle: cleanHandle, roomId: cleanHandle });
+      bus.close();
+      liveStreamSync.sendRoomEvent(cleanHandle, { type: 'LIVE_ROOM_RESET', hostHandle: cleanHandle, roomId: cleanHandle });
+      liveStreamSync.sendRoomEvent(streamSessionId, { type: 'LIVE_ROOM_RESET', hostHandle: cleanHandle, roomId: streamSessionId });
       broadcastSyncEvent({
         action: 'LIVE_STARTED',
         host: hostMeta,
+      });
+      broadcastSyncEvent({
+        action: 'LIVE_ROOM_RESET',
+        roomId: cleanHandle,
+        hostHandle: cleanHandle,
       });
     } catch {}
 
@@ -12748,13 +12763,26 @@ export function App() {
               setMinimizedLiveStream(null);
               setActiveLiveStream(null);
               setIsHostBroadcasting(false);
+              const targetHandle = ((activeLiveStream as any)?.creatorHandle || (activeLiveStream as any)?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+              const streamId = activeLiveStream?.id || '';
+              try {
+                if (targetHandle) localStorage.removeItem(`privity_live_chat_${targetHandle}`);
+                if (streamId) localStorage.removeItem(`privity_live_chat_${streamId}`);
+                const bus = new BroadcastChannel('privity_sync_bus');
+                bus.postMessage({ type: 'LIVE_ROOM_RESET', hostHandle: targetHandle, roomId: streamId });
+                bus.close();
+              } catch {}
               if (activeLiveStream?.id) {
-                const targetHandle = (activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '';
                 liveStreamSync.markStreamEnded(activeLiveStream.id, targetHandle);
                 broadcastSyncEvent({
                   action: 'LIVE_ENDED',
                   streamId: activeLiveStream.id,
                   handle: targetHandle,
+                });
+                broadcastSyncEvent({
+                  action: 'LIVE_ROOM_RESET',
+                  roomId: streamId,
+                  hostHandle: targetHandle,
                 });
               }
               liveStreamSync.stopHostBroadcast();
@@ -12798,13 +12826,26 @@ export function App() {
               bus.close();
             } catch {}
             setIsCoHostInviteAccepted(false);
+            const targetHandle = ((activeLiveStream as any)?.creatorHandle || (activeLiveStream as any)?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+            const streamId = activeLiveStream?.id || '';
+            try {
+              if (targetHandle) localStorage.removeItem(`privity_live_chat_${targetHandle}`);
+              if (streamId) localStorage.removeItem(`privity_live_chat_${streamId}`);
+              const bus = new BroadcastChannel('privity_sync_bus');
+              bus.postMessage({ type: 'LIVE_ROOM_RESET', hostHandle: targetHandle, roomId: streamId });
+              bus.close();
+            } catch {}
             if (activeLiveStream?.id) {
-              const targetHandle = (activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '';
               liveStreamSync.markStreamEnded(activeLiveStream.id, targetHandle);
               broadcastSyncEvent({
                 action: 'LIVE_ENDED',
                 streamId: activeLiveStream.id,
                 handle: targetHandle,
+              });
+              broadcastSyncEvent({
+                action: 'LIVE_ROOM_RESET',
+                roomId: streamId,
+                hostHandle: targetHandle,
               });
             }
             setActiveLiveStream(null);
