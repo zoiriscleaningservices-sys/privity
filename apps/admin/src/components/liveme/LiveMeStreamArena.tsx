@@ -26,6 +26,7 @@ import { LiveGoLiveGuestsModal } from './LiveGoLiveGuestsModal';
 import { LiveFilterCarouselTray, LIVE_FILTERS, FilterPreset } from './LiveFilterCarouselTray';
 import { LiveGiftGoalModal, StreamGiftGoal } from './LiveGiftGoalModal';
 import { LiveDailyLeaderboardModal } from './LiveDailyLeaderboardModal';
+import { LiveGuestStageBox } from './LiveGuestStageBox';
 import { broadcastViaSupabase, onSupabaseBroadcast } from '../../services/supabaseClient';
 import './liveme.css';
 
@@ -695,8 +696,20 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   // Daily Creator Leaderboard Modal State
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
 
-  // Active Co-Host Guests
+  // Active Co-Host Guests & 2-Way Stage State
   const [activeGuests, setActiveGuests] = useState<RoomViewer[]>([]);
+  const [pendingGuestRequests, setPendingGuestRequests] = useState<RoomViewer[]>([]);
+  const [isOnStageAsGuest, setIsOnStageAsGuest] = useState(false);
+  const [isGuestRequestPending, setIsGuestRequestPending] = useState(false);
+  const [guestLocalMediaStream, setGuestLocalMediaStream] = useState<MediaStream | null>(null);
+  const guestLocalStreamRef = useRef<MediaStream | null>(null);
+  const [guestMediaStreams, setGuestMediaStreams] = useState<Record<string, MediaStream>>({});
+
+  // Allow setting remote guest media streams dynamically
+  const registerGuestMediaStream = useCallback((handle: string, stream: MediaStream) => {
+    const clean = handle.replace(/^@/, '').toLowerCase().trim();
+    setGuestMediaStreams((prev) => ({ ...prev, [clean]: stream }));
+  }, []);
 
   const handleInviteGuest = useCallback((viewer: RoomViewer) => {
     setActiveGuests((prev) => {
@@ -715,7 +728,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       targetHandle: viewer.handle,
       guest: viewer,
     });
-  }, [currentStreamer.handle, currentStreamer.id]);
+    showToast(`📩 Invited ${viewer.name} to join the stage as guest!`);
+  }, [currentStreamer.handle, currentStreamer.id, showToast]);
 
   const handleRemoveGuest = useCallback((handle: string) => {
     setActiveGuests((prev) => prev.filter((g) => g.handle !== handle));
@@ -724,7 +738,151 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       type: 'GUEST_DISCONNECTED',
       handle,
     });
-  }, [currentStreamer.handle, currentStreamer.id]);
+    broadcastViaSupabase({
+      action: 'LIVE_GUEST_DISCONNECTED',
+      roomId,
+      handle,
+    });
+    showToast(`👋 Removed @${handle.replace(/^@/, '')} from stage`);
+  }, [currentStreamer.handle, currentStreamer.id, showToast]);
+
+  const handleStartGuestStage = useCallback(async () => {
+    try {
+      showToast('🎤 Accessing camera & microphone with zero-echo audio...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 48000 },
+      });
+      guestLocalStreamRef.current = stream;
+      setGuestLocalMediaStream(stream);
+      setIsOnStageAsGuest(true);
+      setIsGuestRequestPending(false);
+
+      const myViewerObj: RoomViewer = {
+        id: currentUser.handle,
+        handle: currentUser.handle,
+        name: currentUser.name,
+        avatar: currentUser.avatar,
+        level: 25,
+        contribution: 1500,
+        badge: 'Guest',
+      };
+
+      setActiveGuests((prev) => {
+        if (prev.some((g) => g.handle === myViewerObj.handle)) return prev;
+        return [...prev, myViewerObj];
+      });
+
+      const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      liveStreamSync.sendRoomEvent(roomId, {
+        type: 'GUEST_JOINED_STAGE',
+        guest: myViewerObj,
+      });
+      broadcastViaSupabase({
+        action: 'LIVE_GUEST_JOINED_STAGE',
+        roomId,
+        guest: myViewerObj,
+      });
+
+      showToast('🎉 You are now LIVE on stage with the host! Talk away!');
+    } catch (err) {
+      console.warn('Microphone/camera access notice:', err);
+      setIsOnStageAsGuest(true);
+      setIsGuestRequestPending(false);
+      const myViewerObj: RoomViewer = {
+        id: currentUser.handle,
+        handle: currentUser.handle,
+        name: currentUser.name,
+        avatar: currentUser.avatar,
+        level: 25,
+        contribution: 1500,
+        badge: 'Guest',
+      };
+      setActiveGuests((prev) => {
+        if (prev.some((g) => g.handle === myViewerObj.handle)) return prev;
+        return [...prev, myViewerObj];
+      });
+      showToast('🎤 Joined guest stage! Ready to talk.');
+    }
+  }, [currentUser, currentStreamer.handle, currentStreamer.id, showToast]);
+
+  const handleLeaveGuestStage = useCallback(() => {
+    if (guestLocalStreamRef.current) {
+      guestLocalStreamRef.current.getTracks().forEach((t) => t.stop());
+      guestLocalStreamRef.current = null;
+    }
+    setGuestLocalMediaStream(null);
+    setIsOnStageAsGuest(false);
+    setIsGuestRequestPending(false);
+    setActiveGuests((prev) => prev.filter((g) => g.handle !== currentUser.handle));
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    liveStreamSync.sendRoomEvent(roomId, {
+      type: 'GUEST_DISCONNECTED',
+      handle: currentUser.handle,
+    });
+    broadcastViaSupabase({
+      action: 'LIVE_GUEST_DISCONNECTED',
+      roomId,
+      handle: currentUser.handle,
+    });
+    showToast('👋 You left the stage');
+  }, [currentUser.handle, currentStreamer.handle, currentStreamer.id, showToast]);
+
+  const handleRequestJoinStage = useCallback(() => {
+    if (isOnStageAsGuest) {
+      handleLeaveGuestStage();
+      return;
+    }
+    if (isGuestRequestPending) {
+      showToast('⏳ Your request to join the stage is already pending host approval');
+      return;
+    }
+    setIsGuestRequestPending(true);
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    const viewerObj: RoomViewer = {
+      id: currentUser.handle,
+      handle: currentUser.handle,
+      name: currentUser.name,
+      avatar: currentUser.avatar,
+      level: 15,
+      contribution: 500,
+      badge: 'Viewer',
+    };
+    liveStreamSync.sendRoomEvent(roomId, {
+      type: 'GUEST_REQUEST',
+      viewer: viewerObj,
+      timestamp: Date.now(),
+    });
+    broadcastViaSupabase({
+      action: 'LIVE_GUEST_REQUEST',
+      roomId,
+      viewer: viewerObj,
+    });
+    showToast('✋ Stage request sent to host! Waiting for approval...');
+  }, [isOnStageAsGuest, isGuestRequestPending, currentStreamer.handle, currentStreamer.id, currentUser, handleLeaveGuestStage, showToast]);
+
+  const handleAcceptGuestRequest = useCallback((viewer: RoomViewer) => {
+    setPendingGuestRequests((prev) => prev.filter((r) => r.handle !== viewer.handle));
+    handleInviteGuest(viewer);
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    liveStreamSync.sendRoomEvent(roomId, {
+      type: 'GUEST_ACCEPTED',
+      targetHandle: viewer.handle,
+      guest: viewer,
+    });
+    broadcastViaSupabase({
+      action: 'LIVE_GUEST_ACCEPTED',
+      roomId,
+      targetHandle: viewer.handle,
+      guest: viewer,
+    });
+    showToast(`✅ Accepted @${viewer.name} to join the stage!`);
+  }, [currentStreamer.handle, currentStreamer.id, handleInviteGuest, showToast]);
+
+  const handleRejectGuestRequest = useCallback((handle: string) => {
+    setPendingGuestRequests((prev) => prev.filter((r) => r.handle !== handle));
+    showToast(`Declined stage request`);
+  }, [showToast]);
 
   // Open User Profile Mini-Card ("Little Tab" that does not disrupt the live stream)
   const handleOpenUserProfile = (
@@ -1670,10 +1828,34 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           return [...prev, evt.guest];
         });
         showToastRef.current(`🎤 @${evt.guest.name} joined as Co-Host Guest!`);
+      } else if (evt.type === 'GUEST_REQUEST' && evt.viewer) {
+        if (isHost) {
+          setPendingGuestRequests((prev) => {
+            if (prev.some((r) => r.handle === evt.viewer.handle)) return prev;
+            return [...prev, evt.viewer];
+          });
+          showToastRef.current(`✋ @${evt.viewer.name} requested to join the stage as a guest!`);
+        }
+      } else if (evt.type === 'GUEST_ACCEPTED') {
+        const myCleanHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
+        const targetCleanHandle = (evt.targetHandle || '').toLowerCase().replace('@', '').trim();
+        if (targetCleanHandle === myCleanHandle) {
+          showToastRef.current(`🎉 Host accepted your stage request! Connecting camera & mic...`);
+          handleStartGuestStage();
+        }
+      } else if (evt.type === 'GUEST_JOINED_STAGE' && evt.guest) {
+        setActiveGuests((prev) => {
+          if (prev.some((g) => g.handle === evt.guest.handle)) return prev;
+          return [...prev, evt.guest];
+        });
+        if (evt.mediaStream) {
+          registerGuestMediaStream(evt.guest.handle, evt.mediaStream);
+        }
+        showToastRef.current(`🎤 @${evt.guest.name} is now LIVE on stage with the host!`);
       } else if (evt.type === 'COHOST_INVITE') {
-        const myHandle = (currentUser?.handle || '').toLowerCase().replace('@', '');
-        const targetHandle = (evt.targetHandle || '').toLowerCase().replace('@', '');
-        if (targetHandle === myHandle || (!isHost && targetHandle.includes('friend'))) {
+        const myCleanHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
+        const targetCleanHandle = (evt.targetHandle || '').toLowerCase().replace('@', '').trim();
+        if (targetCleanHandle === myCleanHandle || (!isHost && !evt.targetHandle)) {
           setIncomingInvite({
             type: 'cohost',
             senderName: evt.senderName || 'Host',
@@ -1684,9 +1866,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           showToastRef.current(`⚡ ${evt.senderName || 'Host'} invited you to Co-Host Battle!`);
         }
       } else if (evt.type === 'GUEST_INVITE') {
-        const myHandle = (currentUser?.handle || '').toLowerCase().replace('@', '');
-        const targetHandle = (evt.targetHandle || '').toLowerCase().replace('@', '');
-        if (targetHandle === myHandle || !isHost) {
+        const myCleanHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
+        const targetCleanHandle = (evt.targetHandle || '').toLowerCase().replace('@', '').trim();
+        if (targetCleanHandle === myCleanHandle || (!isHost && !evt.targetHandle)) {
           setIncomingInvite({
             type: 'guest',
             senderName: evt.senderName || 'Host',
@@ -1707,10 +1889,16 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         };
         setActiveLiveFilter(matched);
       } else if (evt.type === 'GUEST_DISCONNECTED' && evt.handle) {
-        setActiveGuests((prev) => prev.filter((g) => g.handle !== evt.handle));
+        const cleanHandle = evt.handle.replace(/^@/, '').toLowerCase().trim();
+        setActiveGuests((prev) => prev.filter((g) => g.handle.replace(/^@/, '').toLowerCase().trim() !== cleanHandle));
+        const myClean = (currentUser?.handle || '').replace(/^@/, '').toLowerCase().trim();
+        if (cleanHandle === myClean && isOnStageAsGuest) {
+          handleLeaveGuestStage();
+          showToastRef.current('You stepped down from the guest stage');
+        }
       }
     });
-  }, [currentStreamer.id, currentStreamer.handle, isHost]);
+  }, [currentStreamer.id, currentStreamer.handle, isHost, currentUser, handleStartGuestStage, handleLeaveGuestStage, isOnStageAsGuest, registerGuestMediaStream]);
 
   // Redundant Sub-100ms Cross-Device Realtime via Supabase Broadcast
   useEffect(() => {
@@ -2759,6 +2947,61 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {/* Video Lighting Overlay Tint */}
         <div className="liveme-video-overlay-tint" />
 
+        {/* ================================================================ */}
+        {/* INTERACTIVE 2-WAY LIVE GUEST STAGE BOX (TALK 2-WAY, ZERO ECHO)   */}
+        {/* ================================================================ */}
+        {activeGuests.length > 0 && (
+          <div className="liveme-guest-stage-container">
+            {activeGuests.map((guest) => {
+              const cleanGuestH = guest.handle.replace(/^@/, '').toLowerCase().trim();
+              const cleanMyH = (currentUser.handle || '').replace(/^@/, '').toLowerCase().trim();
+              const isSelfGuest = cleanGuestH === cleanMyH;
+
+              return (
+                <LiveGuestStageBox
+                  key={guest.handle}
+                  guest={guest}
+                  isHost={isHost}
+                  isSelf={isSelfGuest}
+                  localStream={isSelfGuest ? guestLocalMediaStream : undefined}
+                  remoteStream={guestMediaStreams[cleanGuestH]}
+                  onRemove={() => handleRemoveGuest(guest.handle)}
+                  onLeave={handleLeaveGuestStage}
+                  showToast={showToast}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* Host Incoming Guest Stage Request Notification Banner */}
+        {isHost && pendingGuestRequests.length > 0 && (
+          <div className="tiktok-incoming-invite-banner" style={{ top: '80px', bottom: 'auto', zIndex: 45 }}>
+            <img src={pendingGuestRequests[0].avatar} alt="" className="invite-avatar" />
+            <div className="invite-text">
+              <span className="invite-name">{pendingGuestRequests[0].name}</span>
+              <span className="invite-sub">requested to join stage as a Guest!</span>
+            </div>
+            <div className="invite-actions">
+              <button
+                type="button"
+                className="invite-accept-btn"
+                onClick={() => handleAcceptGuestRequest(pendingGuestRequests[0])}
+              >
+                Accept
+              </button>
+              <button
+                type="button"
+                className="invite-decline-btn"
+                onClick={() => handleRejectGuestRequest(pendingGuestRequests[0].handle)}
+                aria-label="Decline request"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* PRIVITY TRANSPARENT VIRTUAL GIFT ENGINE OVERLAY */}
         <GiftAnimationPlayer isMuted={isMuted} />
 
@@ -2899,20 +3142,33 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               </button>
             )}
 
-            {/* Close / End Live Button: Sleek TikTok Power Icon (⏻) without background */}
-            <button
-              type="button"
-              id="liveme-end-broadcast-btn"
-              className="liveme-power-btn"
-              onClick={isHost ? () => setIsConfirmEndOpen(true) : () => onClose({ wasEnded: false, isHost: false })}
-              title={isHost ? 'End Broadcast' : 'Close Stream'}
-              aria-label={isHost ? 'End Broadcast' : 'Close Stream'}
-            >
-              <svg viewBox="0 0 24 24" width="22" height="22" stroke="#ffffff" strokeWidth="2.3" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-                <line x1="12" y1="2" x2="12" y2="12" />
-              </svg>
-            </button>
+            {/* Close / End Live Button: Host gets Power Button ⏻, Viewer gets simple ✕ */}
+            {isHost ? (
+              <button
+                type="button"
+                id="liveme-end-broadcast-btn"
+                className="liveme-power-btn"
+                onClick={() => setIsConfirmEndOpen(true)}
+                title="End Broadcast"
+                aria-label="End Broadcast"
+              >
+                <svg viewBox="0 0 24 24" width="22" height="22" stroke="#ffffff" strokeWidth="2.3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                  <line x1="12" y1="2" x2="12" y2="12" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="liveme-close-btn"
+                onClick={() => onClose({ wasEnded: false, isHost: false })}
+                title="Close Stream"
+                aria-label="Close Stream"
+                style={{ fontSize: '18px', width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            )}
           </div>
         </div>
         {/* Organic Gesture Mode Feedback Toast (Active only when sliding left/right) */}
@@ -3394,45 +3650,71 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         {/* ================================================================ */}
         {arenaMode !== 'stream_hud' && (
           <div className="liveme-bottom-bar">
-            {/* Left 1: Battle / Co-Host Matchmaker (Dual Infinity Gradient Rings) */}
-            <button
-              type="button"
-              className={`tiktok-tool-btn battle ${isPkBattleActive ? 'active' : ''}`}
-              onClick={() => setIsCoHostModalOpen(true)}
-              title="Co-host with creators & Battles"
-            >
-              <svg viewBox="0 0 28 28" width="22" height="22" fill="none">
-                <defs>
-                  <linearGradient id="tkBattleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#ec4899" />
-                    <stop offset="100%" stopColor="#06b6d4" />
-                  </linearGradient>
-                </defs>
-                <path
-                  d="M8.5 9C6.01472 9 4 11.0147 4 13.5C4 15.9853 6.01472 18 8.5 18C10.7423 18 12.336 16.3813 14 14C15.664 11.6187 17.2577 10 19.5 10C21.9853 10 24 12.0147 24 14.5C24 16.9853 21.9853 19 19.5 19C17.2577 19 15.664 17.3813 14 15C12.336 12.6187 10.7423 11 8.5 11"
-                  stroke="url(#tkBattleGrad)"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              {isPkBattleActive && <span className="badge-pill">PK</span>}
-            </button>
+            {/* Left Tools: Strictly Host vs Viewer Separation */}
+            {isHost ? (
+              <>
+                {/* Host Left 1: Battle / Co-Host Matchmaker (Dual Infinity Gradient Rings) */}
+                <button
+                  type="button"
+                  className={`tiktok-tool-btn battle ${isPkBattleActive ? 'active' : ''}`}
+                  onClick={() => setIsCoHostModalOpen(true)}
+                  title="Co-host with creators & Battles"
+                >
+                  <svg viewBox="0 0 28 28" width="22" height="22" fill="none">
+                    <defs>
+                      <linearGradient id="tkBattleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#ec4899" />
+                        <stop offset="100%" stopColor="#06b6d4" />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d="M8.5 9C6.01472 9 4 11.0147 4 13.5C4 15.9853 6.01472 18 8.5 18C10.7423 18 12.336 16.3813 14 14C15.664 11.6187 17.2577 10 19.5 10C21.9853 10 24 12.0147 24 14.5C24 16.9853 21.9853 19 19.5 19C17.2577 19 15.664 17.3813 14 15C12.336 12.6187 10.7423 11 8.5 11"
+                      stroke="url(#tkBattleGrad)"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  {isPkBattleActive && <span className="badge-pill">PK</span>}
+                </button>
 
-            {/* Left 2: Guests / Multi-Guest Icon */}
-            <button
-              type="button"
-              className="tiktok-tool-btn guests"
-              onClick={() => setIsGuestsModalOpen(true)}
-              title="Go LIVE with guests"
-            >
-              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-              {activeGuests.length > 0 && <span className="badge-pill">{activeGuests.length}</span>}
-            </button>
+                {/* Host Left 2: Guests / Multi-Guest Icon */}
+                <button
+                  type="button"
+                  className="tiktok-tool-btn guests"
+                  onClick={() => setIsGuestsModalOpen(true)}
+                  title="Go LIVE with guests"
+                >
+                  <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                  {activeGuests.length > 0 && <span className="badge-pill">{activeGuests.length}</span>}
+                  {pendingGuestRequests.length > 0 && (
+                    <span className="badge-pill" style={{ background: '#06b6d4', color: '#000', fontWeight: 800 }}>
+                      {pendingGuestRequests.length}
+                    </span>
+                  )}
+                </button>
+              </>
+            ) : (
+              /* Viewer Left: Request to Join Stage as Guest */
+              <button
+                type="button"
+                className={`tiktok-tool-btn join-stage ${isOnStageAsGuest ? 'on-stage' : isGuestRequestPending ? 'pending' : ''}`}
+                onClick={handleRequestJoinStage}
+                title={
+                  isOnStageAsGuest
+                    ? 'You are on stage as guest! Click to leave stage'
+                    : isGuestRequestPending
+                    ? 'Stage request pending host approval...'
+                    : 'Request to join stage and talk with host'
+                }
+              >
+                {isOnStageAsGuest ? '🎙️' : isGuestRequestPending ? '⏳' : '🎤'}
+              </button>
+            )}
 
             {/* Center: Chat Input Form (Type... with Smiley) */}
             <form
@@ -3914,11 +4196,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         currentHostAvatar={currentUser.avatar}
         activeAudience={activeAudience}
         activeGuests={activeGuests}
+        pendingRequests={pendingGuestRequests}
         cameraFacing={cameraFacing}
         isVideoOff={isVideoOff}
         onToggleVideo={handleToggleVideo}
         onFlipCamera={handleFlipCamera}
         onInviteGuest={handleInviteGuest}
+        onAcceptRequest={handleAcceptGuestRequest}
+        onRejectRequest={handleRejectGuestRequest}
         onRemoveGuest={handleRemoveGuest}
         showToast={showToast}
       />
@@ -3972,7 +4257,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   setBattleRoundTimer(121);
                   showToast(`⚔️ Connected with ${invite.senderName} for Live Battle!`);
                 } else {
-                  showToast(`🎤 Joined stage as guest!`);
+                  handleStartGuestStage();
                 }
               }}
             >

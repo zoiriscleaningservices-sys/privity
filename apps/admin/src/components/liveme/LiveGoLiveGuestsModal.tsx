@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { RoomViewer } from './LiveMeViewersModal';
 import { liveStreamSync } from '../../services/liveStreamSyncService';
+import { authService, UserAccount } from '../../services/authService';
 
 export interface LiveGoLiveGuestsModalProps {
   isOpen: boolean;
@@ -10,11 +11,14 @@ export interface LiveGoLiveGuestsModalProps {
   currentHostAvatar: string;
   activeAudience?: RoomViewer[];
   activeGuests?: RoomViewer[];
+  pendingRequests?: RoomViewer[];
   cameraFacing: 'user' | 'environment';
   isVideoOff: boolean;
   onToggleVideo: () => void;
   onFlipCamera: () => void;
   onInviteGuest?: (viewer: RoomViewer) => void;
+  onAcceptRequest?: (viewer: RoomViewer) => void;
+  onRejectRequest?: (handle: string) => void;
   onRemoveGuest?: (handle: string) => void;
   showToast: (msg: string) => void;
 }
@@ -27,11 +31,14 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
   currentHostAvatar,
   activeAudience = [],
   activeGuests = [],
+  pendingRequests = [],
   cameraFacing,
   isVideoOff,
   onToggleVideo,
   onFlipCamera,
   onInviteGuest,
+  onAcceptRequest,
+  onRejectRequest,
   onRemoveGuest,
   showToast,
 }) => {
@@ -39,65 +46,78 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
   const [isAutoAcceptDismissed, setIsAutoAcceptDismissed] = useState(false);
   const [invitedMap, setInvitedMap] = useState<Record<string, boolean>>({});
 
+  // Real friends and registered accounts from storage and auth service
+  const realFriendsList = useMemo(() => {
+    const cleanCurrentHandle = currentHostHandle.replace(/^@/, '').toLowerCase().trim();
+    const allAccounts: Record<string, UserAccount> = authService.getAllAccounts();
+
+    // Check followed handles from local storage
+    let followedHandles: string[] = [];
+    try {
+      const stored = localStorage.getItem('privity_following_v5');
+      if (stored) {
+        followedHandles = Object.keys(JSON.parse(stored)).map((h) => h.replace(/^@/, '').toLowerCase());
+      }
+    } catch {}
+
+    const friends: Array<{ handle: string; name: string; avatar: string; isOnline: boolean }> = [];
+
+    // Filter out current host
+    Object.values(allAccounts).forEach((acc) => {
+      const h = acc.handle.replace(/^@/, '').toLowerCase().trim();
+      if (h === cleanCurrentHandle) return;
+      friends.push({
+        handle: h,
+        name: acc.name,
+        avatar: acc.avatar,
+        isOnline: true,
+      });
+    });
+
+    // Fallback real default users if clean scratch environment
+    if (friends.length === 0) {
+      friends.push(
+        {
+          handle: 'nicole',
+          name: 'Nicole Miller',
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          isOnline: true,
+        },
+        {
+          handle: 'alex',
+          name: 'Alex Rivera',
+          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+          isOnline: true,
+        },
+        {
+          handle: 'carlos',
+          name: 'Carlos Perez',
+          avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+          isOnline: false,
+        }
+      );
+    }
+
+    // Sort friends so followed ones appear at the top
+    friends.sort((a, b) => {
+      const aFollow = followedHandles.includes(a.handle) ? 1 : 0;
+      const bFollow = followedHandles.includes(b.handle) ? 1 : 0;
+      return bFollow - aFollow;
+    });
+
+    return friends;
+  }, [currentHostHandle]);
+
   if (!isOpen) return null;
 
-  // Real or mock viewers currently in room matching Screenshot 3
-  const inRoomViewers: RoomViewer[] = activeAudience.length > 0 ? activeAudience : [
-    {
-      id: 'v-friend-vip',
-      handle: 'friend_vip',
-      name: '👄🔯 Friend',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      level: 31,
-      contribution: 12500,
-      isVip: true,
-      badge: 'Friend',
-    },
-    {
-      id: 'v-lbma99',
-      handle: 'lbma99',
-      name: 'lbma99 ✨',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-      level: 18,
-      contribution: 4200,
-    },
-  ];
-
-  // Friends not watching matching Screenshot 3
-  const offlineFriends = [
-    {
-      handle: 'wendy_vasquez',
-      name: 'Wendy Vasquez Rodrig',
-      avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
-      isOnline: true,
-    },
-    {
-      handle: 'salazar_vip',
-      name: '♌️🦐🦎salazar💋🎰...',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
-      isOnline: true,
-    },
-    {
-      handle: 'david_vargas',
-      name: 'David Vargas',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-      isOnline: false,
-    },
-    {
-      handle: 'elena_rostova',
-      name: 'Elena Rostova',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-      isOnline: true,
-    },
-  ];
-
   const handleInvite = (targetHandle: string, targetName: string, targetAvatar: string) => {
-    setInvitedMap((prev) => ({ ...prev, [targetHandle]: true }));
+    const cleanTargetHandle = targetHandle.replace(/^@/, '').toLowerCase().trim();
+    setInvitedMap((prev) => ({ ...prev, [cleanTargetHandle]: true }));
     showToast(`📩 Guest invite sent to ${targetName}!`);
 
     const viewerObj: RoomViewer = {
-      id: `guest-${targetHandle}-${Date.now()}`,
-      handle: targetHandle,
+      id: cleanTargetHandle,
+      handle: cleanTargetHandle,
       name: targetName,
       avatar: targetAvatar,
       level: 20,
@@ -109,14 +129,14 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
       onInviteGuest(viewerObj);
     }
 
-    // Broadcast over MQTT
-    const roomId = currentHostHandle.replace('@', '').toLowerCase().trim();
+    // Broadcast over MQTT and Supabase
+    const roomId = currentHostHandle.replace(/^@/, '').toLowerCase().trim();
     liveStreamSync.sendRoomEvent(roomId, {
       type: 'GUEST_INVITE',
       senderHandle: currentHostHandle,
       senderName: currentHostName,
       senderAvatar: currentHostAvatar,
-      targetHandle,
+      targetHandle: cleanTargetHandle,
       targetName,
       timestamp: Date.now(),
     });
@@ -193,62 +213,115 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
             </div>
           )}
 
-          {/* Section: Viewers */}
-          <div className="tiktok-guests-section">
-            <h4 className="tiktok-section-heading">Viewers</h4>
-            <div className="tiktok-guest-list">
-              {inRoomViewers.map((viewer) => {
-                const isInvited = invitedMap[viewer.handle];
-                const isAlreadyGuest = activeGuests.some((g) => g.handle === viewer.handle);
-
-                return (
-                  <div key={viewer.handle} className="tiktok-guest-row">
+          {/* Section: Stage Requests (Pending Approval) */}
+          {pendingRequests.length > 0 && (
+            <div className="tiktok-guests-section" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <h4 className="tiktok-section-heading" style={{ color: '#06b6d4', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>✋</span>
+                  <span>Stage Requests ({pendingRequests.length})</span>
+                </h4>
+                <span style={{ fontSize: '11px', color: '#94a3b8' }}>Wants to talk</span>
+              </div>
+              <div className="tiktok-guest-list">
+                {pendingRequests.map((req) => (
+                  <div key={req.handle} className="tiktok-guest-row" style={{ background: 'rgba(6, 182, 212, 0.08)', borderRadius: '10px', padding: '8px 10px', border: '1px solid rgba(6, 182, 212, 0.25)' }}>
                     <div className="tiktok-guest-avatar-wrap">
-                      <img src={viewer.avatar} alt={viewer.name} className="tiktok-guest-avatar" />
+                      <img src={req.avatar} alt={req.name} className="tiktok-guest-avatar" />
                     </div>
-
                     <div className="tiktok-guest-details">
                       <div className="tiktok-guest-name-row">
-                        <span className="tiktok-guest-name">{viewer.name}</span>
-                        {viewer.badge === 'Friend' || viewer.isVip ? (
-                          <span className="tiktok-friend-tag">Friend</span>
-                        ) : null}
+                        <span className="tiktok-guest-name">{req.name}</span>
+                        <span className="tiktok-friend-tag" style={{ background: '#06b6d4', color: '#000', fontWeight: 700 }}>Requesting</span>
                       </div>
-                      <span className="tiktok-guest-sub">Top 5 viewer</span>
+                      <span className="tiktok-guest-sub">@{req.handle.replace(/^@/, '')} · Level {req.level || 1}</span>
                     </div>
-
-                    <div className="tiktok-guest-action">
-                      {isAlreadyGuest ? (
-                        <button
-                          type="button"
-                          className="tiktok-btn-remove-guest"
-                          onClick={() => onRemoveGuest && onRemoveGuest(viewer.handle)}
-                        >
-                          Remove
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className={`tiktok-btn-invite ${isInvited ? 'invited' : ''}`}
-                          onClick={() => handleInvite(viewer.handle, viewer.name, viewer.avatar)}
-                          disabled={isInvited}
-                        >
-                          {isInvited ? 'Invited' : 'Invite'}
-                        </button>
-                      )}
+                    <div className="tiktok-guest-action" style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        className="tiktok-btn-invite"
+                        style={{ background: '#06b6d4', color: '#000', fontWeight: 700 }}
+                        onClick={() => onAcceptRequest && onAcceptRequest(req)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        className="tiktok-btn-remove-guest"
+                        onClick={() => onRejectRequest && onRejectRequest(req.handle)}
+                        title="Decline request"
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
+          )}
+
+          {/* Section: Viewers */}
+          <div className="tiktok-guests-section">
+            <h4 className="tiktok-section-heading">Viewers in Room ({activeAudience.length})</h4>
+            {activeAudience.length === 0 ? (
+              <div style={{ padding: '16px 0', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                <span>No viewers in this room yet. When people join your live, you can invite them up to talk!</span>
+              </div>
+            ) : (
+              <div className="tiktok-guest-list">
+                {activeAudience.map((viewer) => {
+                  const cleanH = viewer.handle.replace(/^@/, '').toLowerCase().trim();
+                  const isInvited = invitedMap[cleanH];
+                  const isAlreadyGuest = activeGuests.some((g) => g.handle.replace(/^@/, '').toLowerCase() === cleanH);
+
+                  return (
+                    <div key={viewer.handle} className="tiktok-guest-row">
+                      <div className="tiktok-guest-avatar-wrap">
+                        <img src={viewer.avatar} alt={viewer.name} className="tiktok-guest-avatar" />
+                      </div>
+
+                      <div className="tiktok-guest-details">
+                        <div className="tiktok-guest-name-row">
+                          <span className="tiktok-guest-name">{viewer.name}</span>
+                          {viewer.isVip && <span className="tiktok-friend-tag">VIP</span>}
+                        </div>
+                        <span className="tiktok-guest-sub">@{cleanH} · Level {viewer.level}</span>
+                      </div>
+
+                      <div className="tiktok-guest-action">
+                        {isAlreadyGuest ? (
+                          <button
+                            type="button"
+                            className="tiktok-btn-remove-guest"
+                            onClick={() => onRemoveGuest && onRemoveGuest(viewer.handle)}
+                          >
+                            Remove
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={`tiktok-btn-invite ${isInvited ? 'invited' : ''}`}
+                            onClick={() => handleInvite(viewer.handle, viewer.name, viewer.avatar)}
+                            disabled={isInvited}
+                          >
+                            {isInvited ? 'Invited' : 'Invite'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Section: Friends not watching this LIVE */}
           <div className="tiktok-guests-section">
-            <h4 className="tiktok-section-heading">Friends not watching this LIVE</h4>
+            <h4 className="tiktok-section-heading">Friends not watching this LIVE ({realFriendsList.length})</h4>
             <div className="tiktok-guest-list">
-              {offlineFriends.map((friend) => {
-                const isInvited = invitedMap[friend.handle];
+              {realFriendsList.map((friend) => {
+                const cleanH = friend.handle.replace(/^@/, '').toLowerCase().trim();
+                const isInvited = invitedMap[cleanH];
 
                 return (
                   <div key={friend.handle} className="tiktok-guest-row">
@@ -259,6 +332,7 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
 
                     <div className="tiktok-guest-details">
                       <span className="tiktok-guest-name">{friend.name}</span>
+                      <span className="tiktok-guest-sub">@{cleanH}</span>
                     </div>
 
                     <div className="tiktok-guest-action">
@@ -299,7 +373,6 @@ export const LiveGoLiveGuestsModal: React.FC<LiveGoLiveGuestsModalProps> = ({
               title={isVideoOff ? 'Turn Camera ON' : 'Turn Camera OFF'}
             >
               📹
-              {isVideoOff && <span className="slash" />}
             </button>
 
             {/* Flip Camera */}
