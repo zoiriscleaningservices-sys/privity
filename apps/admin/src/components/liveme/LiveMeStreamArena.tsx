@@ -421,11 +421,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     name: string;
     handle: string;
     avatar: string;
-  } | null>({
-    name: 'lbma99',
-    handle: 'lbma99',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-  });
+  } | null>(null);
   const [hostPkScore, setHostPkScore] = useState(3);
   const [rivalPkScore, setRivalPkScore] = useState(4);
   const [battleRoundTimer, setBattleRoundTimer] = useState(121);
@@ -704,12 +700,23 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [guestLocalMediaStream, setGuestLocalMediaStream] = useState<MediaStream | null>(null);
   const guestLocalStreamRef = useRef<MediaStream | null>(null);
   const [guestMediaStreams, setGuestMediaStreams] = useState<Record<string, MediaStream>>({});
+  const [guestLiveFrames, setGuestLiveFrames] = useState<Record<string, string>>({});
+  const [isP2PVideoActive, setIsP2PVideoActive] = useState(false);
+  const guestRtcCleanupRef = useRef<(() => void) | null>(null);
+  const guestFrameIntervalRef = useRef<any>(null);
 
   // Allow setting remote guest media streams dynamically
   const registerGuestMediaStream = useCallback((handle: string, stream: MediaStream) => {
     const clean = handle.replace(/^@/, '').toLowerCase().trim();
     setGuestMediaStreams((prev) => ({ ...prev, [clean]: stream }));
   }, []);
+
+  // Listen to remote WebRTC guest media streams from liveStreamSync
+  useEffect(() => {
+    return liveStreamSync.subscribeToGuestStreams((cleanGuestH, stream) => {
+      registerGuestMediaStream(cleanGuestH, stream);
+    });
+  }, [registerGuestMediaStream]);
 
   const handleInviteGuest = useCallback((viewer: RoomViewer) => {
     setActiveGuests((prev) => {
@@ -774,6 +781,53 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       });
 
       const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      const cleanMyHandle = currentUser.handle.replace(/^@/, '').toLowerCase().trim();
+
+      // 1. Establish 2-Way WebRTC Media Connection with Host (both talk & see)
+      if (guestRtcCleanupRef.current) {
+        guestRtcCleanupRef.current();
+        guestRtcCleanupRef.current = null;
+      }
+      guestRtcCleanupRef.current = liveStreamSync.connectGuestStage(
+        roomId,
+        cleanMyHandle,
+        stream,
+        (hostStream) => {
+          setRemoteP2PStream(hostStream);
+        }
+      );
+
+      // 2. Continuous lightweight offscreen canvas capture to broadcast live guest frames
+      if (guestFrameIntervalRef.current) {
+        clearInterval(guestFrameIntervalRef.current);
+      }
+      const offscreenVideo = document.createElement('video');
+      offscreenVideo.muted = true;
+      offscreenVideo.autoplay = true;
+      offscreenVideo.playsInline = true;
+      offscreenVideo.srcObject = stream;
+      offscreenVideo.play().catch(() => {});
+
+      const offscreenCanvas = document.createElement('canvas');
+      offscreenCanvas.width = 180;
+      offscreenCanvas.height = 240;
+      const offscreenCtx = offscreenCanvas.getContext('2d');
+
+      const emitGuestFrame = () => {
+        if (!offscreenCtx || offscreenVideo.videoWidth === 0) return;
+        try {
+          offscreenCtx.drawImage(offscreenVideo, 0, 0, 180, 240);
+          const frameJpeg = offscreenCanvas.toDataURL('image/jpeg', 0.35);
+          liveStreamSync.sendRoomEvent(roomId, {
+            type: 'GUEST_LIVE_FRAME',
+            guestHandle: cleanMyHandle,
+            frame: frameJpeg,
+          });
+        } catch {}
+      };
+      guestFrameIntervalRef.current = setInterval(emitGuestFrame, 300);
+
+      // 3. Notify room and Supabase
       liveStreamSync.sendRoomEvent(roomId, {
         type: 'GUEST_JOINED_STAGE',
         guest: myViewerObj,
@@ -807,6 +861,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   }, [currentUser, currentStreamer.handle, currentStreamer.id, showToast]);
 
   const handleLeaveGuestStage = useCallback(() => {
+    if (guestRtcCleanupRef.current) {
+      guestRtcCleanupRef.current();
+      guestRtcCleanupRef.current = null;
+    }
+    if (guestFrameIntervalRef.current) {
+      clearInterval(guestFrameIntervalRef.current);
+      guestFrameIntervalRef.current = null;
+    }
     if (guestLocalStreamRef.current) {
       guestLocalStreamRef.current.getTracks().forEach((t) => t.stop());
       guestLocalStreamRef.current = null;
@@ -827,6 +889,20 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     });
     showToast('👋 You left the stage');
   }, [currentUser.handle, currentStreamer.handle, currentStreamer.id, showToast]);
+
+  // Clean up guest RTC on unmount
+  useEffect(() => {
+    return () => {
+      if (guestRtcCleanupRef.current) {
+        guestRtcCleanupRef.current();
+        guestRtcCleanupRef.current = null;
+      }
+      if (guestFrameIntervalRef.current) {
+        clearInterval(guestFrameIntervalRef.current);
+        guestFrameIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   const handleRequestJoinStage = useCallback(() => {
     if (isOnStageAsGuest) {
@@ -1573,6 +1649,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           const nextCount = prev + 1;
           if (isHost) {
             showToastRef.current(`👋 ${evt.user.name} joined your live stream!`);
+            setFloatingGuestPrompt({
+              name: evt.user.name,
+              handle: userHandle,
+              avatar: evt.user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
+            });
             immediateFrameCaptureRef.current?.();
             liveStreamSync.sendRoomEvent(roomId, {
               type: 'LIVE_STATS',
@@ -1852,6 +1933,22 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           registerGuestMediaStream(evt.guest.handle, evt.mediaStream);
         }
         showToastRef.current(`🎤 @${evt.guest.name} is now LIVE on stage with the host!`);
+      } else if (evt.type === 'GUEST_LIVE_FRAME' && evt.guestHandle && evt.frame) {
+        const gh = evt.guestHandle.replace(/^@/, '').toLowerCase().trim();
+        setGuestLiveFrames((prev) => ({ ...prev, [gh]: evt.frame }));
+      } else if (evt.type === 'GUEST_DISCONNECTED' && evt.handle) {
+        const gh = evt.handle.replace(/^@/, '').toLowerCase().trim();
+        setActiveGuests((prev) => prev.filter((g) => g.handle.replace(/^@/, '').toLowerCase().trim() !== gh));
+        setGuestMediaStreams((prev) => {
+          const next = { ...prev };
+          delete next[gh];
+          return next;
+        });
+        setGuestLiveFrames((prev) => {
+          const next = { ...prev };
+          delete next[gh];
+          return next;
+        });
       } else if (evt.type === 'COHOST_INVITE') {
         const myCleanHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
         const targetCleanHandle = (evt.targetHandle || '').toLowerCase().replace('@', '').trim();
@@ -2604,97 +2701,121 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 </div>
               )}
             </>
-          ) : remoteP2PStream ? (
-            <video
-              ref={(node) => {
-                if (node && node.srcObject !== remoteP2PStream) {
-                  node.srcObject = remoteP2PStream;
-                  node.setAttribute('playsinline', 'true');
-                  node.setAttribute('webkit-playsinline', 'true');
-                  node.muted = isMuted;
-                  const p = node.play();
-                  if (p !== undefined) {
-                    p.catch((err) => {
-                      console.warn('Autoplay unmuted blocked by browser policy:', err);
-                      node.muted = true;
-                      node.play().catch(() => {});
-                      setShowTapToUnmute(true);
-                    });
-                  }
-                }
-              }}
-              autoPlay
-              playsInline
-              muted={isMuted}
-              style={{ filter: activeLiveFilter.cssFilter !== 'none' ? activeLiveFilter.cssFilter : undefined }}
-              className="liveme-video-canvas"
-            />
-          ) : remoteLiveFrame ? (
-            <div className="liveme-live-frame-viewport" style={{ width: '100%', height: '100%', position: 'relative' }}>
-              <img
-                src={remoteLiveFrame}
-                alt="Live Broadcast Camera"
-                className="liveme-video-canvas"
-                style={{ objectFit: 'cover', width: '100%', height: '100%', display: 'block' }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '72px',
-                  left: '14px',
-                  background: 'rgba(239, 68, 68, 0.9)',
-                  color: '#fff',
-                  fontSize: '10px',
-                  fontWeight: 900,
-                  padding: '3px 9px',
-                  borderRadius: '99px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  zIndex: 10,
-                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.5)',
-                  backdropFilter: 'blur(8px)',
-                  letterSpacing: '0.04em',
-                }}
-              >
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fff' }} />
-                <span>LIVE FEED</span>
-              </div>
-            </div>
-          ) : (currentStreamer.peerId || currentStreamer.isCameraStream) ? (
-            <div className="liveme-connecting-camera-backdrop">
-              <img
-                src={currentStreamer.posterUrl || currentStreamer.avatar}
-                alt={currentStreamer.name}
-                className="liveme-connecting-bg-blur"
-              />
-              <div className="liveme-connecting-overlay-content">
-                <div className="liveme-connecting-avatar-ring">
-                  <img
-                    src={currentStreamer.avatar}
-                    alt={currentStreamer.name}
-                    className="liveme-connecting-avatar"
-                  />
-                  <div className="liveme-connecting-pulse-ring" />
-                </div>
-                <div className="liveme-connecting-title">
-                  {p2pConnectionStatus === 'connected' ? 'Streaming Live' : 'Connecting Real-Time Broadcast...'}
-                </div>
-                <div className="liveme-connecting-subtitle">
-                  Direct sovereign live feed from @{currentStreamer.handle}
-                </div>
-              </div>
-            </div>
           ) : (
-            <video
-              src={currentStreamer.videoStreamUrl}
-              poster={currentStreamer.posterUrl}
-              autoPlay
-              loop
-              muted={isMuted}
-              playsInline
-              className="liveme-video-canvas"
-            />
+            <div className="liveme-viewer-media-viewport" style={{ width: '100%', height: '100%', position: 'relative' }}>
+              {/* Layer 1: Guaranteed 0ms Live Frame Base Layer - Renders host image immediately */}
+              {(remoteLiveFrame || currentStreamer.posterUrl) ? (
+                <div style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 1 }}>
+                  <img
+                    src={remoteLiveFrame || currentStreamer.posterUrl}
+                    alt="Live Broadcast Camera"
+                    className="liveme-video-canvas"
+                    style={{ objectFit: 'cover', width: '100%', height: '100%', display: 'block' }}
+                  />
+                  {remoteLiveFrame && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '72px',
+                        left: '14px',
+                        background: 'rgba(239, 68, 68, 0.9)',
+                        color: '#fff',
+                        fontSize: '10px',
+                        fontWeight: 900,
+                        padding: '3px 9px',
+                        borderRadius: '99px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        zIndex: 10,
+                        boxShadow: '0 2px 8px rgba(239, 68, 68, 0.5)',
+                        backdropFilter: 'blur(8px)',
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fff' }} />
+                      <span>LIVE FEED</span>
+                    </div>
+                  )}
+                </div>
+              ) : (currentStreamer.peerId || currentStreamer.isCameraStream) ? (
+                <div className="liveme-connecting-camera-backdrop" style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
+                  <img
+                    src={currentStreamer.posterUrl || currentStreamer.avatar}
+                    alt={currentStreamer.name}
+                    className="liveme-connecting-bg-blur"
+                  />
+                  <div className="liveme-connecting-overlay-content">
+                    <div className="liveme-connecting-avatar-ring">
+                      <img
+                        src={currentStreamer.avatar}
+                        alt={currentStreamer.name}
+                        className="liveme-connecting-avatar"
+                      />
+                      <div className="liveme-connecting-pulse-ring" />
+                    </div>
+                    <div className="liveme-connecting-title">
+                      {p2pConnectionStatus === 'connected' ? 'Streaming Live' : 'Connecting Real-Time Broadcast...'}
+                    </div>
+                    <div className="liveme-connecting-subtitle">
+                      Direct sovereign live feed from @{currentStreamer.handle}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <video
+                  src={currentStreamer.videoStreamUrl}
+                  poster={currentStreamer.posterUrl}
+                  autoPlay
+                  loop
+                  muted={isMuted}
+                  playsInline
+                  className="liveme-video-canvas"
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 1 }}
+                />
+              )}
+
+              {/* Layer 2: Real-time WebRTC P2P Video overlaid with smooth reveal when frames actively decode */}
+              {remoteP2PStream && (
+                <video
+                  ref={(node) => {
+                    if (node && node.srcObject !== remoteP2PStream) {
+                      node.srcObject = remoteP2PStream;
+                      node.setAttribute('playsinline', 'true');
+                      node.setAttribute('webkit-playsinline', 'true');
+                      node.muted = isMuted;
+                      const p = node.play();
+                      if (p !== undefined) {
+                        p.catch((err) => {
+                          console.warn('Autoplay unmuted blocked by browser policy:', err);
+                          node.muted = true;
+                          node.play().catch(() => {});
+                          setShowTapToUnmute(true);
+                        });
+                      }
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  muted={isMuted}
+                  onPlaying={() => setIsP2PVideoActive(true)}
+                  onLoadedData={() => setIsP2PVideoActive(true)}
+                  onError={() => setIsP2PVideoActive(false)}
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    zIndex: 2,
+                    opacity: isP2PVideoActive ? 1 : (remoteLiveFrame ? 0 : 1),
+                    transition: 'opacity 0.25s ease-in-out',
+                    filter: activeLiveFilter.cssFilter !== 'none' ? activeLiveFilter.cssFilter : undefined,
+                  }}
+                  className="liveme-video-canvas"
+                />
+              )}
+            </div>
           )
         )}
 
@@ -2757,38 +2878,55 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                     style={{ filter: computedVideoFilter }}
                     className={`liveme-pk-video-layer ${isMirrored ? 'mirrored' : ''}`}
                   />
-                ) : remoteP2PStream ? (
-                  <video
-                    ref={(node) => {
-                      if (node && node.srcObject !== remoteP2PStream) {
-                        node.srcObject = remoteP2PStream;
-                        node.setAttribute('playsinline', 'true');
-                        node.setAttribute('webkit-playsinline', 'true');
-                        node.play().catch(() => {});
-                      }
-                    }}
-                    autoPlay
-                    playsInline
-                    muted={isMuted}
-                    className="liveme-pk-video-layer"
-                  />
-                ) : remoteLiveFrame ? (
-                  <img
-                    src={remoteLiveFrame}
-                    alt="Live Host Camera"
-                    className="liveme-pk-video-layer"
-                    style={{ objectFit: 'cover', width: '100%', height: '100%' }}
-                  />
                 ) : (
-                  <video
-                    src={currentStreamer.videoStreamUrl}
-                    poster={currentStreamer.posterUrl}
-                    autoPlay
-                    loop
-                    muted={isMuted}
-                    playsInline
-                    className="liveme-pk-video-layer"
-                  />
+                  <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                    {/* Layer 1: Guaranteed 0ms Live Frame Base Layer */}
+                    {(remoteLiveFrame || currentStreamer.posterUrl) ? (
+                      <img
+                        src={remoteLiveFrame || currentStreamer.posterUrl}
+                        alt="Live Host Camera"
+                        className="liveme-pk-video-layer"
+                        style={{ position: 'absolute', inset: 0, objectFit: 'cover', width: '100%', height: '100%', zIndex: 1 }}
+                      />
+                    ) : (
+                      <video
+                        src={currentStreamer.videoStreamUrl}
+                        poster={currentStreamer.posterUrl}
+                        autoPlay
+                        loop
+                        muted={isMuted}
+                        playsInline
+                        className="liveme-pk-video-layer"
+                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 1 }}
+                      />
+                    )}
+
+                    {/* Layer 2: Real-time WebRTC P2P Video overlaid */}
+                    {remoteP2PStream && (
+                      <video
+                        ref={(node) => {
+                          if (node && node.srcObject !== remoteP2PStream) {
+                            node.srcObject = remoteP2PStream;
+                            node.setAttribute('playsinline', 'true');
+                            node.setAttribute('webkit-playsinline', 'true');
+                            node.play().catch(() => {});
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        muted={isMuted}
+                        className="liveme-pk-video-layer"
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          zIndex: 2,
+                        }}
+                      />
+                    )}
+                  </div>
                 )}
 
                 {/* Bottom Left Streamer Tag */}
@@ -2965,6 +3103,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   isSelf={isSelfGuest}
                   localStream={isSelfGuest ? guestLocalMediaStream : undefined}
                   remoteStream={guestMediaStreams[cleanGuestH]}
+                  guestLiveFrame={guestLiveFrames[cleanGuestH]}
                   onRemove={() => handleRemoveGuest(guest.handle)}
                   onLeave={handleLeaveGuestStage}
                   showToast={showToast}
@@ -2972,6 +3111,23 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               );
             })}
           </div>
+        )}
+
+        {/* Dedicated 2-Way Audio Playback Engine for Guest on Stage (Guarantees guest hears host with zero echo) */}
+        {isOnStageAsGuest && remoteP2PStream && (
+          <audio
+            ref={(node) => {
+              if (node && node.srcObject !== remoteP2PStream) {
+                node.srcObject = remoteP2PStream;
+                node.muted = false;
+                node.volume = 1.0;
+                node.play().catch(() => {});
+              }
+            }}
+            autoPlay
+            playsInline
+            style={{ display: 'none' }}
+          />
         )}
 
         {/* Host Incoming Guest Stage Request Notification Banner */}
@@ -3608,7 +3764,16 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               type="button"
               className="pill-invite-btn"
               onClick={() => {
-                showToast(`📩 Invited ${floatingGuestPrompt.name} to join as guest!`);
+                handleInviteGuest({
+                  id: floatingGuestPrompt.handle,
+                  name: floatingGuestPrompt.name,
+                  handle: floatingGuestPrompt.handle,
+                  avatar: floatingGuestPrompt.avatar,
+                  level: 25,
+                  badge: 'VIP Fan ⭐',
+                  contribution: 0,
+                  isFollowing: true,
+                });
                 setFloatingGuestPrompt(null);
               }}
             >

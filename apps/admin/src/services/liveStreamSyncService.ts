@@ -59,6 +59,8 @@ class LiveStreamSyncService {
   private hostPeerConnections: Map<string, RTCPeerConnection> = new Map();
   private hostMediaStream: MediaStream | null = null;
   private currentHostSession: RemoteLiveStreamPayload | null = null;
+  private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+  private guestStreamSubscribers: Set<(guestHandle: string, stream: MediaStream) => void> = new Set();
   private heartbeatInterval: any = null;
   private pruneInterval: any = null;
   private queryInterval: any = null;
@@ -778,6 +780,7 @@ class LiveStreamSyncService {
     this.subscribeToRoomEvents(roomId, async (evt) => {
       if (!this.currentHostSession || !evt) return;
 
+      // 1. Viewer WebRTC Offer handling
       if (evt.type === 'RTC_OFFER' && evt.offer && evt.viewerId) {
         try {
           let pc = this.hostPeerConnections.get(evt.viewerId);
@@ -810,6 +813,14 @@ class LiveStreamSyncService {
           };
 
           await pc.setRemoteDescription(new RTCSessionDescription(evt.offer));
+
+          // Flush any queued candidates for this viewer
+          const queued = this.pendingIceCandidates.get(evt.viewerId) || [];
+          for (const cand of queued) {
+            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+          }
+          this.pendingIceCandidates.delete(evt.viewerId);
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
@@ -827,6 +838,93 @@ class LiveStreamSyncService {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(evt.candidate));
           } catch {}
+        } else {
+          const q = this.pendingIceCandidates.get(evt.viewerId) || [];
+          q.push(evt.candidate);
+          this.pendingIceCandidates.set(evt.viewerId, q);
+        }
+      }
+      // 2. Guest 2-Way Stage WebRTC Offer handling (Host <-> Guest talk & see)
+      else if (evt.type === 'GUEST_RTC_OFFER' && evt.offer && evt.guestHandle) {
+        try {
+          const cleanGuestH = evt.guestHandle.replace(/^@/, '').toLowerCase().trim();
+          const connKey = `guest-${cleanGuestH}`;
+          let pc = this.hostPeerConnections.get(connKey);
+          if (pc) {
+            try { pc.close(); } catch {}
+          }
+          pc = new RTCPeerConnection({
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:stun1.l.google.com:19302' },
+              { urls: 'stun:stun.cloudflare.com:3478' },
+            ],
+          });
+          this.hostPeerConnections.set(connKey, pc);
+
+          // Add host tracks so guest receives host audio and video
+          if (this.hostMediaStream) {
+            this.hostMediaStream.getTracks().forEach((track) => {
+              if (this.hostMediaStream) pc!.addTrack(track, this.hostMediaStream);
+            });
+          }
+
+          // Receive guest tracks so host receives guest audio and video
+          pc.ontrack = (event) => {
+            const guestStream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+            this.dispatchGuestStream(cleanGuestH, guestStream);
+          };
+
+          pc.onicecandidate = (event) => {
+            if (event.candidate) {
+              this.sendRoomEvent(roomId, {
+                type: 'GUEST_RTC_HOST_CANDIDATE',
+                guestHandle: cleanGuestH,
+                candidate: event.candidate,
+              });
+            }
+          };
+
+          await pc.setRemoteDescription(new RTCSessionDescription(evt.offer));
+
+          // Flush queued candidates
+          const queued = this.pendingIceCandidates.get(connKey) || [];
+          for (const cand of queued) {
+            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+          }
+          this.pendingIceCandidates.delete(connKey);
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          this.sendRoomEvent(roomId, {
+            type: 'GUEST_RTC_ANSWER',
+            guestHandle: cleanGuestH,
+            answer,
+          });
+        } catch (err) {
+          console.warn('WebRTC guest offer error on host:', err);
+        }
+      } else if (evt.type === 'GUEST_RTC_CANDIDATE' && evt.candidate && evt.guestHandle) {
+        const cleanGuestH = evt.guestHandle.replace(/^@/, '').toLowerCase().trim();
+        const connKey = `guest-${cleanGuestH}`;
+        const pc = this.hostPeerConnections.get(connKey);
+        if (pc && pc.remoteDescription) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(evt.candidate));
+          } catch {}
+        } else {
+          const q = this.pendingIceCandidates.get(connKey) || [];
+          q.push(evt.candidate);
+          this.pendingIceCandidates.set(connKey, q);
+        }
+      } else if (evt.type === 'GUEST_DISCONNECTED' && evt.handle) {
+        const cleanGuestH = evt.handle.replace(/^@/, '').toLowerCase().trim();
+        const connKey = `guest-${cleanGuestH}`;
+        const pc = this.hostPeerConnections.get(connKey);
+        if (pc) {
+          try { pc.close(); } catch {}
+          this.hostPeerConnections.delete(connKey);
         }
       }
     });
@@ -955,6 +1053,7 @@ class LiveStreamSyncService {
     let rtcPeerConnection: RTCPeerConnection | null = null;
     let isCleanedUp = false;
     let hasStreamConnected = false;
+    const pendingHostCandidates: RTCIceCandidateInit[] = [];
 
     if (onStatusChange) onStatusChange('connecting');
 
@@ -1017,12 +1116,19 @@ class LiveStreamSyncService {
           try {
             if (pc.signalingState !== 'stable') {
               await pc.setRemoteDescription(new RTCSessionDescription(evt.answer));
+              // Flush any queued candidates that arrived before remote description was set
+              for (const cand of pendingHostCandidates) {
+                await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+              }
+              pendingHostCandidates.length = 0;
             }
           } catch {}
         } else if (evt.type === 'RTC_HOST_CANDIDATE' && evt.viewerId === viewerId && evt.candidate) {
           try {
             if (pc.remoteDescription) {
               await pc.addIceCandidate(new RTCIceCandidate(evt.candidate));
+            } else {
+              pendingHostCandidates.push(evt.candidate);
             }
           } catch {}
         }
@@ -1081,6 +1187,142 @@ class LiveStreamSyncService {
         if (viewerPeer) viewerPeer.destroy();
       } catch {}
     };
+  }
+
+  // =========================================================================
+  // GUEST 2-WAY STAGE WEBRTC & REAL-TIME AUDIO/VIDEO
+  // =========================================================================
+
+  public subscribeToGuestStreams(callback: (guestHandle: string, stream: MediaStream) => void): () => void {
+    this.guestStreamSubscribers.add(callback);
+    return () => {
+      this.guestStreamSubscribers.delete(callback);
+    };
+  }
+
+  private dispatchGuestStream(guestHandle: string, stream: MediaStream) {
+    const cleanGuestH = guestHandle.replace(/^@/, '').toLowerCase().trim();
+    this.guestStreamSubscribers.forEach((cb) => {
+      try {
+        cb(cleanGuestH, stream);
+      } catch (e) {
+        console.warn('Guest stream subscriber dispatch error:', e);
+      }
+    });
+  }
+
+  public connectGuestStage(
+    roomIdOrHandle: string,
+    guestHandle: string,
+    localStream: MediaStream,
+    onHostStream?: (stream: MediaStream) => void
+  ): () => void {
+    const roomId = getRoomIdFromHandle(roomIdOrHandle);
+    const cleanGuestH = guestHandle.replace(/^@/, '').toLowerCase().trim();
+    let isCleanedUp = false;
+    let pc: RTCPeerConnection | null = null;
+    const pendingHostCandidates: RTCIceCandidateInit[] = [];
+    const incomingHostStream = new MediaStream();
+
+    try {
+      pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
+        ],
+      });
+
+      // 1. Add all guest media tracks (camera & microphone)
+      localStream.getTracks().forEach((track) => {
+        pc!.addTrack(track, localStream);
+      });
+
+      // 2. Receive host media stream (host camera & microphone)
+      pc.ontrack = (event) => {
+        if (event.track) {
+          if (!incomingHostStream.getTracks().some((t) => t.id === event.track.id)) {
+            incomingHostStream.addTrack(event.track);
+          }
+        }
+        if (event.streams && event.streams[0]) {
+          event.streams[0].getTracks().forEach((t) => {
+            if (!incomingHostStream.getTracks().some((it) => it.id === t.id)) {
+              incomingHostStream.addTrack(t);
+            }
+          });
+        }
+        if (onHostStream) {
+          onHostStream(incomingHostStream);
+        }
+      };
+
+      // 3. Send guest ICE candidates to host
+      pc.onicecandidate = (event) => {
+        if (event.candidate && !isCleanedUp) {
+          this.sendRoomEvent(roomId, {
+            type: 'GUEST_RTC_CANDIDATE',
+            guestHandle: cleanGuestH,
+            candidate: event.candidate,
+          });
+        }
+      };
+
+      // 4. Subscribe to host answer and candidates
+      const unsub = this.subscribeToRoomEvents(roomId, async (evt) => {
+        if (isCleanedUp || !evt || !pc) return;
+
+        if (evt.type === 'GUEST_RTC_ANSWER' && evt.guestHandle === cleanGuestH && evt.answer) {
+          try {
+            if (pc.signalingState !== 'stable') {
+              await pc.setRemoteDescription(new RTCSessionDescription(evt.answer));
+              for (const cand of pendingHostCandidates) {
+                await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+              }
+              pendingHostCandidates.length = 0;
+            }
+          } catch (e) {
+            console.warn('Guest WebRTC setRemoteDescription error:', e);
+          }
+        } else if (evt.type === 'GUEST_RTC_HOST_CANDIDATE' && evt.guestHandle === cleanGuestH && evt.candidate) {
+          try {
+            if (pc.remoteDescription) {
+              await pc.addIceCandidate(new RTCIceCandidate(evt.candidate));
+            } else {
+              pendingHostCandidates.push(evt.candidate);
+            }
+          } catch (e) {
+            console.warn('Guest WebRTC candidate error:', e);
+          }
+        }
+      });
+
+      // 5. Send initial offer
+      pc.createOffer().then(async (offer) => {
+        if (isCleanedUp || !pc) return;
+        await pc.setLocalDescription(offer);
+        this.sendRoomEvent(roomId, {
+          type: 'GUEST_RTC_OFFER',
+          guestHandle: cleanGuestH,
+          offer,
+        });
+      }).catch((e) => {
+        console.warn('Guest WebRTC createOffer error:', e);
+      });
+
+      return () => {
+        isCleanedUp = true;
+        unsub();
+        try {
+          if (pc) pc.close();
+        } catch {}
+      };
+    } catch (err) {
+      console.warn('Guest stage WebRTC initialization error:', err);
+      return () => {
+        isCleanedUp = true;
+      };
+    }
   }
 
   // =========================================================================

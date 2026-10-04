@@ -7,6 +7,7 @@ export interface LiveGuestStageBoxProps {
   isSelf: boolean;
   localStream?: MediaStream | null;
   remoteStream?: MediaStream | null;
+  guestLiveFrame?: string | null;
   onRemove?: () => void;
   onLeave?: () => void;
   showToast: (msg: string) => void;
@@ -18,6 +19,7 @@ export const LiveGuestStageBox: React.FC<LiveGuestStageBoxProps> = ({
   isSelf,
   localStream,
   remoteStream,
+  guestLiveFrame,
   onRemove,
   onLeave,
   showToast,
@@ -27,6 +29,7 @@ export const LiveGuestStageBox: React.FC<LiveGuestStageBoxProps> = ({
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isCamOff, setIsCamOff] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(true);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
 
   // Manage media stream attachment with zero-echo prevention
   useEffect(() => {
@@ -152,29 +155,90 @@ export const LiveGuestStageBox: React.FC<LiveGuestStageBoxProps> = ({
 
   return (
     <div className={`liveme-guest-stage-box ${isSpeaking && !isMicMuted ? 'speaking' : ''}`}>
-      {/* 1. Video Layer / Synthetic Canvas */}
-      {isSelf && localStream ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={true}
-          className={`liveme-guest-stage-video ${isCamOff ? 'hidden' : ''}`}
-        />
-      ) : remoteStream ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={isMicMuted}
+      {/* 1. Underlying Base Layer: Live Guest Camera Frame or Glowing Avatar Visualizer */}
+      {guestLiveFrame ? (
+        <img
+          src={guestLiveFrame}
+          alt={guest.name}
           className="liveme-guest-stage-video"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+            zIndex: 1,
+          }}
         />
-      ) : (
+      ) : !localStream && !remoteStream ? (
         <canvas
           ref={syntheticCanvasRef}
           width={180}
           height={240}
           className="liveme-guest-stage-video"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+            zIndex: 1,
+          }}
+        />
+      ) : (
+        <div
+          className="liveme-guest-stage-video"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            background: 'linear-gradient(135deg, #1e1b4b 0%, #090d16 100%)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1,
+          }}
+        >
+          <img
+            src={guest.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'}
+            alt=""
+            style={{
+              width: '56px',
+              height: '56px',
+              borderRadius: '50%',
+              objectFit: 'cover',
+              border: '2px solid #06b6d4',
+              boxShadow: '0 0 16px rgba(6, 182, 212, 0.4)',
+            }}
+          />
+        </div>
+      )}
+
+      {/* 2. Real-time WebRTC / Local Camera Video Layer */}
+      {((isSelf && localStream) || (!isSelf && remoteStream)) && (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isSelf ? true : isMicMuted}
+          onPlaying={() => setIsVideoPlaying(true)}
+          onLoadedData={() => setIsVideoPlaying(true)}
+          onError={() => setIsVideoPlaying(false)}
+          className={`liveme-guest-stage-video ${isCamOff ? 'hidden' : ''}`}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            zIndex: 2,
+            opacity: isVideoPlaying ? 1 : (guestLiveFrame ? 0 : 1),
+            transition: 'opacity 0.2s ease-in-out',
+          }}
         />
       )}
 
