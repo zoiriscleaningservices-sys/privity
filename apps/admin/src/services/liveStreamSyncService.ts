@@ -857,16 +857,29 @@ class LiveStreamSyncService {
             iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
               { urls: 'stun:stun1.l.google.com:19302' },
+              { urls: 'stun:stun2.l.google.com:19302' },
               { urls: 'stun:stun.cloudflare.com:3478' },
+              { urls: 'stun:global.stun.twilio.com:3478' },
             ],
           });
           this.hostPeerConnections.set(connKey, pc);
 
-          // Add host tracks so guest receives host audio and video
+          // Add host tracks so guest receives host audio and video in ultra-HD
           if (this.hostMediaStream) {
             this.hostMediaStream.getTracks().forEach((track) => {
               if (this.hostMediaStream) pc!.addTrack(track, this.hostMediaStream);
             });
+            try {
+              pc.getSenders().forEach((sender) => {
+                if (sender.track?.kind === 'video') {
+                  const params = sender.getParameters();
+                  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+                  params.encodings[0].maxBitrate = 8000000;
+                  params.encodings[0].networkPriority = 'high';
+                  sender.setParameters(params).catch(() => {});
+                }
+              });
+            } catch {}
           }
 
           // Receive guest tracks so host receives guest audio and video
@@ -1241,14 +1254,27 @@ class LiveStreamSyncService {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
           { urls: 'stun:stun.cloudflare.com:3478' },
+          { urls: 'stun:global.stun.twilio.com:3478' },
         ],
       });
 
-      // 1. Add all guest media tracks (camera & microphone)
+      // 1. Add all guest media tracks (camera & microphone) with ultra-HD bitrate
       localStream.getTracks().forEach((track) => {
         pc!.addTrack(track, localStream);
       });
+      try {
+        pc.getSenders().forEach((sender) => {
+          if (sender.track?.kind === 'video') {
+            const params = sender.getParameters();
+            if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+            params.encodings[0].maxBitrate = 8000000;
+            params.encodings[0].networkPriority = 'high';
+            sender.setParameters(params).catch(() => {});
+          }
+        });
+      } catch {}
 
       // 2. Receive host media stream (host camera & microphone)
       pc.ontrack = (event) => {

@@ -7211,6 +7211,235 @@
   z-index: 1;
 }
 
+/* PK Battle Challenge Handshake Invitation Modal & Overlay */
+.liveme-battle-challenge-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 85;
+  background: rgba(3, 7, 18, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: challengeFadeIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes challengeFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.liveme-battle-challenge-card {
+  width: 100%;
+  max-width: 380px;
+  background: linear-gradient(145deg, rgba(23, 23, 37, 0.95), rgba(15, 15, 26, 0.98));
+  border: 1.5px solid rgba(244, 63, 94, 0.45);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85), 0 0 40px rgba(244, 63, 94, 0.28);
+  border-radius: 26px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.liveme-battle-challenge-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.liveme-battle-icon-anim {
+  font-size: 40px;
+  animation: gloveClash 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes gloveClash {
+  0% { transform: scale(1) rotate(-8deg); }
+  100% { transform: scale(1.15) rotate(8deg); }
+}
+
+.liveme-battle-challenge-header h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  background: linear-gradient(135deg, #f43f5e, #fbbf24);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-transform: uppercase;
+}
+
+.liveme-battle-challenge-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.liveme-battle-challenger-avatar {
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  border: 3px solid #f43f5e;
+  object-fit: cover;
+  box-shadow: 0 0 20px rgba(244, 63, 94, 0.5);
+}
+
+.liveme-battle-challenger-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.liveme-battle-challenger-info strong {
+  font-size: 17px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.liveme-battle-challenger-info span {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.liveme-battle-challenge-text {
+  margin: 4px 0 0 0;
+  font-size: 14px;
+  color: #e2e8f0;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.liveme-battle-challenge-actions {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.liveme-battle-accept-btn {
+  flex: 1.2;
+  padding: 13px 16px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f43f5e 0%, #ec4899 50%, #fb923c 100%);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(244, 63, 94, 0.45);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.liveme-battle-accept-btn:hover {
+  transform: scale(1.03);
+  box-shadow: 0 8px 25px rgba(244, 63, 94, 0.6);
+}
+
+.liveme-battle-accept-btn:active {
+  transform: scale(0.97);
+}
+
+.liveme-battle-decline-btn {
+  flex: 0.9;
+  padding: 13px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.85);
+  color: #cbd5e1;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.liveme-battle-decline-btn:hover {
+  background: rgba(51, 65, 85, 0.95);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.liveme-battle-decline-btn:active {
+  transform: scale(0.97);
+}
+
+/* Challenger Pending Hub State */
+.liveme-cohost-challenge-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.liveme-challenge-pulse {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fbbf24;
+  background: rgba(15, 23, 42, 0.92);
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+
+.liveme-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fbbf24;
+  animation: pulseDotGlow 1.2s infinite alternate;
+}
+
+.liveme-cancel-challenge-btn {
+  padding: 6px 14px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.liveme-cancel-challenge-btn:hover {
+  background: rgba(239, 68, 68, 0.35);
+  color: #ffffff;
+}
+
+/* Ultra-HD video stream layers: 0 glitch, 0 pixelation */
+.liveme-pk-video-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: auto;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform;
+}
+
 
 
 
