@@ -454,6 +454,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [speedMultiplier, setSpeedMultiplier] = useState<number>(1);
   const speedMultiplierRef = useRef<number>(1);
   speedMultiplierRef.current = speedMultiplier;
+  const scheduledSpeedChallengeRef = useRef<{ type: 'double' | 'triple'; multiplier: number; triggerAt: number; duration: number } | null>(null);
+  const startedByRef = useRef<string>('');
+  const [tapCombo, setTapCombo] = useState<number>(0);
+  const tapComboTimerRef = useRef<any>(null);
 
   // PK Battle Duel State (Default false: Stream starts in full-screen solo mode!)
   const [isPkBattleActive, setIsPkBattleActive] = useState(false);
@@ -529,22 +533,32 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         const nextTimer = prev - 1;
         battleRoundTimerRef.current = nextTimer;
 
-        // Trigger random Speed Challenge (Doubles / Triples / None) at around 140s remaining (40s into match)
-        if (nextTimer === 140 && isHost) {
-          const rand = Math.random();
-          const pick: 'double' | 'triple' | null = rand < 0.40 ? 'double' : rand < 0.72 ? 'triple' : null;
-          if (pick) {
-            const challengeEvt = {
-              type: 'PK_SPEED_CHALLENGE',
-              challengeType: pick,
-              multiplier: pick === 'double' ? 2 : 3,
-              duration: 30,
-            };
-            const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-            const rivalRoomId = (pkRivalRef.current?.handle || '').replace(/^@+/, '');
-            liveStreamSync.sendRoomEvent(roomId, challengeEvt);
-            if (rivalRoomId) liveStreamSync.sendRoomEvent(rivalRoomId, challengeEvt);
-          }
+        // Synchronous Speed Challenge Activation (2X or 3X as scheduled)
+        if (scheduledSpeedChallengeRef.current && nextTimer === scheduledSpeedChallengeRef.current.triggerAt) {
+          const sc = scheduledSpeedChallengeRef.current;
+          setSpeedMultiplier(sc.multiplier);
+          speedMultiplierRef.current = sc.multiplier;
+          setSpeedChallenge({
+            type: sc.type,
+            timeLeft: sc.duration,
+          });
+          showToastRef.current(
+            sc.type === 'double'
+              ? '⚡ 2X SPEED CHALLENGE ACTIVATED! All points DOUBLED! (30s)'
+              : '🔥 3X SPEED CHALLENGE ACTIVATED! All points TRIPLED! (30s)'
+          );
+        } else if (nextTimer === 140 && isHost && !scheduledSpeedChallengeRef.current) {
+          const pick: 'double' | 'triple' = Math.random() < 0.5 ? 'double' : 'triple';
+          const challengeEvt = {
+            type: 'PK_SPEED_CHALLENGE',
+            challengeType: pick,
+            multiplier: pick === 'double' ? 2 : 3,
+            duration: 30,
+          };
+          const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
+          const rivalRoomId = (pkRivalRef.current?.handle || '').replace(/^@+/, '');
+          liveStreamSync.sendRoomEvent(roomId, challengeEvt);
+          if (rivalRoomId) liveStreamSync.sendRoomEvent(rivalRoomId, challengeEvt);
         }
 
         return nextTimer;
@@ -1533,6 +1547,30 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 frame: frameJpeg,
               });
             }
+
+            // Real-time Co-Host Frame Relay (Instantly renders host in rival's box with 0ms delay)
+            if (isCoHostConnectedRef.current && pkRivalRef.current?.handle) {
+              const cleanRivalH = (pkRivalRef.current.handle || '').replace(/^@+/, '').toLowerCase().trim();
+              const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+              if (cleanRivalH && cleanRivalH !== cleanMyH) {
+                liveStreamSync.sendRoomEvent(cleanRivalH, {
+                  type: 'COHOST_LIVE_FRAME',
+                  senderHandle: cleanMyH,
+                  targetHandle: cleanRivalH,
+                  frame: frameJpeg,
+                });
+                try {
+                  const cohostBus = new BroadcastChannel('privity_cohost_frames');
+                  cohostBus.postMessage({
+                    type: 'COHOST_FRAME',
+                    senderHandle: cleanMyH,
+                    targetHandle: cleanRivalH,
+                    frame: frameJpeg,
+                  });
+                  cohostBus.close();
+                } catch {}
+              }
+            }
           }
         } catch {}
       }
@@ -1548,6 +1586,71 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     };
   }, [isHost, currentUser.handle, isVideoOff]);
 
+  // Cross-tab / Cross-browser Co-Host Frame Receiver
+  useEffect(() => {
+    let ch: BroadcastChannel | null = null;
+    try {
+      ch = new BroadcastChannel('privity_cohost_frames');
+      ch.onmessage = (e) => {
+        const d = e.data;
+        if (d?.type === 'COHOST_FRAME' && d.frame && d.senderHandle) {
+          const rivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          const senderH = d.senderHandle.replace(/^@+/, '').toLowerCase().trim();
+          const myH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          if (senderH && senderH !== myH && (senderH === rivalH || !rivalH)) {
+            setRemoteCoHostFrame(d.frame);
+          }
+        }
+      };
+    } catch {}
+    return () => {
+      if (ch) ch.close();
+    };
+  }, [currentUser.handle]);
+
+  // Cross-tab real-time sync for battle scores and speed challenges
+  useEffect(() => {
+    let syncBus: BroadcastChannel | null = null;
+    try {
+      syncBus = new BroadcastChannel('privity_sync_bus');
+      syncBus.onmessage = (e) => {
+        const d = e.data;
+        if (!d || !d.type) return;
+        const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        const rivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+
+        if (d.type === 'PK_BATTLE_UPDATE') {
+          const sender = (d.creatorHandle || d.senderHandle || '').replace(/^@+/, '').toLowerCase().trim();
+          if (sender === myClean) {
+            if (typeof d.creatorScore === 'number') {
+              setHostPkScore(d.creatorScore);
+              hostPkScoreRef.current = d.creatorScore;
+            }
+          } else if (sender === rivalH || !sender) {
+            const rScore = typeof d.creatorScore === 'number' ? d.creatorScore : (typeof d.hostScore === 'number' ? d.hostScore : undefined);
+            if (typeof rScore === 'number') {
+              setRivalPkScore(rScore);
+              rivalPkScoreRef.current = rScore;
+            }
+          }
+          if (typeof d.roundTimer === 'number') setBattleRoundTimer(d.roundTimer);
+          if (d.hit) triggerPkHit(d.hit.text, d.hit.color);
+        } else if (d.type === 'PK_SPEED_CHALLENGE' && d.challengeType) {
+          const mult = d.multiplier || (d.challengeType === 'double' ? 2 : 3);
+          setSpeedMultiplier(mult);
+          speedMultiplierRef.current = mult;
+          setSpeedChallenge({
+            type: d.challengeType,
+            timeLeft: d.duration || 30,
+          });
+        }
+      };
+    } catch {}
+    return () => {
+      if (syncBus) syncBus.close();
+    };
+  }, [currentUser.handle]);
+
   // 3. BROADCAST DURATION CLOCK (100% PURE REAL TIME - ZERO FAKE AUDIENCE)
   useEffect(() => {
     const updateTimer = () => {
@@ -1562,45 +1665,6 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       clearInterval(timer);
     };
   }, []);
-
-  // 4. PK BATTLE ROUND COUNTDOWN & SCORE DYNAMICS
-  useEffect(() => {
-    if (!isPkBattleActive) return;
-
-    const timer = setInterval(() => {
-      setBattleRoundTimer((prev) => {
-        if (prev <= 1) {
-          // Battle finished: determine winner
-          setHostPkScore((hostScore) => {
-            setRivalPkScore((rivalScore) => {
-              if (hostScore > rivalScore) {
-                setBattleWinner('host');
-                showToast('🏆 PK VICTORY! Host won the battle!');
-              } else if (rivalScore > hostScore) {
-                setBattleWinner('rival');
-              } else {
-                setBattleWinner('draw');
-              }
-              return rivalScore;
-            });
-            return hostScore;
-          });
-
-          // Reset for next round after 7 seconds
-          setTimeout(() => {
-            setBattleWinner(null);
-            setBattleRoundTimer(60);
-          }, 7000);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, [isPkBattleActive, battleRoundTimer, showToast]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -1644,14 +1708,50 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleNextStream, handlePrevStream, isSummaryOpen, isConfirmEndOpen, isRechargeOpen, isCoinGamesOpen, isGiftTrayOpen, isHost, onClose]);
 
-  // Tap / Double-tap heart reaction
+  // Synthesize lightweight organic pop sound via Web Audio API (0ms latency, zero assets)
+  const playPopSound = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioCtx();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const now = ctx.currentTime;
+      osc.type = 'sine';
+      const freq = 440 + Math.random() * 260;
+      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.6, now + 0.07);
+      gain.gain.setValueAtTime(0.06, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.09);
+    } catch {}
+  }, []);
+
+  // Tap / Double-tap organic heart reaction with burst physics, haptics, and combo
   const spawnHeartReaction = (x?: number, y?: number) => {
+    playPopSound();
+    if (navigator.vibrate) {
+      try { navigator.vibrate(12); } catch {}
+    }
+    if (tapComboTimerRef.current) clearTimeout(tapComboTimerRef.current);
+    setTapCombo((prev) => prev + 1);
+    tapComboTimerRef.current = setTimeout(() => {
+      setTapCombo(0);
+    }, 1200);
+
     const stageWidth = stageRef.current ? stageRef.current.clientWidth : 440;
     const stageHeight = stageRef.current ? stageRef.current.clientHeight : 700;
     const posX = x !== undefined ? x : stageWidth / 2 + (Math.random() * 80 - 40);
     const posY = y !== undefined ? y : stageHeight - 160;
 
-    const colors = ['#f43f5e', '#ec4899', '#a855f7', '#3b82f6', '#fbbf24'];
+    const colors = ['#f43f5e', '#ec4899', '#a855f7', '#3b82f6', '#fbbf24', '#10b981'];
     const heart = {
       id: Date.now() + Math.random(),
       x: posX,
@@ -1659,7 +1759,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       color: colors[Math.floor(Math.random() * colors.length)],
     };
 
-    setFloatingHearts((prev) => [...prev.slice(-15), heart]);
+    setFloatingHearts((prev) => [...prev.slice(-25), heart]);
     setTimeout(() => {
       setFloatingHearts((prev) => prev.filter((h) => h.id !== heart.id));
     }, 2200);
@@ -1846,17 +1946,30 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         isCoHostConnectedRef.current = true;
         setIsPkBattleActive(true);
         isPkBattleActiveRef.current = true;
-        if (evt.rival) {
-          setPkRival(evt.rival);
-          pkRivalRef.current = evt.rival;
-        }
-        setHostPkScore(typeof evt.hostScore === 'number' ? evt.hostScore : 0);
-        setRivalPkScore(typeof evt.rivalScore === 'number' ? evt.rivalScore : 0);
+        setHostPkScore(0);
+        hostPkScoreRef.current = 0;
+        setRivalPkScore(0);
+        rivalPkScoreRef.current = 0;
         setBattleRoundTimer(typeof evt.roundTimer === 'number' ? evt.roundTimer : 180);
+        battleRoundTimerRef.current = typeof evt.roundTimer === 'number' ? evt.roundTimer : 180;
         setBattleWinner(null);
         setSpeedMultiplier(1);
         speedMultiplierRef.current = 1;
         setSpeedChallenge(null);
+
+        if (evt.speedChallenge) {
+          scheduledSpeedChallengeRef.current = evt.speedChallenge;
+        }
+
+        const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        const startedBy = (evt.startedBy || '').replace(/^@+/, '').toLowerCase().trim();
+
+        // If started by rival, ensure pkRival points to the initiator!
+        if (startedBy && startedBy !== myClean && evt.initiatorStreamer) {
+          setPkRival(evt.initiatorStreamer);
+          pkRivalRef.current = evt.initiatorStreamer;
+        }
+
         showToastRef.current(`🥊 LIVE PK Match Started! Cheer your creator and send gifts!`);
       } else if (evt.type === 'PK_SPEED_CHALLENGE' && evt.challengeType) {
         const mult = evt.multiplier || (evt.challengeType === 'double' ? 2 : 3);
@@ -1873,18 +1986,22 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         );
       } else if (evt.type === 'PK_BATTLE_UPDATE') {
         const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
-        if (evt.senderHandle && evt.senderHandle.replace(/^@+/, '').toLowerCase().trim() !== myClean) {
-          if (typeof evt.hostScore === 'number') {
-            setRivalPkScore(evt.hostScore);
-            rivalPkScoreRef.current = evt.hostScore;
+        const sender = (evt.creatorHandle || evt.senderHandle || '').replace(/^@+/, '').toLowerCase().trim();
+        const rivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+
+        if (sender === myClean) {
+          // Point earned by ME: update my hostPkScore
+          if (typeof evt.creatorScore === 'number') {
+            setHostPkScore(evt.creatorScore);
+            hostPkScoreRef.current = evt.creatorScore;
           }
-          if (typeof evt.rivalScore === 'number') {
-            setHostPkScore(evt.rivalScore);
-            hostPkScoreRef.current = evt.rivalScore;
+        } else if (sender === rivalH || !sender) {
+          // Point earned by RIVAL: update rivalPkScore
+          const rScore = typeof evt.creatorScore === 'number' ? evt.creatorScore : (typeof evt.hostScore === 'number' ? evt.hostScore : undefined);
+          if (typeof rScore === 'number') {
+            setRivalPkScore(rScore);
+            rivalPkScoreRef.current = rScore;
           }
-        } else {
-          if (typeof evt.hostScore === 'number') setHostPkScore(evt.hostScore);
-          if (typeof evt.rivalScore === 'number') setRivalPkScore(evt.rivalScore);
         }
         if (typeof evt.roundTimer === 'number') setBattleRoundTimer(evt.roundTimer);
         if (evt.hit) triggerPkHit(evt.hit.text, evt.hit.color);
@@ -1958,62 +2075,87 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         }
         setLiveViewersCount((prev) => Math.max(0, prev - 1));
       } else if (evt.type === 'LIVE_GIFT') {
-        // Enqueue animation for host & all viewers (strict deduplication in GiftQueueManager)
-        if (evt.giftEvent && evt.animGift) {
+        // Enqueue animation ONLY for recipient host & room (rival does NOT see gift animation)
+        const myHandle = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        const curStreamerH = (currentStreamer.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        const recipientH = (evt.giftEvent?.recipientId || evt.recipientHandle || '').replace(/^@+/, '').toLowerCase().trim();
+        const isForMe = !recipientH || recipientH === myHandle || recipientH === curStreamerH;
+
+        if (isForMe && evt.giftEvent && evt.animGift) {
           globalGiftQueue.enqueue(evt.giftEvent, evt.animGift);
         }
 
-        // Add gift message to chat
-        if (evt.giftMessage) {
+        // Add gift message to chat if for this room
+        if (evt.giftMessage && isForMe) {
           setChatMessages((prev) => [...prev.slice(-35), evt.giftMessage]);
         }
 
-        // Play sound effect
-        const matchedGift = LIVEME_GIFTS.find(
-          (g) => g.id === evt.giftEvent?.giftId || g.name === evt.giftEvent?.giftName
-        );
-        if (matchedGift?.soundUrl) {
-          try {
-            const audio = new Audio(matchedGift.soundUrl);
-            audio.volume = isMutedRef.current ? 0 : 0.85;
-            audio.play().catch(() => {});
-          } catch {}
+        // Play sound effect if for this room
+        if (isForMe) {
+          const matchedGift = LIVEME_GIFTS.find(
+            (g) => g.id === evt.giftEvent?.giftId || g.name === evt.giftEvent?.giftName
+          );
+          if (matchedGift?.soundUrl) {
+            try {
+              const audio = new Audio(matchedGift.soundUrl);
+              audio.volume = isMutedRef.current ? 0 : 0.85;
+              audio.play().catch(() => {});
+            } catch {}
+          }
         }
 
-        // Increment diamonds on host
+        // Increment diamonds on host if for me
         const diamonds = evt.diamonds || evt.giftEvent?.coinValue || 10;
-        setDiamondsEarned((prev) => prev + diamonds);
+        if (isForMe) {
+          setDiamondsEarned((prev) => prev + diamonds);
+        }
 
         // Update target stream goal if sent gift matches
         const gName = (evt.giftEvent?.giftName || '').toLowerCase();
         const gId = (evt.giftEvent?.giftId || '').toLowerCase();
-        setStreamGoal((prev) => {
-          if (gName.includes(prev.giftName.toLowerCase()) || gId === prev.giftId.toLowerCase()) {
-            return {
-              ...prev,
-              currentCount: prev.currentCount + (evt.giftEvent?.quantity || 1),
-            };
-          }
-          return prev;
-        });
+        if (isForMe) {
+          setStreamGoal((prev) => {
+            if (gName.includes(prev.giftName.toLowerCase()) || gId === prev.giftId.toLowerCase()) {
+              return {
+                ...prev,
+                currentCount: prev.currentCount + (evt.giftEvent?.quantity || 1),
+              };
+            }
+            return prev;
+          });
+        }
 
-        // If in PK battle, add score
-        if (isPkBattleActiveRef.current) {
-          const dmg = diamonds * 2;
+        // If in PK battle and gift was received by me, add score
+        if (isPkBattleActiveRef.current && isForMe) {
+          const dmg = diamonds * 2 * speedMultiplierRef.current;
           setHostPkScore((prev) => {
             const next = prev + dmg;
             hostPkScoreRef.current = next;
             return next;
           });
-          triggerPkHit(`+${dmg.toLocaleString()} GIFT CRIT! 🔥`, '#ec4899');
+          const hitText = `+${dmg.toLocaleString()} GIFT CRIT! 🔥${speedMultiplierRef.current > 1 ? ` (${speedMultiplierRef.current}X)` : ''}`;
+          triggerPkHit(hitText, '#ec4899');
           if (isHost) {
-            liveStreamSync.sendRoomEvent(roomId, {
+            const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+            const rivalRoomId = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+            const updateEvt = {
               type: 'PK_BATTLE_UPDATE',
-              hostScore: hostPkScoreRef.current + dmg,
-              rivalScore: rivalPkScoreRef.current,
+              creatorHandle: cleanMyH,
+              creatorScore: hostPkScoreRef.current,
+              delta: dmg,
+              senderHandle: `@${cleanMyH}`,
               roundTimer: battleRoundTimerRef.current,
-              hit: { text: `+${dmg.toLocaleString()} GIFT CRIT! 🔥`, color: '#ec4899' },
-            });
+              hit: { text: hitText, color: '#ec4899' },
+            };
+            liveStreamSync.sendRoomEvent(roomId, updateEvt);
+            if (rivalRoomId && rivalRoomId !== cleanMyH) {
+              liveStreamSync.sendRoomEvent(rivalRoomId, updateEvt);
+            }
+            try {
+              const bus = new BroadcastChannel('privity_sync_bus');
+              bus.postMessage(updateEvt);
+              bus.close();
+            } catch {}
           }
         }
 
@@ -2138,7 +2280,10 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       } else if (evt.type === 'COHOST_INVITE_DECLINED') {
         showToastRef.current(`❌ @${(evt.senderHandle || evt.senderName || 'Creator').replace(/^@+/, '')} declined the co-host invitation.`);
       } else if (evt.type === 'COHOST_INVITE_ACCEPTED') {
-        const cleanRivalH = (evt.coHostHandle || evt.senderHandle || '').replace(/^@+/, '').trim();
+        const cleanRivalH = (evt.coHostHandle || evt.senderHandle || '').replace(/^@+/, '').toLowerCase().trim();
+        const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        if (cleanRivalH === myClean) return; // Do not overwrite with self!
+
         const rivalObj: LiveMeStreamer = evt.rivalStreamer || {
           id: `stream-${cleanRivalH}`,
           name: evt.coHostName || evt.senderName || cleanRivalH,
@@ -2168,13 +2313,29 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         setRivalPkScore(0);
         setBattleRoundTimer(180);
         setBattleWinner(null);
+
+        // Connect 2-way WebRTC stream on inviter side
+        if (localStreamRef.current) {
+          liveStreamSync.connectGuestStage(cleanRivalH, myClean, localStreamRef.current, (remoteStream) => {
+            setRemoteCoHostStream(remoteStream);
+          });
+        }
+
         showToastRef.current(`🤝 Connected with @${cleanRivalH} in Co-Host Live! Tap 'Start Match' to begin PK Battle!`);
+      } else if (evt.type === 'COHOST_LIVE_FRAME' && evt.frame) {
+        const rivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        const senderH = (evt.senderHandle || '').replace(/^@+/, '').toLowerCase().trim();
+        const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        if (senderH && senderH !== myClean && (senderH === rivalH || !rivalH)) {
+          setRemoteCoHostFrame(evt.frame);
+        }
       } else if (evt.type === 'COHOST_DISCONNECTED') {
         setIsCoHostConnected(false);
         isCoHostConnectedRef.current = false;
         setIsPkBattleActive(false);
         isPkBattleActiveRef.current = false;
         setRemoteCoHostStream(null);
+        setRemoteCoHostFrame(null);
         showToastRef.current(`Co-host session ended with @${(evt.senderHandle || 'Creator').replace(/^@+/, '')}`);
       } else if (evt.type === 'GUEST_INVITE') {
         const myCleanHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
@@ -2283,26 +2444,32 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     const hitText = `+${points} CHEER! ♥${speedMultiplierRef.current > 1 ? ` (${speedMultiplierRef.current}X)` : ''}`;
     triggerPkHit(hitText, '#f43f5e');
 
+    const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+    const cleanRivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
     const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-    const rivalRoomId = (pkRivalRef.current?.handle || '').replace(/^@+/, '');
+
     const updateEvt = {
       type: 'PK_BATTLE_UPDATE',
-      hostScore: nextScore,
-      rivalScore: rivalPkScoreRef.current,
-      senderHandle: `@${(currentUser.handle || '').replace(/^@+/, '')}`,
+      creatorHandle: cleanMyH,
+      creatorScore: nextScore,
+      delta: points,
+      senderHandle: `@${cleanMyH}`,
       roundTimer: battleRoundTimerRef.current,
       hit: { text: hitText, color: '#f43f5e' },
     };
     try {
       liveStreamSync.sendRoomEvent(roomId, updateEvt);
-      if (rivalRoomId) liveStreamSync.sendRoomEvent(rivalRoomId, updateEvt);
+      if (cleanRivalH && cleanRivalH !== cleanMyH) liveStreamSync.sendRoomEvent(cleanRivalH, updateEvt);
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(updateEvt);
+      bus.close();
     } catch {}
   };
 
   // Co-Host Match Control Handlers
   const handleStartPkMatch = () => {
     const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
-    const cleanRivalH = (pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
+    const cleanRivalH = (pkRivalRef.current?.handle || pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
 
     setIsPkBattleActive(true);
     isPkBattleActiveRef.current = true;
@@ -2316,6 +2483,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     setSpeedMultiplier(1);
     speedMultiplierRef.current = 1;
     setSpeedChallenge(null);
+    startedByRef.current = cleanMyH;
+
+    // Pick 2X or 3X Speed challenge deterministically:
+    const pick: 'double' | 'triple' = Math.random() < 0.5 ? 'double' : 'triple';
+    const scheduledChallenge = {
+      type: pick,
+      multiplier: pick === 'double' ? 2 : 3,
+      triggerAt: 140,
+      duration: 30,
+    };
+    scheduledSpeedChallengeRef.current = scheduledChallenge;
 
     const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
     const startEvt = {
@@ -2326,7 +2504,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       hostHandle: `@${cleanMyH}`,
       rivalHandle: `@${cleanRivalH}`,
       startedBy: cleanMyH,
-      rival: {
+      speedChallenge: scheduledChallenge,
+      initiatorStreamer: {
         id: `stream-${cleanMyH}`,
         name: currentUser.name,
         handle: `@${cleanMyH}`,
@@ -2336,14 +2515,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     };
 
     liveStreamSync.sendRoomEvent(roomId, startEvt);
-    if (cleanRivalH) liveStreamSync.sendRoomEvent(cleanRivalH, startEvt);
+    if (cleanRivalH && cleanRivalH !== cleanMyH) {
+      liveStreamSync.sendRoomEvent(cleanRivalH, startEvt);
+    }
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(startEvt);
+      bus.close();
+    } catch {}
 
     showToast('🥊 LIVE Match Started! Cheer your creator and send gifts!');
   };
 
   const handleDisconnectCoHost = () => {
     const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
-    const cleanRivalH = (pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
+    const cleanRivalH = (pkRivalRef.current?.handle || pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
 
     const discEvt = {
       type: 'COHOST_DISCONNECTED',
@@ -2353,13 +2539,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
     const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
     liveStreamSync.sendRoomEvent(roomId, discEvt);
-    if (cleanRivalH) liveStreamSync.sendRoomEvent(cleanRivalH, discEvt);
+    if (cleanRivalH && cleanRivalH !== cleanMyH) {
+      liveStreamSync.sendRoomEvent(cleanRivalH, discEvt);
+    }
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(discEvt);
+      bus.close();
+    } catch {}
 
     setIsCoHostConnected(false);
     isCoHostConnectedRef.current = false;
     setIsPkBattleActive(false);
     isPkBattleActiveRef.current = false;
     setRemoteCoHostStream(null);
+    setRemoteCoHostFrame(null);
     showToast('Co-host session disconnected.');
   };
 
@@ -2421,8 +2615,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     };
 
     liveStreamSync.sendRoomEvent(cleanSenderH, acceptEvt);
-    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-    liveStreamSync.sendRoomEvent(roomId, acceptEvt);
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(acceptEvt);
+      bus.close();
+    } catch {}
 
     if (localStreamRef.current) {
       liveStreamSync.connectGuestStage(cleanSenderH, cleanMyH, localStreamRef.current, (remoteStream) => {
@@ -2446,8 +2643,11 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     };
 
     liveStreamSync.sendRoomEvent(cleanSenderH, declineEvt);
-    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-    liveStreamSync.sendRoomEvent(roomId, declineEvt);
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(declineEvt);
+      bus.close();
+    } catch {}
     showToast(`Declined invitation from ${invite.senderName}.`);
   };
 
@@ -3395,7 +3595,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               )}
 
               {/* Right Half Box: Rival Streamer */}
-              <div className="liveme-pk-half-box rival">
+              <div
+                className="liveme-pk-half-box rival"
+                onClick={(e) => {
+                  if (e) {
+                    const rect = stageRef.current?.getBoundingClientRect();
+                    if (rect) spawnHeartReaction(e.clientX - rect.left, e.clientY - rect.top);
+                  } else {
+                    spawnHeartReaction();
+                  }
+                }}
+                title="Tap to Cheer! ♥"
+                style={{ cursor: 'pointer' }}
+              >
                 {/* Top Corner Win Streak Badge */}
                 {isPkBattleActive && (
                   <div className="liveme-pk-win-badge right">
@@ -3437,20 +3649,34 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 ) : remoteCoHostFrame ? (
                   <img
                     src={remoteCoHostFrame}
-                    alt="Co-Host Live"
+                    alt={pkRival.name || 'Co-Host Live'}
                     className="liveme-pk-video-layer"
                     style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
                   />
-                ) : (
+                ) : pkRival.videoStreamUrl ? (
                   <video
-                    src={pkRival.videoStreamUrl || 'https://assets.mixkit.co/videos/preview/mixkit-young-man-talking-on-a-video-call-42996-large.mp4'}
+                    src={pkRival.videoStreamUrl}
                     poster={pkRival.posterUrl || pkRival.avatar}
                     autoPlay
                     loop
                     muted={false}
                     playsInline
                     className="liveme-pk-video-layer"
+                    style={{ objectFit: 'cover', width: '100%', height: '100%' }}
                   />
+                ) : (
+                  <div className="liveme-cohost-connecting-box">
+                    <img
+                      src={pkRival.avatar || pkRival.posterUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'}
+                      alt={pkRival.name}
+                      style={{ width: '74px', height: '74px', borderRadius: '50%', border: '3px solid #06b6d4', objectFit: 'cover', marginBottom: '10px' }}
+                    />
+                    <div style={{ color: '#fff', fontWeight: 700, fontSize: '13px' }}>@{pkRival.handle.replace(/^@+/, '')}</div>
+                    <div style={{ color: '#06b6d4', fontSize: '11px', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className="liveme-cohost-status-dot" style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#06b6d4' }} />
+                      <span>Connecting live feed...</span>
+                    </div>
+                  </div>
                 )}
 
                 {/* Bottom Right Streamer Tag with Follow Pill */}
@@ -3668,6 +3894,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             </div>
           ))}
         </div>
+
+        {/* Organic Tap-to-like Combo Badge */}
+        {tapCombo > 1 && (
+          <div className="liveme-tap-combo-badge" key={tapCombo}>
+            <span>🔥</span>
+            <span>x{tapCombo}</span>
+          </div>
+        )}
 
         {/* ================================================================ */}
         {/* 4. TOP BAR: STREAMER INFO (LEFT) & CLOSE / AUDIENCE (RIGHT)      */}
