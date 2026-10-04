@@ -149,7 +149,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   useEffect(() => {
     if (!isHost) {
       const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
-      liveStreamSync.sendRoomEvent(roomId, {
+      const joinEvt = {
+        _eid: `join_${currentUser.handle}_${Date.now()}`,
         type: 'LIVE_JOIN',
         streamerId: currentStreamer.id,
         user: {
@@ -157,16 +158,30 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           handle: currentUser.handle,
           avatar: currentUser.avatar,
         },
-      });
+        timestamp: Date.now(),
+      };
+      liveStreamSync.sendRoomEvent(roomId, joinEvt);
 
-      return () => {
-        liveStreamSync.sendRoomEvent(roomId, {
+      const handleUnload = () => {
+        const leaveEvt = {
+          _eid: `leave_${currentUser.handle}_${Date.now()}`,
           type: 'LIVE_LEAVE',
           streamerId: currentStreamer.id,
           user: {
             handle: currentUser.handle,
           },
-        });
+          timestamp: Date.now(),
+        };
+        liveStreamSync.sendRoomEvent(roomId, leaveEvt);
+      };
+
+      window.addEventListener('beforeunload', handleUnload);
+      window.addEventListener('pagehide', handleUnload);
+
+      return () => {
+        window.removeEventListener('beforeunload', handleUnload);
+        window.removeEventListener('pagehide', handleUnload);
+        handleUnload();
       };
     }
   }, [isHost, currentStreamer.id, currentStreamer.handle, currentUser.name, currentUser.handle, currentUser.avatar]);
@@ -290,7 +305,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [streamDurationSec, setStreamDurationSec] = useState(0);
-  const [liveViewersCount, setLiveViewersCount] = useState<number>(() => isRealStream ? (currentStreamer.viewersCount ?? 0) : (currentStreamer.viewersCount || 0));
+  const [liveViewersCount, setLiveViewersCount] = useState<number>(() => isHost ? 0 : Math.max(1, currentStreamer.viewersCount || 1));
   const [diamondsEarned, setDiamondsEarned] = useState<number>(() => isRealStream ? (currentStreamer.diamonds ?? 0) : 0);
   const [likesReceived, setLikesReceived] = useState<number>(() => isRealStream ? (currentStreamer.likesCount ?? 0) : (currentStreamer.likesCount || 0));
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
@@ -673,6 +688,8 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
   // Real-time room audience roster (Accurate, dynamic tracking of viewers)
   const [activeAudience, setActiveAudience] = useState<RoomViewer[]>([]);
+  const activeAudienceRef = useRef<RoomViewer[]>([]);
+  activeAudienceRef.current = activeAudience;
 
   // Fly-in Viewer Join Animation State (Banner flies in from left, stops, holds for 3.5s, then flies out)
   const [activeJoinBanner, setActiveJoinBanner] = useState<{
@@ -1847,16 +1864,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       setFloatingHearts((prev) => prev.filter((h) => h.id !== heart.id));
     }, 2200);
 
-    // Increment streamer likes count in real-time
+    const nextTotalLikes = likesReceivedRef.current + 1;
+    setLikesReceived(nextTotalLikes);
     const streamerId = currentStreamer.id;
-    setStreamerLikesMap((prev) => {
-      const current = prev[streamerId] ?? currentStreamer.likesCount;
-      return { ...prev, [streamerId]: current + 1 };
-    });
-    setLikesReceived((prev) => prev + 1);
+    setStreamerLikesMap((prev) => ({ ...prev, [streamerId]: nextTotalLikes }));
     setStreamers((prev) =>
       prev.map((s, idx) =>
-        idx === activeIndex ? { ...s, likesCount: s.likesCount + 1 } : s
+        idx === activeIndex ? { ...s, likesCount: nextTotalLikes } : s
       )
     );
 
@@ -1865,22 +1879,16 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
       const targetHandle = (currentStreamer.handle || currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
       const likePayload = {
+        _eid: `like_${currentUser.handle}_${Date.now()}_${Math.random()}`,
         type: 'LIVE_LIKE',
         streamerId: currentStreamer.id,
         targetHandle,
+        totalLikes: nextTotalLikes,
         x: posX,
         y: posY,
         color: heart.color,
       };
       liveStreamSync.sendRoomEvent(roomId, likePayload);
-      broadcastViaSupabase({
-        action: 'LIVE_LIKE',
-        roomId,
-        ...likePayload,
-      });
-      const bus = new BroadcastChannel('privity_sync_bus');
-      bus.postMessage(likePayload);
-      bus.close();
     } catch {}
   };
 
@@ -1901,22 +1909,12 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           setRemoteLiveFrame(evt.frame);
         }
       } else if (evt.type === 'LIVE_LIKE') {
-        const myHandle = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
-        const targetH = (evt.targetHandle || '').replace(/^@+/, '').toLowerCase().trim();
-        const myStreamId = (currentStreamer?.id || '').toLowerCase().trim();
-        const evtStreamId = (evt.streamerId || '').toLowerCase().trim();
-
-        // STRICT ISOLATION: Only render heart and increment count if like was targeted to ME!
-        const isForMe = targetH ? (targetH === myHandle) : (!evtStreamId || evtStreamId === myStreamId || evtStreamId === `stream-${myHandle}`);
-        if (!isForMe) return;
-
         const sid = currentStreamer.id;
-        setStreamerLikesMap((prev) => {
-          const current = prev[sid] ?? 0;
-          return { ...prev, [sid]: current + 1 };
-        });
+        const incomingLikes = typeof evt.totalLikes === 'number' ? evt.totalLikes : null;
+
         setLikesReceived((prev) => {
-          const nextLikes = prev + 1;
+          const nextLikes = incomingLikes !== null ? Math.max(prev, incomingLikes) : (prev + 1);
+          setStreamerLikesMap((m) => ({ ...m, [sid]: nextLikes }));
           if (isHost) {
             liveStreamSync.updateHostStats({ likesCount: nextLikes });
           }
@@ -1928,14 +1926,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         const stageHeight = stageRef.current ? stageRef.current.clientHeight : 700;
         const posX = evt.x !== undefined ? evt.x : stageWidth / 2 + (Math.random() * 80 - 40);
         const posY = evt.y !== undefined ? evt.y : stageHeight - 160;
-        const colors = ['#f43f5e', '#ec4899', '#a855f7', '#3b82f6', '#fbbf24'];
+        const colors = ['#f43f5e', '#ec4899', '#a855f7', '#3b82f6', '#fbbf24', '#10b981'];
         const heart = {
           id: Date.now() + Math.random(),
           x: posX,
           y: posY,
           color: evt.color || colors[Math.floor(Math.random() * colors.length)],
         };
-        setFloatingHearts((prev) => [...prev.slice(-15), heart]);
+        setFloatingHearts((prev) => [...prev.slice(-25), heart]);
         setTimeout(() => {
           setFloatingHearts((prev) => prev.filter((h) => h.id !== heart.id));
         }, 2200);
@@ -1945,13 +1943,18 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           return [...prev.slice(-35), evt.message];
         });
       } else if (evt.type === 'LIVE_JOIN' && evt.user) {
-        const userHandle = evt.user.handle || evt.user.name;
-        const userLevel = evt.user.level || getDeterministicLevel(userHandle);
+        const cleanViewerHandle = (evt.user.handle || evt.user.name || '').replace(/^@+/, '').toLowerCase().trim();
+        const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
 
-        // Trigger specular fly-in banner from left
+        // Host never counts themselves as a viewer
+        if (isHost && cleanViewerHandle === myClean) return;
+
+        const userLevel = evt.user.level || getDeterministicLevel(cleanViewerHandle);
+
+        // Always trigger specular fly-in banner from left for every join!
         triggerJoinFlyIn({
           name: evt.user.name,
-          handle: userHandle,
+          handle: cleanViewerHandle,
           avatar: evt.user.avatar,
           level: userLevel,
           badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
@@ -1960,7 +1963,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         const joinMsg: LiveMeChatMessage = {
           id: `join-${Date.now()}-${Math.random()}`,
           user: evt.user.name,
-          handle: userHandle,
+          handle: cleanViewerHandle,
           avatar: evt.user.avatar,
           level: userLevel,
           badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
@@ -1971,13 +1974,13 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         };
         setChatMessages((prev) => [...prev.slice(-35), joinMsg]);
 
-        // Add to active audience list
+        // Add to active audience list (tracked uniquely by handle)
         setActiveAudience((prev) => {
-          if (prev.some((v) => v.handle === userHandle)) return prev;
+          const filtered = prev.filter((v) => v.handle.replace(/^@+/, '').toLowerCase().trim() !== cleanViewerHandle);
           const newViewer: RoomViewer = {
             id: evt.user.id || `v_${Date.now()}`,
             name: evt.user.name,
-            handle: userHandle,
+            handle: evt.user.handle || cleanViewerHandle,
             avatar: evt.user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
             level: userLevel,
             badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
@@ -1985,21 +1988,22 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             contribution: 0,
             isFollowing: false,
           };
-          return [newViewer, ...prev];
-        });
+          const nextAudience = [newViewer, ...filtered];
+          const nextCount = nextAudience.length;
+          setLiveViewersCount(nextCount);
 
-        setLiveViewersCount((prev) => {
-          const nextCount = prev + 1;
           if (isHost) {
             showToastRef.current(`👋 ${evt.user.name} joined your live stream!`);
             immediateFrameCaptureRef.current?.();
             liveStreamSync.updateHostStats({ viewersCount: nextCount });
             liveStreamSync.sendRoomEvent(streamRoomId, {
+              _eid: `stats_${Date.now()}`,
               type: 'LIVE_STATS',
               count: nextCount,
               likes: likesReceivedRef.current,
               diamonds: diamondsEarnedRef.current,
               isPkBattleActive: isPkBattleActiveRef.current,
+              isCoHostConnected: isCoHostConnectedRef.current,
               pkRival: pkRivalRef.current,
               hostPkScore: hostPkScoreRef.current,
               rivalPkScore: rivalPkScoreRef.current,
@@ -2007,22 +2011,26 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               topContributors: roomContributorsRef.current,
             });
           }
-          return nextCount;
+          return nextAudience;
         });
       } else if (evt.type === 'LIVE_LEAVE') {
-        if (evt.user?.handle) {
-          setActiveAudience((prev) => prev.filter((v) => v.handle !== evt.user.handle));
-        }
-        setLiveViewersCount((prev) => {
-          const nextCount = Math.max(0, prev - 1);
+        const cleanViewerHandle = (evt.user?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        setActiveAudience((prev) => {
+          const nextAudience = cleanViewerHandle
+            ? prev.filter((v) => v.handle.replace(/^@+/, '').toLowerCase().trim() !== cleanViewerHandle)
+            : (prev.length > 0 ? prev.slice(1) : []);
+          const nextCount = nextAudience.length;
+          setLiveViewersCount(nextCount);
+
           if (isHost) {
             liveStreamSync.updateHostStats({ viewersCount: nextCount });
             liveStreamSync.sendRoomEvent(streamRoomId, {
+              _eid: `leave_count_${Date.now()}`,
               type: 'LIVE_VIEWER_COUNT',
               count: nextCount,
             });
           }
-          return nextCount;
+          return nextAudience;
         });
       } else if (evt.type === 'LIVE_VIEWER_COUNT' && typeof evt.count === 'number') {
         setLiveViewersCount(evt.count);
@@ -2037,13 +2045,17 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (typeof evt.diamonds === 'number') {
           setDiamondsEarned(evt.diamonds);
         }
+        if (evt.isCoHostConnected !== undefined) {
+          setIsCoHostConnected(Boolean(evt.isCoHostConnected));
+          isCoHostConnectedRef.current = Boolean(evt.isCoHostConnected);
+        }
+        if (evt.pkRival) {
+          setPkRival(evt.pkRival);
+          pkRivalRef.current = evt.pkRival;
+        }
         if (evt.isPkBattleActive) {
           setIsPkBattleActive(true);
           isPkBattleActiveRef.current = true;
-          if (evt.pkRival) {
-            setPkRival(evt.pkRival);
-            pkRivalRef.current = evt.pkRival;
-          }
           if (typeof evt.hostPkScore === 'number') setHostPkScore(evt.hostPkScore);
           if (typeof evt.rivalPkScore === 'number') setRivalPkScore(evt.rivalPkScore);
           if (typeof evt.battleRoundTimer === 'number') setBattleRoundTimer(evt.battleRoundTimer);
@@ -2551,23 +2563,28 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       if (!payload || payload.roomId !== roomId) return;
       if (payload.action === 'LIVE_LIKE') {
         const sid = currentStreamer.id;
-        setStreamerLikesMap((prev) => {
-          const current = prev[sid] ?? 0;
-          return { ...prev, [sid]: current + 1 };
+        const incomingLikes = typeof payload.totalLikes === 'number' ? payload.totalLikes : null;
+        setLikesReceived((prev) => {
+          const nextLikes = incomingLikes !== null ? Math.max(prev, incomingLikes) : (prev + 1);
+          setStreamerLikesMap((m) => ({ ...m, [sid]: nextLikes }));
+          if (isHost) {
+            liveStreamSync.updateHostStats({ likesCount: nextLikes });
+          }
+          return nextLikes;
         });
-        setLikesReceived((prev) => prev + 1);
 
         const stageWidth = stageRef.current ? stageRef.current.clientWidth : 440;
         const stageHeight = stageRef.current ? stageRef.current.clientHeight : 700;
         const posX = payload.x !== undefined ? payload.x : stageWidth / 2 + (Math.random() * 80 - 40);
         const posY = payload.y !== undefined ? payload.y : stageHeight - 160;
+        const colors = ['#f43f5e', '#ec4899', '#a855f7', '#3b82f6', '#fbbf24', '#10b981'];
         const heart = {
           id: Date.now() + Math.random(),
           x: posX,
           y: posY,
-          color: payload.color || '#f43f5e',
+          color: payload.color || colors[Math.floor(Math.random() * colors.length)],
         };
-        setFloatingHearts((prev) => [...prev.slice(-15), heart]);
+        setFloatingHearts((prev) => [...prev.slice(-25), heart]);
         setTimeout(() => {
           setFloatingHearts((prev) => prev.filter((h) => h.id !== heart.id));
         }, 2200);

@@ -1,6 +1,7 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { Peer } from 'peerjs';
 import { LiveMeStreamer } from '../components/liveme/types';
+import { broadcastViaSupabase, onSupabaseBroadcast } from './supabaseClient';
 
 export interface RemoteLiveStreamPayload {
   id: string;
@@ -76,15 +77,32 @@ class LiveStreamSyncService {
   private queryInterval: any = null;
   private broadcastBus: BroadcastChannel | null = null;
   private isConnecting = false;
+  private recentEventKeys: Set<string> = new Set();
 
   constructor() {
     this.loadEndedStreams();
     this.initBroadcastBus();
+    this.initSupabaseRealtime();
     this.initMqtt();
     this.startPruneLoop();
     this.startQueryLoop();
     this.loadCachedStreams();
     this.setupLifecycleListeners();
+  }
+
+  private initSupabaseRealtime() {
+    try {
+      onSupabaseBroadcast((payload: any) => {
+        if (!payload) return;
+        if (payload.action === 'ROOM_EVENT' && payload.streamId && payload.event) {
+          this.dispatchRoomEvent(payload.streamId, payload.event);
+        } else if (payload.action === 'STREAM_ACTIVE' && payload.stream) {
+          this.handleIncomingStream(payload.stream);
+        } else if (payload.action === 'STREAM_ENDED') {
+          this.handleStreamEnded(payload.streamId, payload.creatorHandle);
+        }
+      });
+    } catch {}
   }
 
   private loadEndedStreams() {
@@ -986,6 +1004,15 @@ class LiveStreamSyncService {
         this.mqttClient.publish(streamTopic, payload, { qos: 0, retain: false });
       } catch {}
     }
+
+    if (type === 'STREAM_ACTIVE') {
+      try {
+        broadcastViaSupabase({
+          action: 'STREAM_ACTIVE',
+          stream,
+        });
+      } catch {}
+    }
   }
 
   public stopHostBroadcast() {
@@ -1406,6 +1433,14 @@ class LiveStreamSyncService {
       });
     } catch {}
 
+    try {
+      broadcastViaSupabase({
+        action: 'ROOM_EVENT',
+        streamId: roomId,
+        event,
+      });
+    } catch {}
+
     this.dispatchRoomEvent(roomId, event);
   }
 
@@ -1453,6 +1488,25 @@ class LiveStreamSyncService {
   }
 
   private dispatchRoomEvent(streamId: string, event: any) {
+    if (!event) return;
+    const eventKey = event._eid || (
+      (event.type || '') + '_' +
+      streamId + '_' +
+      (event.user?.handle || event.senderHandle || '') + '_' +
+      (event.timestamp || '') + '_' +
+      (event.count ?? '') + '_' +
+      (event.delta ?? '')
+    );
+    if (eventKey && this.recentEventKeys.has(eventKey)) {
+      return;
+    }
+    if (eventKey) {
+      this.recentEventKeys.add(eventKey);
+      setTimeout(() => {
+        this.recentEventKeys.delete(eventKey);
+      }, 2500);
+    }
+
     const set = this.roomSubscribers.get(streamId);
     if (set) {
       set.forEach((cb) => {
