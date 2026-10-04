@@ -12665,6 +12665,13 @@ export function App() {
                   },
                 };
                 liveStreamSync.sendRoomEvent(cleanSenderH, acceptEvt);
+                const targetRoomId = (targetStreamer as any)?.handle ? (targetStreamer as any).handle.replace(/^@+/, '').toLowerCase().trim() : targetStreamer.id;
+                if (targetRoomId && targetRoomId !== cleanSenderH) {
+                  liveStreamSync.sendRoomEvent(targetRoomId, acceptEvt);
+                }
+                if (cleanMyH && cleanMyH !== cleanSenderH) {
+                  liveStreamSync.sendRoomEvent(cleanMyH, acceptEvt);
+                }
                 try {
                   const bus = new BroadcastChannel('privity_sync_bus');
                   bus.postMessage(acceptEvt);
@@ -12718,6 +12725,23 @@ export function App() {
             avatar: currentAuthUser?.avatar || myProfile.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
           }}
           onClose={(opts?: { wasEnded?: boolean; isHost?: boolean }) => {
+            const cleanMyH = (myProfile.handle || '').replace(/^@+/, '').toLowerCase().trim();
+            const discEvt = {
+              type: 'COHOST_DISCONNECTED',
+              senderHandle: `@${cleanMyH}`,
+            };
+            if (activeLiveStream?.id) {
+              liveStreamSync.sendRoomEvent(activeLiveStream.id, discEvt);
+              const targetHandle = ((activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '').replace(/^@+/, '').toLowerCase().trim();
+              if (targetHandle && targetHandle !== activeLiveStream.id) {
+                liveStreamSync.sendRoomEvent(targetHandle, discEvt);
+              }
+            }
+            try {
+              const bus = new BroadcastChannel('privity_sync_bus');
+              bus.postMessage(discEvt);
+              bus.close();
+            } catch {}
             setIsCoHostInviteAccepted(false);
             if (opts?.wasEnded || opts?.isHost || isHostBroadcasting) {
               // Live has ended or host is closing: NEVER minimize!
@@ -12756,6 +12780,23 @@ export function App() {
             setActiveLiveStream(null);
           }}
           onEndBroadcast={() => {
+            const cleanMyH = (myProfile.handle || '').replace(/^@+/, '').toLowerCase().trim();
+            const discEvt = {
+              type: 'COHOST_DISCONNECTED',
+              senderHandle: `@${cleanMyH}`,
+            };
+            if (activeLiveStream?.id) {
+              liveStreamSync.sendRoomEvent(activeLiveStream.id, discEvt);
+              const targetHandle = ((activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '').replace(/^@+/, '').toLowerCase().trim();
+              if (targetHandle && targetHandle !== activeLiveStream.id) {
+                liveStreamSync.sendRoomEvent(targetHandle, discEvt);
+              }
+            }
+            try {
+              const bus = new BroadcastChannel('privity_sync_bus');
+              bus.postMessage(discEvt);
+              bus.close();
+            } catch {}
             setIsCoHostInviteAccepted(false);
             if (activeLiveStream?.id) {
               const targetHandle = (activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '';

@@ -193,46 +193,6 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const roomContributorsRef = useRef(roomContributors);
   roomContributorsRef.current = roomContributors;
 
-  // Viewer join and leave room presence announcement
-  useEffect(() => {
-    if (!isHost) {
-      const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
-      const joinEvt = {
-        _eid: `join_${currentUser.handle}_${Date.now()}`,
-        type: 'LIVE_JOIN',
-        streamerId: currentStreamer.id,
-        user: {
-          name: currentUser.name,
-          handle: currentUser.handle,
-          avatar: currentUser.avatar,
-        },
-        timestamp: Date.now(),
-      };
-      liveStreamSync.sendRoomEvent(roomId, joinEvt);
-
-      const handleUnload = () => {
-        const leaveEvt = {
-          _eid: `leave_${currentUser.handle}_${Date.now()}`,
-          type: 'LIVE_LEAVE',
-          streamerId: currentStreamer.id,
-          user: {
-            handle: currentUser.handle,
-          },
-          timestamp: Date.now(),
-        };
-        liveStreamSync.sendRoomEvent(roomId, leaveEvt);
-      };
-
-      window.addEventListener('beforeunload', handleUnload);
-      window.addEventListener('pagehide', handleUnload);
-
-      return () => {
-        window.removeEventListener('beforeunload', handleUnload);
-        window.removeEventListener('pagehide', handleUnload);
-        handleUnload();
-      };
-    }
-  }, [isHost, currentStreamer.id, currentStreamer.handle, currentUser.name, currentUser.handle, currentUser.avatar]);
 
   // Cross-tab live frame sync fallback
   useEffect(() => {
@@ -766,10 +726,21 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       handle: user.handle,
       avatar: user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120',
       level: user.level || getDeterministicLevel(user.handle),
-      badge: user.badge || 'Fan ⭐',
+      badge: user.badge || (user.level && user.level >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐'),
     };
-    joinBannerQueueRef.current.push(entry);
-  }, []);
+    if (!activeJoinBanner && joinBannerQueueRef.current.length === 0) {
+      setActiveJoinBanner(entry);
+      if (joinBannerTimeoutRef.current) clearTimeout(joinBannerTimeoutRef.current);
+      joinBannerTimeoutRef.current = setTimeout(() => {
+        setActiveJoinBanner((prev) => (prev ? { ...prev, isExiting: true } : null));
+        setTimeout(() => {
+          setActiveJoinBanner(null);
+        }, 400);
+      }, 3400);
+    } else {
+      joinBannerQueueRef.current.push(entry);
+    }
+  }, [activeJoinBanner]);
 
   // Process join banner queue
   useEffect(() => {
@@ -1383,20 +1354,209 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [selectedGiftId, setSelectedGiftId] = useState<string>('rose');
   const [selectedCombo, setSelectedCombo] = useState<number>(1);
 
-  // Chat state (starts clean with system welcome, no fake audience or simulated comments)
-  const [chatMessages, setChatMessages] = useState<LiveMeChatMessage[]>([
-    {
-      id: 'welcome-sys',
-      user: 'Privity Live',
-      handle: 'privity',
-      level: 0,
-      text: '🔴 Live broadcast started. Tap the screen for hearts ♥ or say hello!',
-      isSystem: true,
-      timestamp: Date.now(),
-    },
-  ]);
+  // Chat state with permanent localStorage persistence per room ID
+  const [chatMessages, setChatMessages] = useState<LiveMeChatMessage[]>(() => {
+    try {
+      const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      const saved = localStorage.getItem(`privity_live_chat_${canonicalRoom}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return [
+      {
+        id: 'welcome-sys',
+        user: 'Privity Live',
+        handle: 'privity',
+        level: 0,
+        text: '🔴 Live broadcast started. Tap the screen for hearts ♥ or say hello!',
+        isSystem: true,
+        timestamp: Date.now(),
+      },
+    ];
+  });
   const [chatInput, setChatInput] = useState('');
   const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-persist chat messages for this room
+  useEffect(() => {
+    try {
+      const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      if (chatMessages && chatMessages.length > 0) {
+        localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(chatMessages.slice(-80)));
+      }
+    } catch {}
+  }, [chatMessages, currentStreamer.handle, currentStreamer.id]);
+
+  // Viewer join presence, flying badge swoosh, and join chat notice
+  useEffect(() => {
+    if (!isHost) {
+      const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      const userLevel = getDeterministicLevel(currentUser.handle);
+
+      // 1. Immediately trigger the spectator's own flying banner and badge on entry!
+      triggerJoinFlyIn({
+        name: currentUser.name,
+        handle: currentUser.handle,
+        avatar: currentUser.avatar,
+        level: userLevel,
+        badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
+      });
+
+      // 2. Add local join notification in chat stream
+      const joinMsg: LiveMeChatMessage = {
+        id: `join-${Date.now()}-${Math.random()}`,
+        user: currentUser.name,
+        handle: (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim(),
+        avatar: currentUser.avatar,
+        level: userLevel,
+        badge: userLevel >= 40 ? 'VIP Fan 🏆' : 'Fan ⭐',
+        text: 'joined the live room 👋',
+        isSystem: true,
+        isJoin: true,
+        timestamp: Date.now(),
+      };
+      setChatMessages((prev) => {
+        const next = [...prev.slice(-49), joinMsg];
+        try {
+          localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(next.slice(-80)));
+        } catch {}
+        return next;
+      });
+
+      // 3. Audio chime for fly-in banner
+      try {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.12);
+        osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.38);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } catch {}
+
+      // 4. Send LIVE_JOIN to room & sync bus
+      const joinEvt = {
+        _eid: `join_${currentUser.handle}_${Date.now()}`,
+        type: 'LIVE_JOIN',
+        streamerId: currentStreamer.id,
+        user: {
+          name: currentUser.name,
+          handle: currentUser.handle,
+          avatar: currentUser.avatar,
+          level: userLevel,
+        },
+        timestamp: Date.now(),
+      };
+      liveStreamSync.sendRoomEvent(canonicalRoom, joinEvt);
+      if (currentStreamer.id && currentStreamer.id !== canonicalRoom) {
+        liveStreamSync.sendRoomEvent(currentStreamer.id, joinEvt);
+      }
+      try {
+        const bus = new BroadcastChannel('privity_sync_bus');
+        bus.postMessage(joinEvt);
+        bus.close();
+      } catch {}
+
+      const handleUnload = () => {
+        const leaveEvt = {
+          _eid: `leave_${currentUser.handle}_${Date.now()}`,
+          type: 'LIVE_LEAVE',
+          streamerId: currentStreamer.id,
+          user: {
+            handle: currentUser.handle,
+          },
+          timestamp: Date.now(),
+        };
+        liveStreamSync.sendRoomEvent(canonicalRoom, leaveEvt);
+        if (currentStreamer.id && currentStreamer.id !== canonicalRoom) {
+          liveStreamSync.sendRoomEvent(currentStreamer.id, leaveEvt);
+        }
+        try {
+          const bus = new BroadcastChannel('privity_sync_bus');
+          bus.postMessage(leaveEvt);
+          bus.close();
+        } catch {}
+
+        if (isCoHostConnectedRef.current) {
+          const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          const cleanRivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          const discEvt = {
+            type: 'COHOST_DISCONNECTED',
+            senderHandle: `@${cleanMyH}`,
+            targetHandle: cleanRivalH,
+          };
+          liveStreamSync.sendRoomEvent(canonicalRoom, discEvt);
+          if (cleanRivalH && cleanRivalH !== cleanMyH) {
+            liveStreamSync.sendRoomEvent(cleanRivalH, discEvt);
+          }
+        }
+      };
+
+      window.addEventListener('beforeunload', handleUnload);
+      window.addEventListener('pagehide', handleUnload);
+
+      return () => {
+        window.removeEventListener('beforeunload', handleUnload);
+        window.removeEventListener('pagehide', handleUnload);
+        handleUnload();
+      };
+    }
+  }, [isHost, currentStreamer.id, currentStreamer.handle, currentUser.name, currentUser.handle, currentUser.avatar, triggerJoinFlyIn]);
+
+  // Clean Co-Host disconnect helper (used whenever leaving or ending)
+  const broadcastCohostDisconnect = useCallback(() => {
+    if (!isCoHostConnectedRef.current) return;
+    const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
+    const cleanRivalH = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+    const discEvt = {
+      type: 'COHOST_DISCONNECTED',
+      senderHandle: `@${cleanMyH}`,
+      targetHandle: cleanRivalH,
+    };
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    liveStreamSync.sendRoomEvent(roomId, discEvt);
+    if (cleanRivalH && cleanRivalH !== cleanMyH) {
+      liveStreamSync.sendRoomEvent(cleanRivalH, discEvt);
+    }
+    if (currentStreamer.id && currentStreamer.id !== roomId) {
+      liveStreamSync.sendRoomEvent(currentStreamer.id, discEvt);
+    }
+    try {
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage(discEvt);
+      bus.close();
+    } catch {}
+  }, [currentUser.handle, currentStreamer.handle, currentStreamer.id]);
+
+  // Global unload listener for host/co-host disconnect synchronization
+  useEffect(() => {
+    const handleGlobalUnload = () => {
+      broadcastCohostDisconnect();
+    };
+    window.addEventListener('beforeunload', handleGlobalUnload);
+    window.addEventListener('pagehide', handleGlobalUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleGlobalUnload);
+      window.removeEventListener('pagehide', handleGlobalUnload);
+      broadcastCohostDisconnect();
+    };
+  }, [broadcastCohostDisconnect]);
+
+  // Handle arena close with guaranteed co-host disconnect broadcast
+  const handleArenaClose = useCallback((opts?: { wasEnded?: boolean; isHost?: boolean }) => {
+    broadcastCohostDisconnect();
+    onClose(opts);
+  }, [broadcastCohostDisconnect, onClose]);
 
   // 1. HARDWARE WEBCAM & MEDIA STREAM CONNECTION ENGINE (MOBILE COMPATIBLE - NO FLICKER)
   useEffect(() => {
@@ -1715,13 +1875,32 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (d.type === 'PK_BATTLE_REQUEST') {
           const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
           const targetH = (d.targetHandle || '').replace(/^@+/, '').toLowerCase().trim();
-          if (targetH === myClean || (!targetH && isCoHostConnectedRef.current)) {
+          const senderH = (d.senderHandle || '').replace(/^@+/, '').toLowerCase().trim();
+          const rivalClean = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+          if (senderH !== myClean && (targetH === myClean || !targetH || senderH === rivalClean || isCoHostConnectedRef.current)) {
             setIncomingBattleRequest({
               senderName: d.senderName || 'Co-Host',
               senderHandle: (d.senderHandle || '@host').replace(/^@+/, ''),
               senderAvatar: d.senderAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
               duration: d.duration || 180,
             });
+            try {
+              const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.type = 'triangle';
+              osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+              osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+              gain.gain.setValueAtTime(0.4, ctx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.start();
+              osc.stop(ctx.currentTime + 0.32);
+            } catch {}
+            if (navigator.vibrate) {
+              try { navigator.vibrate([80, 40, 80]); } catch {}
+            }
             showToastRef.current(`🥊 @${(d.senderHandle || 'Co-Host').replace(/^@+/, '')} challenged you to a PK Battle!`);
           }
         } else if (d.type === 'PK_BATTLE_CANCEL') {
@@ -1857,12 +2036,12 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         else if (isCoinGamesOpen) setIsCoinGamesOpen(false);
         else if (isGiftTrayOpen) setIsGiftTrayOpen(false);
         else if (isHost) setIsConfirmEndOpen(true);
-        else onClose();
+        else handleArenaClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleNextStream, handlePrevStream, isSummaryOpen, isConfirmEndOpen, isRechargeOpen, isCoinGamesOpen, isGiftTrayOpen, isHost, onClose]);
+  }, [handleNextStream, handlePrevStream, isSummaryOpen, isConfirmEndOpen, isRechargeOpen, isCoinGamesOpen, isGiftTrayOpen, isHost, handleArenaClose]);
 
   // Synthesize lightweight organic pop sound via Web Audio API (0ms latency, zero assets)
   const playPopSound = useCallback(() => {
@@ -1996,7 +2175,12 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       } else if (evt.type === 'LIVE_CHAT' && evt.message) {
         setChatMessages((prev) => {
           if (prev.some((m) => m.id === evt.message.id)) return prev;
-          return [...prev.slice(-35), evt.message];
+          const next = [...prev.slice(-49), evt.message];
+          try {
+            const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+            localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(next.slice(-80)));
+          } catch {}
+          return next;
         });
       } else if (evt.type === 'LIVE_JOIN' && evt.user) {
         const cleanViewerHandle = (evt.user.handle || evt.user.name || '').replace(/^@+/, '').toLowerCase().trim();
@@ -2004,6 +2188,9 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
 
         // Host never counts themselves as a viewer
         if (isHost && cleanViewerHandle === myClean) return;
+
+        // If spectator themselves just joined, avoid duplicate trigger since triggered locally
+        if (!isHost && cleanViewerHandle === myClean) return;
 
         const userLevel = evt.user.level || getDeterministicLevel(cleanViewerHandle);
 
@@ -2122,13 +2309,32 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       } else if (evt.type === 'PK_BATTLE_REQUEST') {
         const myClean = (currentUser?.handle || '').replace(/^@+/, '').toLowerCase().trim();
         const targetH = (evt.targetHandle || '').replace(/^@+/, '').toLowerCase().trim();
-        if (targetH === myClean || (!targetH && isCoHostConnectedRef.current)) {
+        const senderH = (evt.senderHandle || '').replace(/^@+/, '').toLowerCase().trim();
+        const rivalClean = (pkRivalRef.current?.handle || '').replace(/^@+/, '').toLowerCase().trim();
+        if (senderH !== myClean && (targetH === myClean || !targetH || senderH === rivalClean || isCoHostConnectedRef.current)) {
           setIncomingBattleRequest({
             senderName: evt.senderName || 'Co-Host',
             senderHandle: (evt.senderHandle || '@host').replace(/^@+/, ''),
             senderAvatar: evt.senderAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
             duration: evt.duration || 180,
           });
+          try {
+            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+            gain.gain.setValueAtTime(0.4, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.32);
+          } catch {}
+          if (navigator.vibrate) {
+            try { navigator.vibrate([80, 40, 80]); } catch {}
+          }
           showToastRef.current(`🥊 @${(evt.senderHandle || 'Co-Host').replace(/^@+/, '')} challenged you to a PK Battle!`);
         }
       } else if (evt.type === 'PK_BATTLE_CANCEL') {
@@ -2254,7 +2460,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             if (remaining <= 0) {
               clearInterval(interval);
               setIsLiveEndedOverlayOpen(false);
-              onClose({ wasEnded: true, isHost: false });
+              handleArenaClose({ wasEnded: true, isHost: false });
             }
           }, 1000);
         }
@@ -2283,7 +2489,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (currentUser.handle.toLowerCase() === evt.handle.toLowerCase()) {
           showToastRef.current('👢 You were removed from this live broadcast by the host.');
           setTimeout(() => {
-            onClose({ wasEnded: true, isHost: false });
+            handleArenaClose({ wasEnded: true, isHost: false });
           }, 1500);
         }
         setLiveViewersCount((prev) => Math.max(0, prev - 1));
@@ -2291,7 +2497,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         if (currentUser.handle.toLowerCase() === evt.handle.toLowerCase()) {
           showToastRef.current('🚫 You have been blocked from this live broadcast.');
           setTimeout(() => {
-            onClose({ wasEnded: true, isHost: false });
+            handleArenaClose({ wasEnded: true, isHost: false });
           }, 1200);
         }
         setLiveViewersCount((prev) => Math.max(0, prev - 1));
@@ -2939,26 +3145,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   };
 
   const handleDisconnectCoHost = () => {
-    const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
-    const cleanRivalH = (pkRivalRef.current?.handle || pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
-
-    const discEvt = {
-      type: 'COHOST_DISCONNECTED',
-      senderHandle: `@${cleanMyH}`,
-      targetHandle: cleanRivalH,
-    };
-
-    const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-    liveStreamSync.sendRoomEvent(roomId, discEvt);
-    if (cleanRivalH && cleanRivalH !== cleanMyH) {
-      liveStreamSync.sendRoomEvent(cleanRivalH, discEvt);
-    }
-    try {
-      const bus = new BroadcastChannel('privity_sync_bus');
-      bus.postMessage(discEvt);
-      bus.close();
-    } catch {}
-
+    broadcastCohostDisconnect();
     setIsCoHostConnected(false);
     isCoHostConnectedRef.current = false;
     setIsPkBattleActive(false);
@@ -3025,7 +3212,14 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       },
     };
 
+    const streamRoomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
     liveStreamSync.sendRoomEvent(cleanSenderH, acceptEvt);
+    if (streamRoomId && streamRoomId !== cleanSenderH) {
+      liveStreamSync.sendRoomEvent(streamRoomId, acceptEvt);
+    }
+    if (cleanMyH && cleanMyH !== cleanSenderH) {
+      liveStreamSync.sendRoomEvent(cleanMyH, acceptEvt);
+    }
     try {
       const bus = new BroadcastChannel('privity_sync_bus');
       bus.postMessage(acceptEvt);
@@ -3242,15 +3436,34 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       timestamp: Date.now(),
     };
 
-    setChatMessages((prev) => [...prev, newMsg]);
+    setChatMessages((prev) => {
+      const next = [...prev, newMsg];
+      try {
+        const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+        localStorage.setItem(`privity_live_chat_${canonicalRoom}`, JSON.stringify(next.slice(-80)));
+      } catch {}
+      return next;
+    });
     spawnHeartReaction();
 
     try {
-      const roomId = currentStreamer.id || getRoomIdFromHandle(currentUser.handle);
-      liveStreamSync.sendRoomEvent(roomId, {
+      const canonicalRoom = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+      liveStreamSync.sendRoomEvent(canonicalRoom, {
         type: 'LIVE_CHAT',
         message: newMsg,
       });
+      if (currentStreamer.id && currentStreamer.id !== canonicalRoom) {
+        liveStreamSync.sendRoomEvent(currentStreamer.id, {
+          type: 'LIVE_CHAT',
+          message: newMsg,
+        });
+      }
+      const bus = new BroadcastChannel('privity_sync_bus');
+      bus.postMessage({
+        type: 'LIVE_CHAT',
+        message: newMsg,
+      });
+      bus.close();
     } catch {}
   };
 
@@ -4056,7 +4269,24 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 )}
 
                 {/* Rival / Co-Host Video & Real-Time Audio */}
-                {remoteCoHostStream ? (
+                {(!isHost && localStreamRef.current) ? (
+                  <video
+                    ref={(node) => {
+                      if (node && node.srcObject !== localStreamRef.current) {
+                        node.srcObject = localStreamRef.current;
+                        node.setAttribute('playsinline', 'true');
+                        node.setAttribute('webkit-playsinline', 'true');
+                        node.muted = true;
+                        node.play().catch(() => {});
+                      }
+                    }}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="liveme-pk-video-layer"
+                    style={{ objectFit: 'cover', width: '100%', height: '100%' }}
+                  />
+                ) : remoteCoHostStream ? (
                   <>
                     <video
                       ref={(node) => {
@@ -4115,16 +4345,30 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                     style={{ objectFit: 'cover', width: '100%', height: '100%' }}
                   />
                 ) : (
-                  <div className="liveme-cohost-connecting-box">
+                  <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
                     <img
-                      src={pkRival.avatar || pkRival.posterUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200'}
+                      src={pkRival.avatar || pkRival.posterUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400'}
                       alt={pkRival.name}
-                      style={{ width: '74px', height: '74px', borderRadius: '50%', border: '3px solid #06b6d4', objectFit: 'cover', marginBottom: '10px' }}
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', filter: 'brightness(0.92)' }}
                     />
-                    <div style={{ color: '#fff', fontWeight: 700, fontSize: '13px' }}>@{pkRival.handle.replace(/^@+/, '')}</div>
-                    <div style={{ color: '#06b6d4', fontSize: '11px', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className="liveme-cohost-status-dot" style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#06b6d4' }} />
-                      <span>Connecting live feed...</span>
+                    <div style={{
+                      position: 'absolute',
+                      top: 12,
+                      right: 12,
+                      background: 'rgba(239, 68, 68, 0.9)',
+                      color: '#ffffff',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      padding: '3px 8px',
+                      borderRadius: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      boxShadow: '0 2px 8px rgba(239, 68, 68, 0.4)',
+                      letterSpacing: '0.5px',
+                    }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ffffff', animation: 'pulse 1.2s infinite' }} />
+                      LIVE
                     </div>
                   </div>
                 )}
@@ -4132,16 +4376,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                 {/* Bottom Right Streamer Tag with Follow Pill */}
                 <div
                   className="liveme-pk-streamer-tag right"
-                  onClick={() => handleOpenUserProfile(pkRival.handle, { name: pkRival.name, avatar: pkRival.avatar })}
+                  onClick={() => handleOpenUserProfile(
+                    !isHost ? currentUser.handle : pkRival.handle,
+                    !isHost ? { name: currentUser.name, avatar: currentUser.avatar } : { name: pkRival.name, avatar: pkRival.avatar }
+                  )}
                   style={{ cursor: 'pointer' }}
                 >
-                  <span>@{pkRival.handle.replace(/^@+/, '')}</span>
+                  <span>@{(!isHost ? currentUser.handle : pkRival.handle).replace(/^@+/, '')}</span>
                   <button
                     type="button"
                     className="liveme-pk-follow-plus"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleToggleFollow(pkRival.handle);
+                      handleToggleFollow(!isHost ? currentUser.handle : pkRival.handle);
                     }}
                   >
                     +
@@ -4247,49 +4494,6 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               </div>
             )}
 
-            {/* Incoming PK Battle Challenge Card (Handshake Accept / Decline Prompt) */}
-            {incomingBattleRequest && (
-              <div className="liveme-battle-challenge-overlay">
-                <div className="liveme-battle-challenge-card">
-                  <div className="liveme-battle-challenge-header">
-                    <span className="liveme-battle-icon-anim">⚔️</span>
-                    <h3>PK Battle Challenge!</h3>
-                  </div>
-                  <div className="liveme-battle-challenge-body">
-                    <img
-                      src={incomingBattleRequest.senderAvatar}
-                      alt={incomingBattleRequest.senderName}
-                      className="liveme-battle-challenger-avatar"
-                    />
-                    <div className="liveme-battle-challenger-info">
-                      <strong>{incomingBattleRequest.senderName}</strong>
-                      <span>@{incomingBattleRequest.senderHandle}</span>
-                    </div>
-                    <p className="liveme-battle-challenge-text">
-                      Challenged you to a 3-Minute Live PK Battle! Are you ready to compete?
-                    </p>
-                  </div>
-                  <div className="liveme-battle-challenge-actions">
-                    <button
-                      type="button"
-                      className="liveme-battle-accept-btn"
-                      onClick={handleAcceptBattleRequest}
-                    >
-                      <span>🥊</span>
-                      <span>Accept Match</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="liveme-battle-decline-btn"
-                      onClick={handleDeclineBattleRequest}
-                    >
-                      <span>✕</span>
-                      <span>Decline</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -4522,7 +4726,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               <button
                 type="button"
                 className="liveme-close-btn liveme-min-pip-btn"
-                onClick={() => onClose({ wasEnded: false, isHost: false })}
+                onClick={() => handleArenaClose({ wasEnded: false, isHost: false })}
                 title="Minimize to Picture-in-Picture"
                 aria-label="Minimize to Picture-in-Picture"
                 style={{ marginRight: '6px', fontSize: '15px' }}
@@ -4550,7 +4754,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               <button
                 type="button"
                 className="liveme-close-btn"
-                onClick={() => onClose({ wasEnded: false, isHost: false })}
+                onClick={() => handleArenaClose({ wasEnded: false, isHost: false })}
                 title="Close Stream"
                 aria-label="Close Stream"
                 style={{ fontSize: '18px', width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
@@ -5652,6 +5856,52 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
       )}
 
       {/* ================================================================ */}
+      {/* 9D. INCOMING PK BATTLE CHALLENGE CARD (ROOT MODAL LAYER)         */}
+      {/* ================================================================ */}
+      {incomingBattleRequest && (
+        <div className="liveme-battle-challenge-overlay">
+          <div className="liveme-battle-challenge-card">
+            <div className="liveme-battle-challenge-header">
+              <span className="liveme-battle-icon-anim">⚔️</span>
+              <h3>PK Battle Challenge!</h3>
+            </div>
+            <div className="liveme-battle-challenge-body">
+              <img
+                src={incomingBattleRequest.senderAvatar}
+                alt={incomingBattleRequest.senderName}
+                className="liveme-battle-challenger-avatar"
+              />
+              <div className="liveme-battle-challenger-info">
+                <strong>{incomingBattleRequest.senderName}</strong>
+                <span>@{incomingBattleRequest.senderHandle}</span>
+              </div>
+              <p className="liveme-battle-challenge-text">
+                Challenged you to a 3-Minute Live PK Battle! Are you ready to compete?
+              </p>
+            </div>
+            <div className="liveme-battle-challenge-actions">
+              <button
+                type="button"
+                className="liveme-battle-accept-btn"
+                onClick={handleAcceptBattleRequest}
+              >
+                <span>🥊</span>
+                <span>Accept Match</span>
+              </button>
+              <button
+                type="button"
+                className="liveme-battle-decline-btn"
+                onClick={handleDeclineBattleRequest}
+              >
+                <span>✕</span>
+                <span>Decline</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================ */}
       {/* 10. AUTHENTIC LIVEME RECHARGE MODAL                              */}
       {/* ================================================================ */}
       <LiveMeRechargeModal
@@ -5779,7 +6029,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                     followersGained: Math.floor(liveViewersCount * 0.12),
                   });
                 }
-                onClose({ wasEnded: true, isHost: true });
+                handleArenaClose({ wasEnded: true, isHost: true });
               }}
             >
               Done & Return to Feed
@@ -5961,7 +6211,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             <button
               type="button"
               className="liveme-ended-close-now-btn"
-              onClick={() => onClose({ wasEnded: true, isHost: false })}
+              onClick={() => handleArenaClose({ wasEnded: true, isHost: false })}
             >
               Exit Now
             </button>
