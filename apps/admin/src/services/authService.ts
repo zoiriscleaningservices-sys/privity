@@ -242,7 +242,9 @@ class AuthService {
         localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(user));
         // Also sync to accounts
         const accounts = this.getAllAccounts();
-        accounts[user.handle.toLowerCase()] = user;
+        if (user.handle) {
+          accounts[user.handle.toLowerCase()] = user;
+        }
         this.saveAccounts(accounts);
 
         // Broadcast to all active tabs and global Supabase peers in real time
@@ -256,7 +258,7 @@ class AuthService {
         const sb = getSupabaseClient();
         if (sb) {
           const profilePayload: any = {
-            handle: user.handle.toLowerCase(),
+            handle: (user.handle || '').toLowerCase(),
             name: user.name,
             email: user.email,
             avatar: user.avatar,
@@ -502,7 +504,7 @@ class AuthService {
     const accounts = this.getAllAccounts();
 
     const found = Object.values(accounts).find(
-      (a) => a.handle.toLowerCase() === clean || a.email.toLowerCase() === clean
+      (a) => (a?.handle || '').toLowerCase() === clean || (a?.email || '').toLowerCase() === clean
     );
 
     if (found) {

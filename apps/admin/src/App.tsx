@@ -74,6 +74,9 @@ import { AuthModal } from './components/auth';
 import { convertVideoToAnimatedLoop, isKnownVideoUrl, extractVideoThumbnail } from './services/videoMediaHelper';
 import { storePostMedia, getFreshMediaUrl, clearAllMediaBlobs } from './services/mediaDb';
 
+// Privity LIVE Studio & Interactive Simulator
+const LiveLab = React.lazy(() => import('./live/dev/LiveLab').then((m) => ({ default: m.LiveLab })));
+
 export const BANNED_MOCK_HANDLES = new Set([
   'elena_rodriguez',
   'marcus_dev',
@@ -886,6 +889,16 @@ export function App() {
   };
 
   // 0. Persistent Active Section / Tab (stays on current section upon refresh)
+  const isLiveLabHash = (): boolean => {
+    try {
+      const h = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      return ['live-lab', 'live-sim', 'live-v2', 'live-studio', 'live', 'studio', 'battle'].includes(h);
+    } catch {
+      return false;
+    }
+  };
+
+  const [liveLabActive, setLiveLabActive] = useState<boolean>(isLiveLabHash);
   const getInitialActiveTab = (): 'feed' | 'discover' | 'messages' | 'activity' | 'profile' | 'safety' => {
     try {
       const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
@@ -1253,7 +1266,9 @@ export function App() {
   useEffect(() => {
     safeSaveStorage('privity_active_tab_v5', activeTab);
     try {
-      if (window.location.hash.replace(/^#\/?/, '').toLowerCase() !== activeTab) {
+      const curH = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (['live-lab', 'live-sim', 'live-v2', 'live-studio', 'live', 'studio', 'battle'].includes(curH)) return;
+      if (curH !== activeTab) {
         window.location.hash = activeTab;
       }
     } catch (e) {}
@@ -1262,6 +1277,11 @@ export function App() {
   useEffect(() => {
     const handleHash = () => {
       const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (['live-lab', 'live-sim', 'live-v2', 'live-studio', 'live', 'studio', 'battle'].includes(hash)) {
+        setLiveLabActive(true);
+        return;
+      }
+      setLiveLabActive(false);
       if (['feed', 'discover', 'messages', 'activity', 'profile', 'safety'].includes(hash)) {
         setActiveTab(hash as any);
         if (hash === 'messages') {
@@ -7360,10 +7380,65 @@ export function App() {
     return sorted;
   }, [posts]);
 
+  if (liveLabActive && LiveLab) {
+    return (
+      <React.Suspense
+        fallback={
+          <div
+            style={{
+              background: '#030407',
+              color: '#ffffff',
+              height: '100vh',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            Loading Privity LIVE Studio...
+          </div>
+        }
+      >
+        <LiveLab />
+      </React.Suspense>
+    );
+  }
+
   // MANDATORY AUTHENTICATION WALL: Nobody can view anything unless logged in
   if (!currentAuthUser) {
     return (
-      <div style={{ minHeight: '100vh', width: '100vw', background: '#060813', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+      <div style={{ minHeight: '100vh', width: '100vw', background: '#060813', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: '20px' }}>
+        {/* Instant Access to LIVE Studio without needing login */}
+        <div style={{ position: 'fixed', top: '24px', zIndex: 99999, display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => {
+              window.location.hash = 'live-lab';
+              setLiveLabActive(true);
+            }}
+            style={{
+              background: 'linear-gradient(135deg, #ec4899, #8b5cf6)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '999px',
+              padding: '12px 24px',
+              fontSize: '14px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 8px 28px rgba(236,72,153,0.45)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '10px',
+              letterSpacing: '-0.01em',
+              transition: 'transform 0.15s ease',
+            }}
+            title="Open Privity LIVE Studio (Interactive Stage 3 Simulator)"
+          >
+            <span style={{ fontSize: '18px' }}>🎙️</span>
+            <span>Launch Privity LIVE Studio (Interactive Demo &amp; Battle Arena)</span>
+            <span style={{ opacity: 0.8, fontSize: '16px' }}>→</span>
+          </button>
+        </div>
         {toastMsg && (
           <div className="apple-glass-toast">
             <div className="glass-toast-dot" />
@@ -7520,6 +7595,19 @@ export function App() {
           >
             <span className="nav-icon-wrap"><IconShield size={21} /></span>
             <span>Safety & Reports</span>
+          </button>
+
+          <button
+            className={`nav-link-btn ${liveLabActive ? 'active' : ''}`}
+            onClick={() => {
+              window.location.hash = 'live-lab';
+              setLiveLabActive(true);
+            }}
+            title="Open Privity LIVE Studio (Interactive Stage 3 Simulator & Battle)"
+          >
+            <span className="nav-icon-wrap"><IconFeedStream size={21} /></span>
+            <span>LIVE Studio</span>
+            <span className="nav-badge-pill" style={{ background: 'linear-gradient(135deg, #ec4899, #8b5cf6)', color: '#fff', fontWeight: 800 }}>LIVE</span>
           </button>
         </nav>
 
@@ -7930,6 +8018,40 @@ export function App() {
 
             {/* Circles & Stories Rail */}
             <div className="circles-story-rail">
+              {/* Privity LIVE Studio Spotlight Bubble */}
+              <div
+                className="circle-unit live-story-unit"
+                onClick={() => {
+                  window.location.hash = 'live-lab';
+                  setLiveLabActive(true);
+                }}
+                title="Launch Privity LIVE Studio (Interactive Stage 3 Simulator & Battle)"
+                style={{ cursor: 'pointer' }}
+              >
+                <div className="circle-halo-ring live-pulsing-halo" style={{ background: 'linear-gradient(135deg, #ec4899, #8b5cf6)', padding: '2px' }}>
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      borderRadius: '50%',
+                      background: '#0a0d1d',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '22px',
+                    }}
+                  >
+                    🎙️
+                  </div>
+                  <div className="circle-live-pill-tag" style={{ background: 'linear-gradient(135deg, #ec4899, #8b5cf6)', color: '#fff', fontWeight: 800 }}>
+                    STUDIO 🔴
+                  </div>
+                </div>
+                <span className="circle-tag-name" style={{ color: '#ec4899', fontWeight: 800 }}>
+                  LIVE Studio
+                </span>
+              </div>
+
               {/* Active Real-Time Live Broadcasts Across Devices (At very start of rail) */}
               {networkLiveStreamers.map((liveStream) => (
                 <div
