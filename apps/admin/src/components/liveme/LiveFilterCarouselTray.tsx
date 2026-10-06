@@ -90,6 +90,46 @@ export const LIVE_FILTERS: FilterPreset[] = [
     icon: '🃏',
     emoji: '💚',
   },
+  {
+    id: 'stage3-warm',
+    name: 'Warm Glow',
+    cssFilter: 'sepia(0.25) saturate(1.25) contrast(1.10) brightness(1.05)',
+    previewColor: '#f97316',
+    icon: '🔥',
+    emoji: '🌅',
+  },
+  {
+    id: 'stage3-cool',
+    name: 'Cool Dusk',
+    cssFilter: 'hue-rotate(190deg) saturate(1.15) contrast(1.08) brightness(0.98)',
+    previewColor: '#0ea5e9',
+    icon: '❄️',
+    emoji: '🌊',
+  },
+  {
+    id: 'stage3-cinematic',
+    name: 'Cinematic Noir',
+    cssFilter: 'contrast(1.30) brightness(0.95) saturate(0.85) sepia(0.10)',
+    previewColor: '#475569',
+    icon: '🎥',
+    emoji: '🎬',
+  },
+  {
+    id: 'stage3-vivid',
+    name: 'Vivid Pop',
+    cssFilter: 'saturate(1.45) contrast(1.20) brightness(1.06)',
+    previewColor: '#e11d48',
+    icon: '💥',
+    emoji: '🌈',
+  },
+  {
+    id: 'stage3-vintage',
+    name: 'Matte Vintage',
+    cssFilter: 'sepia(0.18) contrast(0.95) brightness(1.08) saturate(1.10)',
+    previewColor: '#d97706',
+    icon: '🎞️',
+    emoji: '📻',
+  },
 ];
 
 export interface LiveFilterCarouselTrayProps {
@@ -99,6 +139,7 @@ export interface LiveFilterCarouselTrayProps {
   onSelectFilter: (filter: FilterPreset) => void;
   onToggleFullscreen?: () => void;
   showToast: (msg: string) => void;
+  onOpenProFilters?: () => void;
 }
 
 export const LiveFilterCarouselTray: React.FC<LiveFilterCarouselTrayProps> = ({
@@ -108,6 +149,7 @@ export const LiveFilterCarouselTray: React.FC<LiveFilterCarouselTrayProps> = ({
   onSelectFilter,
   onToggleFullscreen,
   showToast,
+  onOpenProFilters,
 }) => {
   if (!isOpen) return null;
 
@@ -128,6 +170,26 @@ export const LiveFilterCarouselTray: React.FC<LiveFilterCarouselTrayProps> = ({
 
       {/* Horizontal Scrollable Filter Cards Matching Screenshot 4 */}
       <div className="tiktok-filter-cards-scroll">
+        {onOpenProFilters && (
+          <div
+            className="tiktok-filter-card"
+            onClick={() => {
+              onOpenProFilters();
+              showToast('✨ Stage 3 Pro Filter Studio opened');
+            }}
+            style={{
+              background: 'linear-gradient(135deg, rgba(236,72,153,0.25), rgba(139,92,246,0.25))',
+              borderColor: '#ec4899',
+            }}
+            title="Open Stage 3 Custom Filter Editor & Shaders"
+          >
+            <div className="tiktok-filter-circle" style={{ background: 'linear-gradient(135deg, #ec4899, #8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ fontSize: '18px' }}>🎨</span>
+            </div>
+            <span className="tiktok-filter-name" style={{ color: '#ec4899', fontWeight: 700 }}>Pro Studio</span>
+          </div>
+        )}
+
         {LIVE_FILTERS.map((f) => {
           const isSelected = activeFilterId === f.id;
 

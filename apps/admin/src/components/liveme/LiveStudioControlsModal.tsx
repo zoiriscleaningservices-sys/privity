@@ -28,6 +28,9 @@ export interface LiveStudioControlsModalProps {
   moderationCount?: number;
   onOpenModeration?: () => void;
   showToast?: (msg: string) => void;
+  // Stage 3 Integration
+  onOpenProFilters?: () => void;
+  onOpenStageManager?: () => void;
 }
 
 export const LiveStudioControlsModal: React.FC<LiveStudioControlsModalProps> = ({
@@ -46,6 +49,8 @@ export const LiveStudioControlsModal: React.FC<LiveStudioControlsModalProps> = (
   onToggleAudioMonitoring,
   onOpenModeration,
   showToast = () => {},
+  onOpenProFilters,
+  onOpenStageManager,
 }) => {
   const [isGridCollapsed, setIsGridCollapsed] = useState(false);
   const [activePollActive, setActivePollActive] = useState(false);
@@ -120,6 +125,50 @@ export const LiveStudioControlsModal: React.FC<LiveStudioControlsModalProps> = (
         <div className="tiktok-studio-card-container">
           {!isGridCollapsed && (
             <div className="tiktok-studio-tools-grid">
+              {/* Stage 3 Pro Filters & Custom Editor */}
+              {onOpenProFilters && (
+                <button
+                  type="button"
+                  className="tiktok-studio-tool-item active"
+                  onClick={() => {
+                    onOpenProFilters();
+                    onClose();
+                  }}
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(236,72,153,0.18), rgba(139,92,246,0.18))',
+                    border: '1px solid rgba(236,72,153,0.4)',
+                  }}
+                  title="Open Stage 3 Pro Filter Studio (Shaders & Custom Presets)"
+                >
+                  <div className="tool-icon-wrap" style={{ background: 'linear-gradient(135deg, #ec4899, #8b5cf6)', color: '#fff' }}>
+                    <span className="tool-icon">🎨</span>
+                  </div>
+                  <span className="tool-label" style={{ color: '#ec4899', fontWeight: 700 }}>Pro Filters</span>
+                </button>
+              )}
+
+              {/* Stage 3 Stage Manager & Layouts */}
+              {onOpenStageManager && (
+                <button
+                  type="button"
+                  className="tiktok-studio-tool-item active"
+                  onClick={() => {
+                    onOpenStageManager();
+                    onClose();
+                  }}
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(59,130,246,0.18), rgba(147,51,234,0.18))',
+                    border: '1px solid rgba(59,130,246,0.4)',
+                  }}
+                  title="Open Stage 3 Stage Manager (Layouts & Guests)"
+                >
+                  <div className="tool-icon-wrap" style={{ background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', color: '#fff' }}>
+                    <span className="tool-icon">🎛️</span>
+                  </div>
+                  <span className="tool-label" style={{ color: '#60a5fa', fontWeight: 700 }}>Stage Manager</span>
+                </button>
+              )}
+
               {/* 1. Poll & Gift vote */}
               <button
                 type="button"
