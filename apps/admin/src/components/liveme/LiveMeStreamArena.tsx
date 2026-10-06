@@ -28,6 +28,22 @@ import { LiveGiftGoalModal, StreamGiftGoal } from './LiveGiftGoalModal';
 import { LiveDailyLeaderboardModal } from './LiveDailyLeaderboardModal';
 import { LiveGuestStageBox } from './LiveGuestStageBox';
 import { broadcastViaSupabase, onSupabaseBroadcast } from '../../services/supabaseClient';
+import { FilterSheet } from '../../live/ui/FilterSheet';
+import { StageManagerSheet } from '../../live/ui/StageManagerSheet';
+import { BattleBar } from '../../live/battle/BattleBar';
+import { BattleTimer } from '../../live/battle/BattleTimer';
+import { BattleResults } from '../../live/battle/BattleResults';
+import { DoubleBanner } from '../../live/moments/DoubleBanner';
+import type { BattleView } from '../../live/battle/deriveBattleView';
+import { DeviceFilterPresetStore } from '../../live/media/presetStore';
+import { useFilterLibrary } from '../../live/media/hooks';
+import type { FilterParams } from '../../live/media/filterTypes';
+import { IDENTITY_PARAMS } from '../../live/media/filterTypes';
+import { NO_FILTER_ID } from '../../live/media/filterPresets';
+import type { StageLayoutMode } from '../../live/stage/stageLayout';
+import '../../live/ui/live.css';
+import '../../live/battle/battle.css';
+import '../../live/moments/moments.css';
 import './liveme.css';
 
 const broadcastSyncEvent = (payload: any) => {
@@ -535,11 +551,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const battleRoundTimerRef = useRef(battleRoundTimer);
   battleRoundTimerRef.current = battleRoundTimer;
 
-  const formatBattleTimer = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
+
 
   // Dynamic Rival Streamer in PK Battle (defaults to mel<3... from TikTok reference)
   const [pkRival, setPkRival] = useState<LiveMeStreamer>(() => {
@@ -783,6 +795,33 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
   const [activeBeautyFilter, setActiveBeautyFilter] = useState('normal');
   const [activeLighting, setActiveLighting] = useState('none');
 
+  // Stage 3 Integration: Pro Filters & Custom Editor
+  const filterPresetStore = useMemo(() => new DeviceFilterPresetStore(currentUser.handle || 'default'), [currentUser.handle]);
+  const filterLibrary = useFilterLibrary(filterPresetStore);
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
+  const [filterComparing, setFilterComparing] = useState(false);
+  const [filterDraft, setFilterDraft] = useState<{ params: FilterParams; intensity: number } | null>(null);
+
+  // Active Stage 3 filter calculation
+  const activeStage3Params = filterComparing
+    ? IDENTITY_PARAMS
+    : filterDraft?.params ?? filterLibrary.active?.params ?? IDENTITY_PARAMS;
+  const activeStage3Intensity = filterComparing
+    ? 1
+    : filterDraft?.intensity ?? filterLibrary.selection?.intensity ?? 1;
+
+  const stage3CssFilter = useMemo(() => {
+    if (filterComparing || !filterLibrary.active || filterLibrary.active.id === NO_FILTER_ID) return '';
+    const { brightness, contrast, saturation, temperature, tint } = activeStage3Params;
+    const k = activeStage3Intensity;
+    const b = 1 + brightness * 0.45 * k;
+    const c = 1 + contrast * 0.5 * k;
+    const s = 1 + saturation * 0.6 * k;
+    const sepia = temperature > 0 ? (temperature * 0.28 * k).toFixed(3) : '0';
+    const hue = (temperature < 0 ? temperature * 14 * k : tint * 18 * k).toFixed(1);
+    return `brightness(${b.toFixed(2)}) contrast(${c.toFixed(2)}) saturate(${s.toFixed(2)}) sepia(${sepia}) hue-rotate(${hue}deg)`;
+  }, [activeStage3Params, activeStage3Intensity, filterComparing, filterLibrary.active]);
+
   const computedVideoFilter = useMemo(() => {
     const b = 1 + (skinLightening / 100) * 0.35;
     const c = 1 - (skinSmoothing / 100) * 0.08;
@@ -796,9 +835,46 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     const filterObj = BEAUTY_FILTERS.find((f) => f.id === activeBeautyFilter);
     const presetFilter = filterObj && filterObj.cssFilter !== 'none' ? filterObj.cssFilter : '';
     const liveFilterCss = activeLiveFilter && activeLiveFilter.cssFilter !== 'none' ? activeLiveFilter.cssFilter : '';
+    const stage3FilterStr = stage3CssFilter ? ` ${stage3CssFilter}` : '';
 
-    return `brightness(${b.toFixed(2)}) contrast(${c.toFixed(2)}) saturate(${s.toFixed(2)}) ${toneFilter} ${presetFilter} ${liveFilterCss}`.trim();
-  }, [skinLightening, skinSmoothing, skinTone, activeBeautyFilter, activeLiveFilter]);
+    return `brightness(${b.toFixed(2)}) contrast(${c.toFixed(2)}) saturate(${s.toFixed(2)}) ${toneFilter} ${presetFilter} ${liveFilterCss}${stage3FilterStr}`.trim();
+  }, [skinLightening, skinSmoothing, skinTone, activeBeautyFilter, activeLiveFilter, stage3CssFilter]);
+
+  // Stage 3 Integration: Stage Manager & Multi-Guest Layout
+  const [isStageManagerOpen, setIsStageManagerOpen] = useState(false);
+  const [stageLayoutMode, setStageLayoutMode] = useState<StageLayoutMode>('auto');
+  const [featuredGuestId, setFeaturedGuestId] = useState<string | null>(null);
+  const [localPlaybackMuted, setLocalPlaybackMuted] = useState<Set<string>>(new Set());
+
+  // Stage 3 Integration: BattleView derivation for BattleBar & BattleTimer
+  const stage3BattleView: BattleView = useMemo(() => {
+    const total = hostPkScore + rivalPkScore;
+    const shareA = total === 0 ? 0.5 : hostPkScore / total;
+    const leadSide = hostPkScore > rivalPkScore ? 'a' : rivalPkScore > hostPkScore ? 'b' : null;
+    const isFinal = battleRoundTimer <= 30 && battleRoundTimer > 0;
+    const stage = battleWinner ? 'RESULTS' : isFinal ? 'FINAL_COUNTDOWN' : isPkBattleActive ? 'ACTIVE' : 'IDLE';
+    const bonus = speedMultiplier > 1 ? 'active' : 'none';
+
+    return {
+      battleId: 'pk-active',
+      stage,
+      bonus,
+      bonusMultiplier: speedMultiplier,
+      msToBonus: null,
+      bonusMsRemaining: speedChallenge ? speedChallenge.timeLeft * 1000 : null,
+      bonusSegmentIdx: null,
+      pull: null,
+      inBreak: false,
+      intensity: (Math.min(4, Math.floor(total / 500)) as any),
+      msRemaining: battleRoundTimer * 1000,
+      countdownValue: null,
+      segment: null,
+      multiplier: speedMultiplier,
+      scores: { a: hostPkScore, b: rivalPkScore, pulls: [] },
+      leadSide,
+      shareA,
+    };
+  }, [hostPkScore, rivalPkScore, battleRoundTimer, speedMultiplier, speedChallenge, battleWinner, isPkBattleActive]);
 
   const handleResetBeauty = useCallback(() => {
     setSkinSmoothing(0);
@@ -4009,12 +4085,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Calculate PK Tug-of-War percentage widths
-  const hostPkPercentage = useMemo(() => {
-    const total = hostPkScore + rivalPkScore;
-    if (total <= 0) return 50;
-    return Math.max(12, Math.min(88, Math.round((hostPkScore / total) * 100)));
-  }, [hostPkScore, rivalPkScore]);
+
 
   // Organic Gestures Handling (Mobile Touch Swipes + Desktop Pointer Drag):
   // - Swipe Left (deltaX < 0): Enters Large Messages Chat Reader (or returns from HUD to Live)
@@ -4405,32 +4476,19 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           <div className="liveme-pk-stage-wrap">
             {/* Split Tug-of-War Score Bar (Only visible when PK Match has started) */}
             {isPkBattleActive && (
-              <div className="liveme-pk-tug-bar-dock">
-                <div className="liveme-pk-bar-track">
-                  {/* Host Pink Half */}
-                  <div className="liveme-pk-bar-host" style={{ width: `${hostPkPercentage}%` }}>
-                    <span className="liveme-pk-score-large">{hostPkScore}</span>
-                  </div>
+              <div className="liveme-pk-tug-bar-dock" style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '0 8px' }}>
+                {/* Stage 3 High-Performance BattleBar */}
+                <BattleBar view={stage3BattleView} />
 
-                  {/* Center Collision & Timer Badge */}
-                  <div className="liveme-pk-center-badge">
-                    <span className="liveme-pk-clash-icon">🥊</span>
-                    <span className="liveme-pk-timer-digits">
-                      {formatBattleTimer(battleRoundTimer)}
-                    </span>
-                  </div>
-
-                  {/* Rival Cyan Half */}
-                  <div className="liveme-pk-bar-rival" style={{ width: `${100 - hostPkPercentage}%` }}>
-                    <span className="liveme-pk-score-large">{rivalPkScore}</span>
-                  </div>
+                {/* Stage 3 Battle Timer with circular progress & pulses */}
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <BattleTimer view={stage3BattleView} />
                 </div>
 
-                {/* Speed Challenge Banner (Doubles 2X / Triples 3X) */}
+                {/* Speed Challenge Banner (Doubles 2X / Triples 3X) with Stage 3 DoubleBanner */}
                 {speedChallenge && (
-                  <div className="liveme-speed-challenge-banner">
-                    <span>{speedChallenge.type === 'double' ? '⚡ 2X SPEED CHALLENGE' : '🔥 3X SPEED CHALLENGE'}</span>
-                    <span style={{ opacity: 0.9 }}>({speedChallenge.timeLeft}s)</span>
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <DoubleBanner status="active" multiplier={speedMultiplier} />
                   </div>
                 )}
               </div>
@@ -5781,6 +5839,7 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
           }}
           onToggleFullscreen={handleToggleFullscreen}
           showToast={showToast}
+          onOpenProFilters={() => setIsFilterSheetOpen(true)}
         />
 
         {/* 6b. EXPANDED REAL-APP TYPING DOCK (Opens when clicking to type for full message visibility) */}
@@ -6541,7 +6600,142 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
         onSwapDualCameras={() => setIsDualSwapped((prev) => !prev)}
         onOpenModeration={() => setIsModerationModalOpen(true)}
         moderationCount={mutedUsers.length + kickedUsers.length + blockedUsers.length}
+        onOpenProFilters={() => setIsFilterSheetOpen(true)}
+        onOpenStageManager={() => setIsStageManagerOpen(true)}
       />
+
+      {/* Stage 3 Pro Filters & Custom Editor Sheet */}
+      {isFilterSheetOpen && (
+        <div className="plv-screen" style={{ position: 'fixed', inset: 0, zIndex: 999999, pointerEvents: 'none', background: 'transparent' }}>
+          <div style={{ pointerEvents: 'auto' }}>
+            <FilterSheet
+              open={isFilterSheetOpen}
+              onClose={() => setIsFilterSheetOpen(false)}
+              library={filterLibrary}
+              onCompare={setFilterComparing}
+              comparing={filterComparing}
+              onDraft={setFilterDraft}
+              pipelineReady={true}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Stage 3 Stage Manager Sheet */}
+      {isStageManagerOpen && (
+        <div className="plv-screen" style={{ position: 'fixed', inset: 0, zIndex: 999999, pointerEvents: 'none', background: 'transparent' }}>
+          <div style={{ pointerEvents: 'auto' }}>
+            <StageManagerSheet
+              open={isStageManagerOpen}
+              onClose={() => setIsStageManagerOpen(false)}
+              guests={activeGuests.map((g, i) => ({
+                id: g.handle,
+                handle: g.handle,
+                display_name: g.name || g.handle,
+                avatar_url: g.avatar || null,
+                slot: i,
+              }))}
+              presentation={{
+                order: activeGuests.map((g) => g.handle),
+                featuredId: featuredGuestId,
+                mode: stageLayoutMode,
+              }}
+              presence={new Map()}
+              requests={pendingGuestRequests.map((req) => ({
+                userId: req.handle,
+                user: {
+                  id: req.handle,
+                  handle: req.handle,
+                  display_name: req.name || req.handle,
+                  avatar_url: req.avatar || null,
+                },
+                status: 'pending' as const,
+                requestedAt: Date.now(),
+                updatedAt: Date.now(),
+                error: null,
+              }))}
+              localMuted={localPlaybackMuted}
+              battleActive={isPkBattleActive}
+              onRespond={(userId, accept) => {
+                const targetReq = pendingGuestRequests.find((r) => r.handle === userId);
+                if (targetReq) {
+                  if (accept) {
+                    handleInviteGuest(targetReq);
+                    setPendingGuestRequests((prev) => prev.filter((r) => r.handle !== userId));
+                    showToast(`Accepted ${targetReq.name} onto stage`);
+                  } else {
+                    setPendingGuestRequests((prev) => prev.filter((r) => r.handle !== userId));
+                    showToast(`Declined ${targetReq.name}`);
+                  }
+                }
+              }}
+              onRemove={async (userId) => {
+                handleRemoveGuest(userId);
+                showToast('Guest removed from stage');
+                return true;
+              }}
+              onMove={() => {}}
+              onMoveTo={() => {}}
+              onFeature={(userId) => {
+                setFeaturedGuestId(userId);
+                showToast(userId ? 'Guest promoted to Spotlight' : 'Spotlight removed');
+              }}
+              onLayout={(mode) => {
+                setStageLayoutMode(mode);
+                showToast(`Stage layout: ${mode.toUpperCase()}`);
+              }}
+              onToggleLocalMute={(userId) => {
+                setLocalPlaybackMuted((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(userId)) next.delete(userId);
+                  else next.add(userId);
+                  return next;
+                });
+              }}
+              onRefreshRequests={() => {}}
+              onClearHistory={() => {}}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Stage 3 Battle Results Overlay */}
+      {battleWinner && (
+        <div className="plv-screen" style={{ position: 'fixed', inset: 0, zIndex: 999999, pointerEvents: 'auto' }}>
+          <BattleResults
+            result={{
+              winner_side: battleWinner === 'host' ? 'a' : battleWinner === 'rival' ? 'b' : null,
+              final_a: hostPkScore,
+              final_b: rivalPkScore,
+              pull_wins: null,
+              stats: {
+                total_gifts: 0,
+                biggest_gift: null,
+                top_supporters: [],
+                lead_changes: 0,
+                comebacks: 0,
+                peak_viewers: null,
+              },
+            }}
+            hostA={{
+              id: 'host',
+              handle: currentStreamer.handle || 'host',
+              display_name: currentStreamer.name || 'Host',
+              avatar_url: currentStreamer.avatar || null,
+            }}
+            hostB={{
+              id: 'rival',
+              handle: pkRival?.handle || 'opponent',
+              display_name: pkRival?.name || 'Opponent',
+              avatar_url: pkRival?.avatar || null,
+            }}
+            onDismiss={() => {
+              setBattleWinner(null);
+              setIsPkBattleActive(false);
+            }}
+          />
+        </div>
+      )}
 
       {/* ================================================================ */}
       {/* 14D. HOST STREAM TARGET GIFT GOAL MODAL                          */}
