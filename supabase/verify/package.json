@@ -1,0 +1,18 @@
+{
+  "name": "@privity/supabase-verify",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs the LIVE v2 migrations against a real local PostgreSQL (embedded) and verifies behaviour, security and concurrency. Not part of the app workspaces or the Pages deploy.",
+  "scripts": {
+    "test": "vitest run",
+    "apply:staging": "node ./scripts/apply-remote.mjs"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "embedded-postgres": "^17.5.0-beta.15",
+    "pg": "^8.23.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}

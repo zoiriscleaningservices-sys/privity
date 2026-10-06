@@ -1,0 +1,392 @@
+/* Privity LIVE — Battle UI CSS */
+
+.live-battle-hud {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 4px 12px;
+  position: relative;
+  z-index: 20;
+  pointer-events: auto;
+}
+
+.live-battle-hud-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 4px;
+}
+
+/* Battle Bar Signature */
+.live-battle-bar-container {
+  width: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.live-battle-bar-track {
+  width: 100%;
+  height: 28px;
+  border-radius: 9999px;
+  background: rgba(10, 14, 26, 0.85);
+  border: 1.5px solid var(--live-border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), inset 0 2px 4px rgba(0, 0, 0, 0.6);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  backdrop-filter: var(--live-glass-blur);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.live-battle-bar-fill-a {
+  height: 100%;
+  background: var(--live-team-a-gradient);
+  transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.live-battle-bar-fill-b {
+  height: 100%;
+  background: var(--live-team-b-gradient);
+  transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.live-battle-bar-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #ffffff;
+  box-shadow: 0 0 10px #ffffff, 0 0 20px rgba(255, 255, 255, 0.8);
+  transform: translateX(-50%);
+  z-index: 10;
+  transition: left 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.live-battle-bar-scores {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 12px;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.live-battle-score-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--live-font-mono);
+  font-weight: 800;
+  font-size: 14px;
+  color: #ffffff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+  letter-spacing: -0.02em;
+}
+
+.live-battle-score-pill.lead-a {
+  color: #e0e7ff;
+}
+
+.live-battle-score-pill.lead-b {
+  color: #ffe4e6;
+}
+
+/* Double Bonus Mode */
+.live-battle-bar-track.bonus-active {
+  border-color: rgba(245, 158, 11, 0.9);
+  animation: live-double-pulse 1.2s infinite ease-in-out;
+}
+
+/* Intensity Tiers */
+.live-battle-bar-track.intensity-1 {
+  border-color: rgba(239, 68, 68, 0.4);
+}
+.live-battle-bar-track.intensity-2 {
+  border-color: rgba(239, 68, 68, 0.7);
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.35);
+}
+.live-battle-bar-track.intensity-3 {
+  border-color: #ef4444;
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.55);
+}
+.live-battle-bar-track.intensity-4 {
+  border-color: #f87171;
+  box-shadow: 0 0 40px rgba(239, 68, 68, 0.85);
+  animation: live-pulse 0.4s infinite alternate;
+}
+
+/* Battle Timer */
+.live-battle-timer-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid var(--live-border);
+  backdrop-filter: var(--live-glass-blur);
+  font-family: var(--live-font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--live-text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.live-battle-timer-badge.urgency-final {
+  color: #fee2e2;
+  background: rgba(185, 28, 28, 0.8);
+  border-color: #ef4444;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+  animation: live-final-countdown-tick 1s infinite cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+/* Phase Badge */
+.live-battle-phase-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  backdrop-filter: var(--live-glass-blur);
+}
+
+.live-battle-phase-badge.normal {
+  background: rgba(30, 41, 59, 0.7);
+  color: var(--live-text-secondary);
+  border: 1px solid var(--live-border);
+}
+
+.live-battle-phase-badge.double-warning {
+  background: rgba(180, 83, 9, 0.35);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.6);
+  animation: live-pulse 1s infinite ease-in-out;
+}
+
+.live-battle-phase-badge.double-active {
+  background: var(--live-double-gradient);
+  color: #030407;
+  border: 1px solid #fef08a;
+  box-shadow: 0 0 12px var(--live-double-glow);
+  font-weight: 900;
+}
+
+.live-battle-phase-badge.locked {
+  background: rgba(71, 85, 105, 0.6);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+/* Pull Progress (3-pull format) */
+.live-pull-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.65);
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--live-border);
+}
+
+.live-pull-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(100, 116, 139, 0.5);
+  transition: all 0.3s ease;
+}
+
+.live-pull-dot.active {
+  background: #ffffff;
+  box-shadow: 0 0 8px #ffffff;
+  transform: scale(1.25);
+}
+
+.live-pull-dot.won-a {
+  background: var(--live-team-a-light);
+  box-shadow: 0 0 6px var(--live-team-a-glow);
+}
+
+.live-pull-dot.won-b {
+  background: var(--live-team-b-light);
+  box-shadow: 0 0 6px var(--live-team-b-glow);
+}
+
+/* Battle Intro VS Presentation */
+.live-battle-intro-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(15, 23, 42, 0.9) 0%, rgba(3, 4, 7, 0.96) 80%);
+  backdrop-filter: blur(24px);
+  z-index: 50;
+  animation: live-stage-bloom 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 24px;
+}
+
+.live-battle-intro-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  width: 100%;
+  max-width: 440px;
+  margin-bottom: 24px;
+}
+
+.live-intro-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.live-intro-avatar-frame {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  padding: 3px;
+  position: relative;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+.live-intro-avatar-frame.side-a {
+  background: var(--live-team-a-gradient);
+  box-shadow: 0 0 25px var(--live-team-a-glow);
+}
+
+.live-intro-avatar-frame.side-b {
+  background: var(--live-team-b-gradient);
+  box-shadow: 0 0 25px var(--live-team-b-glow);
+}
+
+.live-intro-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #1e293b;
+}
+
+.live-intro-vs-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-family: var(--live-font-display);
+  font-size: 32px;
+  font-weight: 900;
+  color: #fbbf24;
+  text-shadow: 0 0 20px rgba(245, 158, 11, 0.7);
+  animation: live-double-pulse 1s infinite alternate;
+}
+
+.live-intro-countdown-number {
+  font-family: var(--live-font-display);
+  font-size: 72px;
+  font-weight: 900;
+  color: #ffffff;
+  text-shadow: 0 0 35px var(--live-team-a-glow), 0 0 60px var(--live-team-b-glow);
+  animation: live-final-countdown-tick 0.8s infinite;
+}
+
+/* Battle Results Overlay */
+.live-battle-results-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(15, 23, 42, 0.94) 0%, rgba(3, 4, 7, 0.98) 85%);
+  backdrop-filter: blur(28px);
+  z-index: 60;
+  animation: live-stage-bloom 0.5s ease;
+  padding: 20px;
+}
+
+.live-results-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--live-surface-elevated);
+  border: 1px solid var(--live-border);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.live-results-winner-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.live-results-winner-crown {
+  color: #fbbf24;
+  filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.8));
+}
+
+.live-results-scores-row {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 12px;
+  background: rgba(10, 14, 26, 0.6);
+  border-radius: 12px;
+  border: 1px solid var(--live-border);
+}
+
+.live-results-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.live-results-stat-box {
+  background: rgba(15, 23, 42, 0.5);
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--live-border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live-results-stat-label {
+  font-size: 11px;
+  color: var(--live-text-muted);
+  text-transform: uppercase;
+}
+
+.live-results-stat-value {
+  font-family: var(--live-font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--live-text-primary);
+}

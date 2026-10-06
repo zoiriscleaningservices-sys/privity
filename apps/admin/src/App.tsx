@@ -74,6 +74,11 @@ import { AuthModal } from './components/auth';
 import { convertVideoToAnimatedLoop, isKnownVideoUrl, extractVideoThumbnail } from './services/videoMediaHelper';
 import { storePostMedia, getFreshMediaUrl, clearAllMediaBlobs } from './services/mediaDb';
 
+// LIVE Lab is a development/QA environment with simulated data. It is compiled into DEV builds only.
+const LiveLab = import.meta.env.DEV
+  ? React.lazy(() => import('./live/dev/LiveLab').then((m) => ({ default: m.LiveLab })))
+  : null;
+
 export const BANNED_MOCK_HANDLES = new Set([
   'elena_rodriguez',
   'marcus_dev',
@@ -886,6 +891,18 @@ export function App() {
   };
 
   // 0. Persistent Active Section / Tab (stays on current section upon refresh)
+  const isLiveLabHash = (): boolean => {
+    if (!import.meta.env.DEV) return false;
+    try {
+      const h = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      return h === 'live-lab' || h === 'live-sim';
+    } catch {
+      return false;
+    }
+  };
+
+  const [liveLabActive, setLiveLabActive] = useState<boolean>(isLiveLabHash);
+
   const getInitialActiveTab = (): 'feed' | 'discover' | 'messages' | 'activity' | 'profile' | 'safety' => {
     try {
       const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
@@ -1253,7 +1270,9 @@ export function App() {
   useEffect(() => {
     safeSaveStorage('privity_active_tab_v5', activeTab);
     try {
-      if (window.location.hash.replace(/^#\/?/, '').toLowerCase() !== activeTab) {
+      const curH = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (curH === 'live-lab' || curH === 'live-sim') return;
+      if (curH !== activeTab) {
         window.location.hash = activeTab;
       }
     } catch (e) {}
@@ -1262,6 +1281,11 @@ export function App() {
   useEffect(() => {
     const handleHash = () => {
       const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (hash === 'live-lab' || hash === 'live-sim') {
+        setLiveLabActive(true);
+        return;
+      }
+      setLiveLabActive(false);
       if (['feed', 'discover', 'messages', 'activity', 'profile', 'safety'].includes(hash)) {
         setActiveTab(hash as any);
         if (hash === 'messages') {
@@ -7360,6 +7384,30 @@ export function App() {
     return sorted;
   }, [posts]);
 
+  if (liveLabActive && LiveLab) {
+    return (
+      <React.Suspense
+        fallback={
+          <div
+            style={{
+              background: '#030407',
+              color: '#ffffff',
+              height: '100vh',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            Loading Privity LIVE Lab...
+          </div>
+        }
+      >
+        <LiveLab />
+      </React.Suspense>
+    );
+  }
+
   // MANDATORY AUTHENTICATION WALL: Nobody can view anything unless logged in
   if (!currentAuthUser) {
     return (
@@ -7521,6 +7569,20 @@ export function App() {
             <span className="nav-icon-wrap"><IconShield size={21} /></span>
             <span>Safety & Reports</span>
           </button>
+
+          {import.meta.env.DEV && (
+            <button
+              className={`nav-link-btn ${liveLabActive ? 'active' : ''}`}
+              onClick={() => {
+                window.location.hash = 'live-lab';
+                setLiveLabActive(true);
+              }}
+              title="Open Privity LIVE Lab Development Simulator"
+            >
+              <span className="nav-icon-wrap"><IconFeedStream size={21} /></span>
+              <span>LIVE Lab (Dev)</span>
+            </button>
+          )}
         </nav>
 
         <button

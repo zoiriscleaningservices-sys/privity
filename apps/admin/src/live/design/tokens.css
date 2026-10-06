@@ -1,0 +1,95 @@
+/**
+ * Privity LIVE v2 — Design Tokens
+ * Dark luxury, cyber-crystal glass, vibrant battle accents, and tabular typography.
+ */
+
+:root {
+  /* Surface & Base */
+  --live-void: #030407;
+  --live-deep: #070a14;
+  --live-surface: rgba(12, 17, 29, 0.72);
+  --live-surface-elevated: rgba(18, 24, 41, 0.85);
+  --live-surface-card: rgba(22, 30, 52, 0.65);
+  --live-border: rgba(255, 255, 255, 0.08);
+  --live-border-glow: rgba(99, 102, 241, 0.3);
+  --live-glass-blur: blur(20px);
+
+  /* Typography */
+  --live-font-display: 'Outfit', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --live-font-body: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --live-font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+  /* Text Colors */
+  --live-text-primary: #f8fafc;
+  --live-text-secondary: #94a3b8;
+  --live-text-muted: #64748b;
+  --live-text-gold: #fbbf24;
+
+  /* Battle Team A (Cyan / Electric Indigo) */
+  --live-team-a: #6366f1;
+  --live-team-a-light: #818cf8;
+  --live-team-a-glow: rgba(99, 102, 241, 0.45);
+  --live-team-a-bg: linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(56, 189, 248, 0.15) 100%);
+  --live-team-a-gradient: linear-gradient(90deg, #6366f1 0%, #38bdf8 100%);
+
+  /* Battle Team B (Rose / Sunset Coral) */
+  --live-team-b: #f43f5e;
+  --live-team-b-light: #fb7185;
+  --live-team-b-glow: rgba(244, 63, 94, 0.45);
+  --live-team-b-bg: linear-gradient(135deg, rgba(244, 63, 94, 0.25) 0%, rgba(251, 146, 60, 0.15) 100%);
+  --live-team-b-gradient: linear-gradient(90deg, #fb923c 0%, #f43f5e 100%);
+
+  /* Double / Bonus Phase (Radiant Gold / Solar Amber) */
+  --live-double-gold: #f59e0b;
+  --live-double-glow: rgba(245, 158, 11, 0.55);
+  --live-double-gradient: linear-gradient(135deg, #f59e0b 0%, #fbbf24 50%, #fef08a 100%);
+
+  /* Final Countdown / High Urgency (Crimson / Flame) */
+  --live-danger: #ef4444;
+  --live-danger-glow: rgba(239, 68, 68, 0.6);
+  --live-danger-gradient: linear-gradient(135deg, #dc2626 0%, #ef4444 50%, #f87171 100%);
+
+  /* Success / Lead change / Winner */
+  --live-success: #10b981;
+  --live-success-glow: rgba(16, 185, 129, 0.4);
+
+  /* Gift Rarities */
+  --live-rarity-common: #94a3b8;
+  --live-rarity-rare: #38bdf8;
+  --live-rarity-epic: #a855f7;
+  --live-rarity-legendary: #f59e0b;
+
+  /* Safe Areas */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+
+  /* Aliases referenced by earlier LIVE components */
+  --live-safe-top: var(--sat);
+  --live-safe-bottom: var(--sab);
+  --live-bg-void: var(--live-void);
+  --live-font-sans: var(--live-font-body);
+  --live-gradient-primary: linear-gradient(135deg, #7c6cff 0%, #b06bff 100%);
+
+  /* Privity Studio language (Stage 3) */
+  --plv-ink: #07080d;
+  --plv-ink-2: #0e1018;
+  --plv-glass: rgba(14, 16, 26, 0.62);
+  --plv-glass-strong: rgba(14, 16, 26, 0.86);
+  --plv-glass-line: rgba(255, 255, 255, 0.1);
+  --plv-iris: #7c6cff;
+  --plv-iris-2: #b06bff;
+  --plv-iris-grad: linear-gradient(135deg, #7c6cff 0%, #b06bff 100%);
+  --plv-pulse: #ff5470;
+  --plv-mint: #3ee6b5;
+  --plv-amber: #ffb547;
+  --plv-text: #f5f6fb;
+  --plv-text-2: rgba(245, 246, 251, 0.72);
+  --plv-text-3: rgba(245, 246, 251, 0.5);
+  --plv-radius: 18px;
+  --plv-radius-lg: 26px;
+  --plv-touch: 48px;
+  --plv-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --plv-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}

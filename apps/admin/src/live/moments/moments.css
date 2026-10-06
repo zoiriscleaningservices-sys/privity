@@ -1,0 +1,280 @@
+/* Privity LIVE — Moments & Show Lanes CSS */
+
+/* Corner Lane: Bottom Left above chat */
+.live-corner-lane {
+  position: absolute;
+  left: var(--plv-corner-lane-left, 12px);
+  bottom: var(--plv-corner-lane-bottom, 230px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 25;
+  pointer-events: none;
+  max-width: min(320px, calc(100% - 96px));
+}
+
+.live-moment-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: rgba(10, 14, 26, 0.88);
+  border: 1px solid var(--live-border);
+  backdrop-filter: var(--live-glass-blur);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  animation: live-toast-slide 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+  color: #ffffff;
+}
+
+.live-moment-toast.rare {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: linear-gradient(90deg, rgba(30, 27, 75, 0.9) 0%, rgba(10, 14, 26, 0.9) 100%);
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.3);
+}
+
+.live-moment-toast.epic {
+  border-color: rgba(168, 85, 247, 0.6);
+  background: linear-gradient(90deg, rgba(59, 7, 100, 0.92) 0%, rgba(15, 23, 42, 0.92) 100%);
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+}
+
+.live-moment-toast.legendary {
+  border-color: rgba(245, 158, 11, 0.8);
+  background: linear-gradient(90deg, rgba(69, 26, 3, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+  box-shadow: 0 0 25px rgba(245, 158, 11, 0.5);
+}
+
+.live-moment-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.live-moment-icon {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+}
+
+.live-moment-details {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.live-moment-sender {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-moment-action {
+  font-size: 11px;
+  color: var(--live-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* D6 excluded battle gift tag */
+.live-gift-excluded-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: rgba(51, 65, 85, 0.6);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-top: 2px;
+  display: inline-block;
+}
+
+/* Banner Lane: Below Battle HUD */
+.live-banner-lane {
+  position: absolute;
+  top: var(--plv-banner-lane-top, 135px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 28;
+  pointer-events: none;
+  padding: 0 16px;
+}
+
+.live-lead-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  border-radius: 9999px;
+  backdrop-filter: var(--live-glass-blur);
+  font-family: var(--live-font-display);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  animation: live-banner-drop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+.live-lead-banner.side-a {
+  background: var(--live-team-a-gradient);
+  color: #ffffff;
+  border: 1px solid rgba(129, 140, 248, 0.6);
+  box-shadow: 0 0 20px var(--live-team-a-glow);
+}
+
+.live-lead-banner.side-b {
+  background: var(--live-team-b-gradient);
+  color: #ffffff;
+  border: 1px solid rgba(251, 113, 133, 0.6);
+  box-shadow: 0 0 20px var(--live-team-b-glow);
+}
+
+.live-comeback-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #b91c1c 0%, #d97706 100%);
+  color: #ffffff;
+  border: 1px solid #f59e0b;
+  box-shadow: 0 0 25px rgba(217, 119, 6, 0.6);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  animation: live-banner-drop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.live-double-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  border-radius: 9999px;
+  background: var(--live-double-gradient);
+  color: #030407;
+  border: 1px solid #fef08a;
+  box-shadow: 0 0 20px var(--live-double-glow);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  animation: live-double-pulse 1.2s infinite ease-in-out;
+}
+
+.live-milestone-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+  border: 1px solid var(--live-border);
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: live-banner-drop 0.35s ease;
+}
+
+/* Stage Lane: Center Screen Takeover for Legendary Gifts */
+.live-stage-lane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.live-legendary-gift-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 24px;
+  background: radial-gradient(circle at center, rgba(30, 27, 75, 0.75) 0%, rgba(3, 4, 7, 0.88) 80%);
+  border: 1.5px solid rgba(245, 158, 11, 0.6);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 0 60px rgba(245, 158, 11, 0.35);
+  animation: live-stage-bloom 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 360px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.live-stage-gift-anim {
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 30px rgba(245, 158, 11, 0.8));
+  animation: live-pulse 2s infinite alternate ease-in-out;
+}
+
+.live-stage-gift-title {
+  font-family: var(--live-font-display);
+  font-size: 22px;
+  font-weight: 900;
+  color: #fbbf24;
+  text-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
+  margin: 0;
+}
+
+.live-stage-gift-subtitle {
+  font-size: 13px;
+  color: var(--live-text-secondary);
+  margin: 0;
+}
+
+/* Top Supporter Chip: Under Top Bar */
+.live-top-supporter-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  backdrop-filter: var(--live-glass-blur);
+  font-size: 11px;
+  font-weight: 700;
+  color: #fbbf24;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.live-top-supporter-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* Featured Supporter Card (Modal or Popover) */
+.live-supporter-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--live-border);
+  border-radius: 14px;
+  gap: 12px;
+}
