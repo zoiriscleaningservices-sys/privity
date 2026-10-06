@@ -3294,6 +3294,24 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     showToast(`Cancelled match challenge.`);
   };
 
+  const handleStartInstantBattle = () => {
+    setIsCoHostConnected(true);
+    isCoHostConnectedRef.current = true;
+    setIsPkBattleActive(true);
+    isPkBattleActiveRef.current = true;
+    setHostPkScore(120);
+    hostPkScoreRef.current = 120;
+    setRivalPkScore(80);
+    rivalPkScoreRef.current = 80;
+    setBattleRoundTimer(180);
+    battleRoundTimerRef.current = 180;
+    setBattleWinner(null);
+    setSpeedMultiplier(2);
+    speedMultiplierRef.current = 2;
+    setSpeedChallenge({ type: 'double', timeLeft: 30 });
+    showToast('⚔️ Stage 3 PK Battle Arena started! Cheering 2X active!');
+  };
+
   const handleAcceptBattleRequest = () => {
     const cleanMyH = (currentUser.handle || '').replace(/^@+/, '').toLowerCase().trim();
     const cleanRivalH = (incomingBattleRequest?.senderHandle || pkRivalRef.current?.handle || pkRival.handle || '').replace(/^@+/, '').toLowerCase().trim();
@@ -5165,6 +5183,66 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
               <span>Gift Gallery</span>
               <span>🎁</span>
             </div>
+
+            {isHost && (
+              <>
+                <div
+                  className="liveme-sub-pill"
+                  onClick={() => setIsFilterSheetOpen(true)}
+                  style={{
+                    cursor: 'pointer',
+                    background: 'linear-gradient(135deg, rgba(236,72,153,0.4), rgba(139,92,246,0.4))',
+                    border: '1px solid rgba(236,72,153,0.7)',
+                    color: '#fff',
+                    fontWeight: 700,
+                  }}
+                  title="Stage 3 Pro Filters & Real-time Shaders"
+                >
+                  <span>🎨</span>
+                  <span>Pro Filters</span>
+                </div>
+
+                <div
+                  className="liveme-sub-pill"
+                  onClick={() => setIsStageManagerOpen(true)}
+                  style={{
+                    cursor: 'pointer',
+                    background: 'linear-gradient(135deg, rgba(59,130,246,0.4), rgba(147,51,234,0.4))',
+                    border: '1px solid rgba(59,130,246,0.7)',
+                    color: '#fff',
+                    fontWeight: 700,
+                  }}
+                  title="Stage 3 Stage Manager & Multi-Guest Layouts"
+                >
+                  <span>🎛️</span>
+                  <span>Stage Manager</span>
+                </div>
+
+                <div
+                  className="liveme-sub-pill"
+                  onClick={() => {
+                    if (isPkBattleActive) {
+                      showToast('🥊 PK Battle is active! Cheer your side!');
+                    } else {
+                      handleStartInstantBattle();
+                    }
+                  }}
+                  style={{
+                    cursor: 'pointer',
+                    background: isPkBattleActive
+                      ? 'linear-gradient(135deg, #ef4444, #f97316)'
+                      : 'linear-gradient(135deg, rgba(239,68,68,0.4), rgba(249,115,22,0.4))',
+                    border: '1px solid rgba(239,68,68,0.7)',
+                    color: '#fff',
+                    fontWeight: 700,
+                  }}
+                  title="Stage 3 PK Battle Arena (Dual Stream & Tug-of-War Bar)"
+                >
+                  <span>⚔️</span>
+                  <span>{isPkBattleActive ? 'Battle Active 🔴' : 'PK Battle'}</span>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -5574,20 +5652,20 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   type="button"
                   className={`tiktok-tool-btn battle ${(isCoHostConnected || isPkBattleActive) ? 'active' : ''}`}
                   onClick={() => {
-                    if (isCoHostConnected && !isPkBattleActive) {
-                      handleRequestBattle();
-                    } else if (isPkBattleActive) {
+                    if (isPkBattleActive) {
                       showToast('🥊 PK Battle is active! Cheer your side!');
+                    } else if (isCoHostConnected) {
+                      handleRequestBattle();
                     } else {
-                      setIsCoHostModalOpen(true);
+                      handleStartInstantBattle();
                     }
                   }}
                   title={
-                    isCoHostConnected && !isPkBattleActive
-                      ? '🥊 Tap PK to challenge co-host to 3-minute battle!'
-                      : isPkBattleActive
+                    isPkBattleActive
                       ? 'PK Battle in progress'
-                      : 'Co-host with creators & Battles'
+                      : isCoHostConnected
+                      ? '🥊 Tap PK to challenge co-host to 3-minute battle!'
+                      : 'Launch Instant PK Battle Duel & Arena!'
                   }
                 >
                   <svg viewBox="0 0 28 28" width="22" height="22" fill="none">
@@ -5607,12 +5685,12 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
                   {(isCoHostConnected || isPkBattleActive) && <span className="badge-pill">PK</span>}
                 </button>
 
-                {/* Host Left 2: Guests / Multi-Guest Icon */}
+                {/* Host Left 2: Guests / Stage Manager */}
                 <button
                   type="button"
                   className="tiktok-tool-btn guests"
-                  onClick={() => setIsGuestsModalOpen(true)}
-                  title="Go LIVE with guests"
+                  onClick={() => setIsStageManagerOpen(true)}
+                  title="Stage Manager: Multi-Guest Layouts & Requests"
                 >
                   <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -5735,6 +5813,34 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
             <div className="liveme-toolbar-actions">
               {isHost ? (
                 <>
+                  {/* Stage 3 Pro Filters Button */}
+                  <button
+                    type="button"
+                    className="tiktok-tool-btn"
+                    onClick={() => setIsFilterSheetOpen(true)}
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(236,72,153,0.35), rgba(139,92,246,0.35))',
+                      border: '1.5px solid #ec4899',
+                    }}
+                    title="Open Stage 3 Pro Filters & Real-Time Shaders"
+                  >
+                    <span style={{ fontSize: '18px' }}>🎨</span>
+                  </button>
+
+                  {/* Stage 3 Stage Manager Button */}
+                  <button
+                    type="button"
+                    className="tiktok-tool-btn"
+                    onClick={() => setIsStageManagerOpen(true)}
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(59,130,246,0.35), rgba(147,51,234,0.35))',
+                      border: '1.5px solid #3b82f6',
+                    }}
+                    title="Open Stage 3 Stage Manager & Multi-Guest Layouts"
+                  >
+                    <span style={{ fontSize: '18px' }}>🎛️</span>
+                  </button>
+
                   {/* Share Button */}
                   <button
                     type="button"
