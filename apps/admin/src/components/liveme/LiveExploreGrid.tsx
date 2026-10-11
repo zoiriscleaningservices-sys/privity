@@ -21,6 +21,7 @@ export interface LiveExploreGridProps {
     handle: string;
     avatar: string;
   };
+  networkStreamers?: LiveMeStreamer[];
   showToast: (msg: string) => void;
 }
 
@@ -32,6 +33,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   onBackToFeed,
   onGoLive,
   currentUser,
+  networkStreamers: propNetworkStreamers,
   showToast,
 }) => {
   const [activeTab, setActiveTab] = useState<MainCategoryTab>('featured');
@@ -41,15 +43,22 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
 
   // Network Active Streamers (synchronized across all physical devices)
-  const [networkStreamers, setNetworkStreamers] = useState<LiveMeStreamer[]>(() =>
+  const [internalStreamers, setInternalStreamers] = useState<LiveMeStreamer[]>(() =>
     liveStreamSync.getStreamersList()
   );
 
   useEffect(() => {
     return liveStreamSync.subscribeToActiveStreams((streams) => {
-      setNetworkStreamers(streams);
+      setInternalStreamers(streams);
     });
   }, []);
+
+  // Merge parent networkStreamers prop with internally subscribed streamers
+  const networkStreamers = Array.from(
+    new Map(
+      [...(propNetworkStreamers || []), ...internalStreamers].map((s) => [s.id, s])
+    ).values()
+  );
 
   // Cross-tab active live host detection fallback - only active if actually broadcasting and alive
   const [activeHost, setActiveHost] = useState<any>(() => {
@@ -62,7 +71,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
         const parsed = JSON.parse(saved);
         const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
         if (liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt)) return null;
-        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 30000) return null;
+        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 35000) return null;
         return parsed;
       }
       return null;
@@ -96,14 +105,20 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       syncBus.onmessage = (e) => {
         const action = e.data?.action || e.data?.type;
         const host = e.data?.host || e.data?.stream;
-        if (action === 'LIVE_HOST_STARTED' || action === 'LIVE_STARTED' || action === 'STREAM_ACTIVE') {
+        if (
+          action === 'LIVE_HOST_STARTED' ||
+          action === 'LIVE_STARTED' ||
+          action === 'STREAM_ACTIVE' ||
+          action === 'LIVE_HEARTBEAT' ||
+          action === 'STREAM_HEARTBEAT'
+        ) {
           if (host) {
             setActiveHost(host);
-            setNetworkStreamers(liveStreamSync.getStreamersList());
+            setInternalStreamers(liveStreamSync.getStreamersList());
           }
         } else if (action === 'LIVE_HOST_ENDED' || action === 'LIVE_ENDED' || action === 'STREAM_ENDED') {
           setActiveHost(null);
-          setNetworkStreamers(liveStreamSync.getStreamersList());
+          setInternalStreamers(liveStreamSync.getStreamersList());
           const handle = (e.data?.handle || e.data?.creatorHandle || '').toLowerCase().replace('@', '').trim();
           if (handle) {
             setLiveFramesMap((prev) => {
@@ -119,18 +134,25 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     const unsubSupabase = onSupabaseBroadcast((payload: any) => {
       if (!payload) return;
       const action = payload.action || payload.type;
-      if (action === 'STREAM_ACTIVE' || action === 'LIVE_STARTED' || action === 'LIVE_HOST_STARTED') {
+      if (
+        action === 'STREAM_ACTIVE' ||
+        action === 'LIVE_STARTED' ||
+        action === 'LIVE_HOST_STARTED' ||
+        action === 'STREAM_HEARTBEAT' ||
+        action === 'LIVE_HEARTBEAT'
+      ) {
         const host = payload.stream || payload.host;
         if (host) {
           const normH = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
           liveStreamSync.clearStreamEnded(host.id, normH);
-          setNetworkStreamers(liveStreamSync.getStreamersList());
+          setInternalStreamers(liveStreamSync.getStreamersList());
+          setActiveHost(host);
         }
       } else if (action === 'STREAM_ENDED' || action === 'LIVE_ENDED' || action === 'LIVE_HOST_ENDED') {
         const sid = payload.streamId;
         const h = (payload.creatorHandle || payload.handle || '').toLowerCase().replace('@', '').trim();
         liveStreamSync.markStreamEnded(sid, h);
-        setNetworkStreamers(liveStreamSync.getStreamersList());
+        setInternalStreamers(liveStreamSync.getStreamersList());
         setActiveHost((prev: any) => {
           if (!prev) return null;
           const prevH = (prev.creatorHandle || prev.handle || '').toLowerCase().replace('@', '').trim();
@@ -154,7 +176,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
         e.key === 'privity_remote_active_streams' ||
         e.key === 'privity_ended_streams_v2'
       ) {
-        setNetworkStreamers(liveStreamSync.getStreamersList());
+        setInternalStreamers(liveStreamSync.getStreamersList());
         const isB = localStorage.getItem('privity_is_host_broadcasting') === 'true';
         const saved = localStorage.getItem('privity_current_live_host');
         if (isB && saved) {
@@ -163,7 +185,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
             const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
             if (
               liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
-              (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 30000)
+              (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 35000)
             ) {
               setActiveHost(null);
             } else {
@@ -189,19 +211,19 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
 
   // Filter streamers - STRICT HANDLE DEDUPLICATION & ZERO ZOMBIE GHOSTS
   const userHandle = (currentUser?.handle || '').toLowerCase().replace('@', '').trim();
-  const isUserBroadcasting =
+  const isBroadcastingNow =
     (liveStreamSync.isLocalHost() && !!liveStreamSync.getHostSession()) ||
     (activeHost &&
       activeHost.isLive !== false &&
       !liveStreamSync.isStreamEnded(activeHost.id, activeHost.creatorHandle || activeHost.handle, activeHost.startedAt) &&
-      (!activeHost.lastHeartbeat || Date.now() - activeHost.lastHeartbeat <= 30000));
+      (!activeHost.lastHeartbeat || Date.now() - activeHost.lastHeartbeat <= 35000));
 
-  const currentHost = liveStreamSync.getHostSession() || (isUserBroadcasting ? activeHost : null);
+  const currentHost = liveStreamSync.getHostSession() || activeHost;
 
   const streamersByHandle = new Map<string, LiveMeStreamer>();
 
   // 1. Host card: ALWAYS show if host is ACTUALLY broadcasting right now!
-  if (isUserBroadcasting && currentHost && !liveStreamSync.isStreamEnded(currentHost.id, currentHost.creatorHandle || currentHost.handle, currentHost.startedAt)) {
+  if (currentHost && (isBroadcastingNow || activeHost) && !liveStreamSync.isStreamEnded(currentHost.id, currentHost.creatorHandle || currentHost.handle, currentHost.startedAt)) {
     const rawHandle = currentHost.creatorHandle || currentHost.handle || userHandle;
     const hostHandle = rawHandle.toLowerCase().replace('@', '').trim();
     const rawName = currentHost.creatorName || currentHost.name || currentUser?.name || 'Creator';
@@ -241,7 +263,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   for (const s of networkStreamers) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
     if (!normHandle) continue;
-    if (liveStreamSync.isStreamEnded(s.id, normHandle)) continue;
+    if (liveStreamSync.isStreamEnded(s.id, normHandle, s.startedAt)) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
@@ -250,14 +272,14 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   // 3. Fallback catalog streamers: add only if creator not already active and not ended
   for (const s of LIVEME_STREAMERS) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
-    if (liveStreamSync.isStreamEnded(s.id, normHandle)) continue;
+    if (liveStreamSync.isStreamEnded(s.id, normHandle, s.startedAt)) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
   }
 
   const allStreamers: LiveMeStreamer[] = Array.from(streamersByHandle.values()).filter(
-    (s) => !liveStreamSync.isStreamEnded(s.id, s.handle)
+    (s) => !liveStreamSync.isStreamEnded(s.id, s.handle, s.startedAt)
   );
 
   const filteredStreamers = allStreamers
@@ -281,7 +303,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
           s.id.startsWith('live-user-') ||
           s.id === 'liveme-host-myself' ||
           networkStreamers.some((ns) => ns.id === s.id)) &&
-        !liveStreamSync.isStreamEnded(s.id, s.handle);
+        !liveStreamSync.isStreamEnded(s.id, s.handle, s.startedAt);
 
       if (isRealActiveStream) {
         return true;
@@ -334,8 +356,8 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     })
     .sort((a, b) => {
       // 1. Current user host broadcast ALWAYS #1
-      const aIsMyHost = a.isHost || (isUserBroadcasting && (a.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
-      const bIsMyHost = b.isHost || (isUserBroadcasting && (b.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
+      const aIsMyHost = a.isHost || (isBroadcastingNow && (a.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
+      const bIsMyHost = b.isHost || (isBroadcastingNow && (b.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
       if (aIsMyHost && !bIsMyHost) return -1;
       if (!aIsMyHost && bIsMyHost) return 1;
 

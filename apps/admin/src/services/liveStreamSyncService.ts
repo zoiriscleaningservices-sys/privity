@@ -168,6 +168,14 @@ class LiveStreamSyncService {
   public isStreamEnded(streamId?: string, _rawHandle?: string, startedAt?: number): boolean {
     const normId = (streamId || '').toLowerCase().trim();
     if (normId && this.endedStreams.has(normId)) {
+      // If this stream is currently active on this instance or hosting, it is NOT ended
+      if (this.currentHostSession && this.currentHostSession.id.toLowerCase().trim() === normId) {
+        return false;
+      }
+      const active = this.activeStreams.get(normId);
+      if (active && (!active.lastHeartbeat || Date.now() - active.lastHeartbeat <= 35000)) {
+        return false;
+      }
       const record = this.endedStreams.get(normId);
       if (record && startedAt && startedAt > record.endedAt) {
         return false;
@@ -197,7 +205,14 @@ class LiveStreamSyncService {
         if (!e.data) return;
         const action = e.data.action || e.data.type;
         const host = e.data.host || e.data.stream;
-        if ((action === 'LIVE_HOST_STARTED' || action === 'LIVE_STARTED' || action === 'STREAM_ACTIVE') && host) {
+        if (
+          (action === 'LIVE_HOST_STARTED' ||
+            action === 'LIVE_STARTED' ||
+            action === 'STREAM_ACTIVE' ||
+            action === 'LIVE_HEARTBEAT' ||
+            action === 'STREAM_HEARTBEAT') &&
+          host
+        ) {
           const normHandle = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
           this.clearStreamEnded(host.id, normHandle);
           this.handleIncomingStream(host);
@@ -1065,6 +1080,35 @@ class LiveStreamSyncService {
   }
 
   private announceStream(stream: RemoteLiveStreamPayload, type: 'STREAM_ACTIVE' | 'STREAM_HEARTBEAT' = 'STREAM_ACTIVE') {
+    const now = Date.now();
+    stream.lastHeartbeat = now;
+    stream.isLive = true;
+
+    // Keep activeStreams synchronized on this instance
+    this.activeStreams.set(stream.id, stream);
+
+    // Keep local host storage updated with latest heartbeat timestamp
+    if (this.currentHostSession && this.currentHostSession.id === stream.id) {
+      this.currentHostSession.lastHeartbeat = now;
+      this.currentHostSession.isLive = true;
+      try {
+        localStorage.setItem('privity_current_live_host', JSON.stringify(this.currentHostSession));
+        localStorage.setItem('privity_is_host_broadcasting', 'true');
+      } catch {}
+    }
+
+    // Always emit over BroadcastChannel so all browser tabs stay in continuous real-time sync
+    if (this.broadcastBus) {
+      try {
+        this.broadcastBus.postMessage({
+          type: type === 'STREAM_ACTIVE' ? 'LIVE_HOST_STARTED' : 'LIVE_HEARTBEAT',
+          action: type === 'STREAM_ACTIVE' ? 'LIVE_STARTED' : 'LIVE_HEARTBEAT',
+          host: stream,
+          stream,
+        });
+      } catch {}
+    }
+
     if (this.mqttClient && this.mqttClient.connected) {
       try {
         const payload = JSON.stringify({ type, stream });
@@ -1074,14 +1118,12 @@ class LiveStreamSyncService {
       } catch {}
     }
 
-    if (type === 'STREAM_ACTIVE') {
-      try {
-        broadcastViaSupabase({
-          action: 'STREAM_ACTIVE',
-          stream,
-        });
-      } catch {}
-    }
+    try {
+      broadcastViaSupabase({
+        action: type === 'STREAM_ACTIVE' ? 'STREAM_ACTIVE' : 'STREAM_HEARTBEAT',
+        stream,
+      });
+    } catch {}
   }
 
   public stopHostBroadcast() {

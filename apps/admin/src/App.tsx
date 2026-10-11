@@ -4655,6 +4655,7 @@ export function App() {
     if (!isHostBroadcasting || !activeLiveStream) return;
     const cleanHandle = (myProfile.handle || '').replace(/^@/, '');
     const hbInterval = setInterval(() => {
+      const now = Date.now();
       const hostMeta = {
         id: activeLiveStream.id,
         creatorHandle: cleanHandle,
@@ -4666,10 +4667,29 @@ export function App() {
         isVerified: myProfile.isVerified,
         category: (activeLiveStream as any).category || 'Featured',
         title: (activeLiveStream as any).title || 'Live Broadcast',
-        startedAt: (activeLiveStream as any).startedAt || Date.now(),
-        lastHeartbeat: Date.now(),
+        startedAt: (activeLiveStream as any).startedAt || now,
+        lastHeartbeat: now,
         isLive: true,
       };
+
+      // Keep localStorage fresh so other tabs see active host without stale timeout
+      try {
+        localStorage.setItem('privity_current_live_host', JSON.stringify(hostMeta));
+        localStorage.setItem('privity_is_host_broadcasting', 'true');
+      } catch {}
+
+      // Keep BroadcastChannel active across all tabs
+      try {
+        const syncBus = new BroadcastChannel('privity_sync_bus');
+        syncBus.postMessage({
+          type: 'LIVE_HEARTBEAT',
+          action: 'LIVE_HEARTBEAT',
+          host: hostMeta,
+          stream: hostMeta,
+        });
+        syncBus.close();
+      } catch {}
+
       broadcastSyncEvent({
         action: 'LIVE_HEARTBEAT',
         host: hostMeta,
@@ -5495,21 +5515,63 @@ export function App() {
         setFeedFilter('live');
         if (streamId && (!activeLiveStream || activeLiveStream.id !== streamId)) {
           const syncList = liveStreamSync.getStreamersList();
-          const target =
+          let target =
             syncList.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase()) ||
             LIVEME_STREAMERS.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase()) ||
             networkLiveStreamers.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase());
 
-          if (target) {
-            setActiveLiveStream(target as any);
-          } else {
+          if (!target) {
             const activePayload = liveStreamSync.getActiveStreamPayload(streamId);
             if (activePayload && (activePayload.id === streamId || (activePayload.creatorHandle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase())) {
-              setActiveLiveStream(activePayload as any);
-            } else {
-              triggerToast('This LIVE stream has ended or is unavailable.');
-              window.location.hash = 'live';
+              target = activePayload as any;
             }
+          }
+
+          if (!target) {
+            try {
+              const saved = localStorage.getItem('privity_current_live_host');
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.id === streamId || (parsed.creatorHandle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase()) {
+                  target = parsed;
+                }
+              }
+            } catch {}
+          }
+
+          if (target) {
+            const isLocalHost = liveStreamSync.isLocalHost(target.id);
+            setIsHostBroadcasting(isLocalHost);
+            setActiveLiveStream(target as any);
+          } else {
+            // Construct immediate viewer streamer so deep-link never crashes or redirects prematurely
+            const rawHandle = streamId.startsWith('live-user-')
+              ? streamId.replace('live-user-', '').split('-')[0]
+              : streamId.replace(/^@+/, '');
+            const fallbackStreamer: LiveMeStreamer = {
+              id: streamId,
+              name: rawHandle ? rawHandle.charAt(0).toUpperCase() + rawHandle.slice(1) : 'Live Creator',
+              handle: `@${rawHandle || 'creator'}`,
+              avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              title: 'Live Broadcast · Sovereign Stream',
+              description: 'Live broadcast · Sovereign Stream',
+              category: 'Featured',
+              isVerified: true,
+              viewersCount: 1,
+              totalViews: '1',
+              popularity: '0',
+              diamonds: 0,
+              likesCount: 0,
+              posterUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              tags: ['Host', 'LiveNow', 'Privity'],
+              tagBadge: 'LIVE NOW',
+              isCameraStream: true,
+              startedAt: Date.now(),
+              topContributors: [],
+            };
+            setIsHostBroadcasting(false);
+            setActiveLiveStream(fallbackStreamer as any);
+            liveStreamSync.queryNetworkStreams();
           }
         }
         return;
@@ -7337,6 +7399,7 @@ export function App() {
       title: userStream.title,
       description: userStream.description,
       startedAt: Date.now(),
+      lastHeartbeat: Date.now(),
       viewersCount: 0,
       likesCount: 0,
       previewUrl: userStream.previewUrl,
@@ -7861,6 +7924,7 @@ export function App() {
             {/* LIVE BROADCASTS 2-COLUMN EXPLORE DISCOVER ARENA */}
             {feedFilter === 'live' ? (
               <LiveExploreGrid
+                networkStreamers={networkLiveStreamers}
                 onOpenStream={(streamerId, streamerObj) => {
                   const targetStreamer =
                     streamerObj ||

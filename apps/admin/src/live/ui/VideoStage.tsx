@@ -83,7 +83,19 @@ const Tile = memo(function Tile({ t }: { t: TileModel }) {
   let body: ReactNode;
   if (isLocal && cameraOn) body = t.local;
   else if (!isLocal && media?.stream && (hasLiveVideoTrack || (cameraOn && status !== 'disconnected'))) {
-    body = <StreamVideo stream={media.stream} className="plv-tile-video" label={`${name} video`} />;
+    body = (
+      <>
+        {liveFrame && (
+          <img
+            src={liveFrame}
+            className="plv-tile-video"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }}
+            alt={`${name} live`}
+          />
+        )}
+        <StreamVideo stream={media.stream} className="plv-tile-video" label={`${name} video`} />
+      </>
+    );
   } else if (!isLocal && liveFrame) {
     body = (
       <img
