@@ -59,7 +59,10 @@ export function buildStage(input: BuildStageInput): BuiltStage {
   for (const id of slotOrder) if (!order.includes(id)) order.push(id);
 
   const tileFor = (id: string, role: TileModel['role'], area: TileModel['area'], user: UserRef): TileModel => {
-    const isSelf = self?.id === id;
+    const isSelf =
+      self?.id === id ||
+      (self?.id && (self.id === user.id || (user.handle && self.id.toLowerCase() === user.handle.toLowerCase()))) ||
+      (role === 'host' && (self?.id === room.host.id || (room.host.handle && self?.id.toLowerCase() === room.host.handle.toLowerCase())));
     return {
       id,
       role: isSelf && role === 'guest' ? 'self' : role,

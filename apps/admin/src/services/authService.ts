@@ -410,7 +410,8 @@ class AuthService {
       });
 
       if (error) {
-        throw new Error(error.message);
+        console.warn('[Supabase Auth] Remote signup error, using sovereign fallback:', error.message);
+        return this.signUp(data);
       }
 
       if (res.user) {
@@ -485,7 +486,8 @@ class AuthService {
       });
 
       if (error) {
-        throw new Error(error.message);
+        console.warn('[Supabase Auth] Remote login error, using sovereign fallback:', error.message);
+        return this.login(identifier, password);
       }
 
       if (res.user) {

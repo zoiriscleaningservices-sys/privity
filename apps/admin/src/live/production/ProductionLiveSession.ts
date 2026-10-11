@@ -63,11 +63,11 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   const iso = () => new Date(now()).toISOString();
 
   // Host info
-  const cleanHostHandle = streamerHandle.replace(/^@/, '').toLowerCase().trim();
+  const cleanHostHandle = (streamerHandle || streamerId || '').replace(/^@/, '').toLowerCase().trim();
   const hostUserRef: UserRef = {
     id: cleanHostHandle || streamerId,
     handle: cleanHostHandle || streamerId,
-    display_name: streamerName,
+    display_name: streamerName || cleanHostHandle || 'Creator',
     avatar_url: streamerAvatar || null,
   };
 

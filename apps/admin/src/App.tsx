@@ -7352,7 +7352,7 @@ export function App() {
         previewUrl: userStream.previewUrl,
         tags: userStream.tags,
       },
-      cameraStream || null
+      finalStream
     ).then((peerId) => {
       try {
         localStorage.setItem(
@@ -12812,7 +12812,11 @@ export function App() {
       {activeLiveStream && (
         <ProductionLiveArena
           streamer={activeLiveStream as any}
-          isHost={isHostBroadcasting}
+          isHost={
+            isHostBroadcasting &&
+            ((activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '').replace(/^@/, '').toLowerCase().trim() ===
+              (myProfile.handle || '').replace(/^@/, '').toLowerCase().trim()
+          }
           initialCoHostMode={isCoHostInviteAccepted}
           currentUser={{
             name: currentAuthUser?.name || myProfile.name || 'Member',

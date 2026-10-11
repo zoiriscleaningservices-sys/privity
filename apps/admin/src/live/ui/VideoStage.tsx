@@ -47,21 +47,24 @@ const Tile = memo(function Tile({ t }: { t: TileModel }) {
   const micOn = isLocal ? t.localMicOn : media?.micOn;
   const status = isLocal ? 'connected' : media?.status ?? 'none';
   const hasAudio = !isLocal && !!media?.stream && media.stream.getAudioTracks().length > 0;
+  const hasLiveVideoTrack = !isLocal && !!media?.stream && media.stream.getVideoTracks().some((tr) => tr.readyState === 'live');
 
   let body: ReactNode;
   if (isLocal && cameraOn) body = t.local;
-  else if (!isLocal && media?.stream && cameraOn && status === 'connected') {
+  else if (!isLocal && media?.stream && (hasLiveVideoTrack || (cameraOn && status !== 'disconnected'))) {
     body = <StreamVideo stream={media.stream} className="plv-tile-video" label={`${name} video`} />;
   } else {
     const reason = isLocal
       ? 'Your camera is off'
-      : !media
-        ? 'Waiting for video'
+      : !media || status === 'none'
+        ? 'Connecting to broadcast…'
         : status === 'reconnecting'
           ? 'Reconnecting…'
           : status === 'disconnected'
             ? 'Connection lost'
-            : 'Camera off';
+            : !hasLiveVideoTrack
+              ? 'Waiting for video stream…'
+              : 'Camera off';
     const Icon = !media && !isLocal ? null : status === 'reconnecting' ? RefreshCw : status === 'disconnected' ? WifiOff : VideoOff;
     body = (
       <div className="plv-tile-placeholder">
@@ -80,6 +83,9 @@ const Tile = memo(function Tile({ t }: { t: TileModel }) {
       type={t.onSelect ? 'button' : undefined}
       className={`plv-tile plv-tile--${t.area} plv-tile--${t.role} ${t.featured ? 'is-featured' : ''} ${t.side ? `plv-tile--side-${t.side}` : ''}`}
       data-tile-id={t.id}
+      data-media-status={status}
+      data-has-stream={!!media?.stream}
+      data-video-tracks={media?.stream?.getVideoTracks().length ?? 0}
       onClick={t.onSelect}
       aria-label={t.onSelect ? `${name} — open options` : undefined}
     >

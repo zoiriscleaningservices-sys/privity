@@ -11,7 +11,7 @@ import {
   updateCustomPreset,
 } from '../media/filterPresets';
 import { DeviceFilterPresetStore, parseLibrary, serializeLibrary, storageKeyFor } from '../media/presetStore';
-import { classifyMediaError } from '../media/LocalMediaController';
+import { LocalMediaController, classifyMediaError } from '../media/LocalMediaController';
 import { availableEffects, EFFECT_REGISTRY } from '../media/effectRegistry';
 
 const SKIN: RGB = [217 / 255, 161 / 255, 132 / 255];
@@ -198,3 +198,59 @@ describe('effect registry', () => {
     expect(EFFECT_REGISTRY.filter((e) => e.status === 'planned').length).toBeGreaterThan(3);
   });
 });
+
+describe('LocalMediaController initialStream handover (prevents black screen duplicate hardware lock)', () => {
+  it('adopts existing live tracks from initialStream and marks camera live without querying getUserMedia', async () => {
+    let getUserMediaCalled = false;
+    const mockMediaDevices = {
+      getUserMedia: async () => {
+        getUserMediaCalled = true;
+        throw new Error('NotReadableError');
+      },
+    } as unknown as MediaDevices;
+
+    const mockVideoTrack = {
+      kind: 'video',
+      readyState: 'live',
+      label: 'Production Camera',
+      enabled: true,
+      stop: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    } as unknown as MediaStreamTrack;
+
+    const mockAudioTrack = {
+      kind: 'audio',
+      readyState: 'live',
+      label: 'Production Microphone',
+      enabled: true,
+      stop: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    } as unknown as MediaStreamTrack;
+
+    const initialStream = {
+      getVideoTracks: () => [mockVideoTrack],
+      getAudioTracks: () => [mockAudioTrack],
+      getTracks: () => [mockVideoTrack, mockAudioTrack],
+    } as unknown as MediaStream;
+
+    const ctrl = new LocalMediaController('camera', {
+      mediaDevices: mockMediaDevices,
+      initialStream,
+    });
+
+    const state = ctrl.getState();
+    expect(state.camera.status).toBe('live');
+    expect(state.camera.enabled).toBe(true);
+    expect(state.camera.label).toBe('Production Camera');
+    expect(state.mic.status).toBe('live');
+    expect(state.mic.enabled).toBe(true);
+
+    // Starting should not re-query getUserMedia or throw NotReadableError
+    await ctrl.start({ video: true, audio: true });
+    expect(getUserMediaCalled).toBe(false);
+    expect(ctrl.getState().camera.status).toBe('live');
+  });
+});
+

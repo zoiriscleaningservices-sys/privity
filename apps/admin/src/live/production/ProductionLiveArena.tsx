@@ -71,31 +71,35 @@ export const ProductionLiveArena: React.FC<ProductionLiveArenaProps> = ({
     []
   );
 
+  const streamerHandle = streamer.handle || (streamer as any).creatorHandle || '';
+  const streamerName = streamer.name || (streamer as any).creatorName || streamerHandle || 'Creator';
+  const streamerAvatar = streamer.avatar || (streamer as any).creatorAvatar || (streamer as any).previewUrl || '';
+
   const session = useMemo(
     () =>
       createProductionLiveSession({
         streamerId: streamer.id,
-        streamerHandle: streamer.handle,
-        streamerName: streamer.name,
-        streamerAvatar: streamer.avatar,
+        streamerHandle,
+        streamerName,
+        streamerAvatar,
         me,
         isHost,
         onCoinsChange,
       }),
-    [streamer.id, streamer.handle, streamer.name, streamer.avatar, me, isHost, onCoinsChange]
+    [streamer.id, streamerHandle, streamerName, streamerAvatar, me, isHost, onCoinsChange]
   );
 
   const mediaTransport = useMemo(
     () =>
       new ProductionMediaTransport({
         streamerId: streamer.id,
-        streamerHandle: streamer.handle,
+        streamerHandle,
         myId: me.id,
         myHandle: me.handle,
         isHost,
         initialStream: userMediaStream,
       }),
-    [streamer.id, streamer.handle, me.id, me.handle, isHost, userMediaStream]
+    [streamer.id, streamerHandle, me.id, me.handle, isHost, userMediaStream]
   );
 
   useEffect(() => {
@@ -127,6 +131,7 @@ export const ProductionLiveArena: React.FC<ProductionLiveArenaProps> = ({
           media={mediaTransport}
           filterStore={filterStore}
           mediaSource="camera"
+          userMediaStream={userMediaStream}
           onExit={() => onClose({ isHost: true, wasEnded: true })}
         />
       ) : (

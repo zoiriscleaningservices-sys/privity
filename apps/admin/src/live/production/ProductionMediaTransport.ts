@@ -49,7 +49,7 @@ export class ProductionMediaTransport implements MediaTransport {
           micOn: true,
           stream: remoteStream,
         });
-        const cleanHandle = this.opts.streamerHandle.replace(/^@/, '').toLowerCase().trim();
+        const cleanHandle = (this.opts.streamerHandle || this.opts.streamerId || '').replace(/^@/, '').toLowerCase().trim();
         if (cleanHandle && cleanHandle !== this.opts.streamerId) {
           this.remote.set(cleanHandle, {
             id: cleanHandle,
