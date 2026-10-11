@@ -60,7 +60,8 @@ import {
 } from './gifts';
 import './gifts/gifts.css';
 import { CameraModal } from './camera';
-import { LiveMeStreamArena, LiveExploreGrid, LivePipPlayer, LIVEME_STREAMERS } from './components/liveme';
+import { LiveExploreGrid, LivePipPlayer, LIVEME_STREAMERS } from './components/liveme';
+import { ProductionLiveArena } from './live';
 import { LiveMeStreamer } from './components/liveme/types';
 import { liveStreamSync } from './services/liveStreamSyncService';
 import {
@@ -12807,21 +12808,24 @@ export function App() {
         </div>
       )}
 
-      {/* 100% FAITHFUL LIVEME STREAM ARENA REPLICATION */}
+      {/* PRIVITY LIVE — COMPLETE STAGE 1–5 PRODUCTION ARENA */}
       {activeLiveStream && (
-        <LiveMeStreamArena
-          initialStreamerId={activeLiveStream.id}
-          isHostBroadcast={isHostBroadcasting}
+        <ProductionLiveArena
+          streamer={activeLiveStream as any}
+          isHost={isHostBroadcasting}
           initialCoHostMode={isCoHostInviteAccepted}
-          userMediaStream={hostLiveCameraStream}
-          customStreamer={activeLiveStream as any}
           currentUser={{
             name: currentAuthUser?.name || myProfile.name || 'Member',
             handle: (currentAuthUser?.handle || myProfile.handle || '').startsWith('@')
               ? (currentAuthUser?.handle || myProfile.handle || '')
               : `@${currentAuthUser?.handle || myProfile.handle || 'member'}`,
             avatar: currentAuthUser?.avatar || myProfile.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400',
+            id: currentAuthUser?.id,
           }}
+          userMediaStream={hostLiveCameraStream}
+          userCoins={userSparksBalance}
+          onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
+          showToast={triggerToast}
           onClose={(opts?: { wasEnded?: boolean; isHost?: boolean }) => {
             const cleanMyH = (myProfile.handle || '').replace(/^@+/, '').toLowerCase().trim();
             const discEvt = {
@@ -12853,6 +12857,7 @@ export function App() {
                 if (streamId) localStorage.removeItem(`privity_live_chat_${streamId}`);
                 const bus = new BroadcastChannel('privity_sync_bus');
                 bus.postMessage({ type: 'LIVE_ROOM_RESET', hostHandle: targetHandle, roomId: streamId });
+                bus.postMessage({ type: 'LIVE_HOST_ENDED', action: 'LIVE_ENDED', streamId, handle: targetHandle, creatorHandle: targetHandle });
                 bus.close();
               } catch {}
               if (activeLiveStream?.id) {
@@ -12867,6 +12872,14 @@ export function App() {
                   roomId: streamId,
                   hostHandle: targetHandle,
                 });
+                try {
+                  broadcastViaSupabase({
+                    action: 'STREAM_ENDED',
+                    streamId: activeLiveStream.id,
+                    creatorHandle: targetHandle,
+                    handle: targetHandle,
+                  });
+                } catch {}
               }
               liveStreamSync.stopHostBroadcast();
               try {
@@ -12890,74 +12903,6 @@ export function App() {
             setMinimizedLiveStream(streamer);
             setActiveLiveStream(null);
           }}
-          onEndBroadcast={() => {
-            const cleanMyH = (myProfile.handle || '').replace(/^@+/, '').toLowerCase().trim();
-            const discEvt = {
-              type: 'COHOST_DISCONNECTED',
-              senderHandle: `@${cleanMyH}`,
-            };
-            if (activeLiveStream?.id) {
-              liveStreamSync.sendRoomEvent(activeLiveStream.id, discEvt);
-              const targetHandle = ((activeLiveStream as any).creatorHandle || (activeLiveStream as any).handle || '').replace(/^@+/, '').toLowerCase().trim();
-              if (targetHandle && targetHandle !== activeLiveStream.id) {
-                liveStreamSync.sendRoomEvent(targetHandle, discEvt);
-              }
-            }
-            try {
-              const bus = new BroadcastChannel('privity_sync_bus');
-              bus.postMessage(discEvt);
-              bus.close();
-            } catch {}
-            setIsCoHostInviteAccepted(false);
-            const targetHandle = ((activeLiveStream as any)?.creatorHandle || (activeLiveStream as any)?.handle || '').replace(/^@+/, '').toLowerCase().trim();
-            const streamId = activeLiveStream?.id || '';
-            try {
-              if (targetHandle) localStorage.removeItem(`privity_live_chat_${targetHandle}`);
-              if (streamId) localStorage.removeItem(`privity_live_chat_${streamId}`);
-              const bus = new BroadcastChannel('privity_sync_bus');
-              bus.postMessage({ type: 'LIVE_ROOM_RESET', hostHandle: targetHandle, roomId: streamId });
-              bus.postMessage({ type: 'LIVE_HOST_ENDED', action: 'LIVE_ENDED', streamId, handle: targetHandle, creatorHandle: targetHandle });
-              bus.close();
-            } catch {}
-            if (activeLiveStream?.id) {
-              liveStreamSync.markStreamEnded(activeLiveStream.id, targetHandle);
-              broadcastSyncEvent({
-                action: 'LIVE_ENDED',
-                streamId: activeLiveStream.id,
-                handle: targetHandle,
-              });
-              broadcastSyncEvent({
-                action: 'LIVE_ROOM_RESET',
-                roomId: streamId,
-                hostHandle: targetHandle,
-              });
-              try {
-                broadcastViaSupabase({
-                  action: 'STREAM_ENDED',
-                  streamId: activeLiveStream.id,
-                  creatorHandle: targetHandle,
-                  handle: targetHandle,
-                });
-              } catch {}
-            }
-            setActiveLiveStream(null);
-            setMinimizedLiveStream(null);
-            setIsHostBroadcasting(false);
-            liveStreamSync.stopHostBroadcast();
-            try {
-              localStorage.removeItem('privity_is_host_broadcasting');
-              localStorage.removeItem('privity_active_live_session');
-              localStorage.removeItem('privity_current_live_host');
-              localStorage.removeItem('privity_remote_active_streams');
-            } catch {}
-            if (hostLiveCameraStream) {
-              hostLiveCameraStream.getTracks().forEach((t) => t.stop());
-              setHostLiveCameraStream(null);
-            }
-          }}
-          userCoins={userSparksBalance}
-          onCoinsChange={(delta) => setUserSparksBalance((prev) => Math.max(0, prev + delta))}
-          showToast={triggerToast}
           onViewProfile={(handle) => {
             const streamer =
               networkLiveStreamers.find((s) => s.id === activeLiveStream.id) ||

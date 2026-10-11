@@ -96,3 +96,9 @@ export { describeLiveError } from './client/errors';
 export { LiveLab } from './dev/LiveLab';
 export { SimulatedLiveBackend } from './dev/SimulatedLiveBackend';
 export { LabMediaHub } from './dev/LabMediaHub';
+
+// Stage 1–5 Real Production LIVE Arena
+export { ProductionLiveArena } from './production/ProductionLiveArena';
+export type { ProductionLiveArenaProps } from './production/ProductionLiveArena';
+export { ProductionMediaTransport } from './production/ProductionMediaTransport';
+export { createProductionLiveSession } from './production/ProductionLiveSession';
