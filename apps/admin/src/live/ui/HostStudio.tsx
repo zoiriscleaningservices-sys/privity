@@ -53,13 +53,14 @@ export interface HostStudioProps {
   filterStore: FilterPresetStore;
   /** 'camera' in production; the Lab may use the labelled test signal. */
   mediaSource: MediaSourceKind;
+  userMediaStream?: MediaStream | null;
   onExit: () => void;
 }
 
 /** The creator's control room: the camera stays the hero, controls stay at the edges. */
 export function HostStudio(props: HostStudioProps) {
   const controller = useLiveRoom(props.feed, props.effects);
-  const localMedia = useHostLocalMedia(props.mediaSource);
+  const localMedia = useHostLocalMedia(props.mediaSource, props.userMediaStream);
   return (
     <LiveFrame effects={props.effects} variant="host" label="LIVE Studio">
       {controller && localMedia ? (
@@ -74,17 +75,17 @@ export function HostStudio(props: HostStudioProps) {
   );
 }
 
-function useHostLocalMedia(source: MediaSourceKind): LocalMediaController | null {
+function useHostLocalMedia(source: MediaSourceKind, initialStream?: MediaStream | null): LocalMediaController | null {
   const [c, setC] = useState<LocalMediaController | null>(null);
   useEffect(() => {
-    const m = new LocalMediaController(source);
+    const m = new LocalMediaController(source, { initialStream });
     setC(m);
     void m.start({ video: true, audio: true });
     return () => {
       m.dispose();
       setC(null);
     };
-  }, [source]);
+  }, [source, initialStream]);
   return c;
 }
 
@@ -145,8 +146,14 @@ function StudioBody({
 
   // ---- Publish the processed camera + mic through the media transport ---------------
   const processed = useMemo(() => pipeline?.captureStream(30) ?? null, [pipeline]);
-  const cameraLive = local.camera.status === 'live';
-  const micLive = local.mic.status === 'live' && local.mic.enabled;
+  const liveVideoTracks = useMemo(() => {
+    if (processed && processed.getVideoTracks().length > 0) {
+      return processed.getVideoTracks();
+    }
+    return local.videoStream ? local.videoStream.getVideoTracks() : [];
+  }, [processed, local.videoStream]);
+  const cameraLive = local.camera.status === 'live' && liveVideoTracks.length > 0;
+  const micLive = local.mic.status === 'live' && local.mic.enabled && !!local.audioTrack;
   useEffect(() => {
     if (!media) return;
     if (!live) {
@@ -154,10 +161,14 @@ function StudioBody({
       return;
     }
     const tracks: MediaStreamTrack[] = [];
-    if (processed && cameraLive) tracks.push(...processed.getVideoTracks());
-    if (local.audioTrack) tracks.push(local.audioTrack);
-    media.publish(me.id, { stream: tracks.length ? new MediaStream(tracks) : null, cameraOn: cameraLive && !!processed, micOn: micLive });
-  }, [media, me.id, processed, cameraLive, micLive, local.audioTrack, live]);
+    if (cameraLive && liveVideoTracks[0]) tracks.push(liveVideoTracks[0]);
+    if (micLive && local.audioTrack) tracks.push(local.audioTrack);
+    media.publish(me.id, {
+      stream: tracks.length ? new MediaStream(tracks) : null,
+      cameraOn: cameraLive,
+      micOn: micLive,
+    });
+  }, [media, me.id, processed, cameraLive, micLive, local.audioTrack, live, liveVideoTracks]);
   useEffect(() => () => media?.unpublish(me.id), [media, me.id]);
 
   // Stop my devices as soon as the LIVE has ended.
@@ -175,7 +186,7 @@ function StudioBody({
 
   const selfTile = useMemo(
     () => ({
-      id: me.id,
+      id: room ? room.host.id : me.id,
       local: (
         <FilteredPreview
           stream={local.videoStream}
@@ -190,7 +201,7 @@ function StudioBody({
       cameraOn: cameraLive,
       micOn: micLive,
     }),
-    [me.id, local.videoStream, params, intensity, comparing, mirrored, cameraLive, micLive],
+    [room?.host.id, me.id, local.videoStream, params, intensity, comparing, mirrored, cameraLive, micLive],
   );
 
   const stage = useMemo(

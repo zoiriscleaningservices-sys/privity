@@ -97,6 +97,7 @@ function initialState(source: MediaSourceKind): LocalMediaState {
 export interface LocalMediaDeps {
   mediaDevices?: MediaDevices | null;
   createPattern?: (variant: PatternVariant) => TestPatternSource;
+  initialStream?: MediaStream | null;
 }
 
 export class LocalMediaController {
@@ -119,6 +120,23 @@ export class LocalMediaController {
           ? navigator.mediaDevices
           : null;
     this.createPattern = deps.createPattern ?? ((v) => new TestPatternSource(v));
+
+    if (deps.initialStream) {
+      const vTracks = deps.initialStream.getVideoTracks();
+      const aTracks = deps.initialStream.getAudioTracks();
+      if (vTracks.length > 0 && vTracks[0].readyState === 'live') {
+        this.state.videoStream = typeof MediaStream !== 'undefined' ? new MediaStream([vTracks[0]]) : (deps.initialStream as any);
+        this.state.camera.status = 'live';
+        this.state.camera.enabled = true;
+        this.state.camera.label = vTracks[0].label || 'Camera';
+      }
+      if (aTracks.length > 0 && aTracks[0].readyState === 'live') {
+        this.state.audioTrack = aTracks[0];
+        this.state.mic.status = 'live';
+        this.state.mic.enabled = aTracks[0].enabled;
+        this.state.mic.label = aTracks[0].label || 'Microphone';
+      }
+    }
   }
 
   getState(): LocalMediaState {
@@ -155,6 +173,12 @@ export class LocalMediaController {
       this.stopVideo();
       this.patchCamera({ enabled: false, status: 'off', message: null });
       void this.stopDual();
+      return;
+    }
+    const existing = this.state.videoStream?.getVideoTracks()[0];
+    if (existing && existing.readyState === 'live') {
+      existing.enabled = true;
+      this.patchCamera({ enabled: true, status: 'live', message: null });
       return;
     }
     this.patchCamera({ enabled: true });
@@ -275,15 +299,21 @@ export class LocalMediaController {
       } else {
         if (typeof window !== 'undefined' && window.isSecureContext === false) throw insecureError();
         if (!this.media?.getUserMedia) throw Object.assign(new Error('no mediaDevices'), { name: 'NotFoundError' });
-        stream = await this.media.getUserMedia({
-          video: {
-            facingMode: strictFacing ? { exact: facing } : { ideal: facing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 },
-          },
-          audio: false,
-        });
+        try {
+          stream = await this.media.getUserMedia({
+            video: {
+              facingMode: strictFacing ? { exact: facing } : { ideal: facing },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30 },
+            },
+            audio: false,
+          });
+        } catch (constraintErr) {
+          if (strictFacing) throw constraintErr;
+          // Fallback to unconstrained video request
+          stream = await this.media.getUserMedia({ video: true, audio: false });
+        }
         label = stream.getVideoTracks()[0]?.label || 'Camera';
       }
       if (this.disposed || epoch !== this.epoch || !this.state.camera.enabled) {
@@ -325,10 +355,15 @@ export class LocalMediaController {
       } else {
         if (typeof window !== 'undefined' && window.isSecureContext === false) throw insecureError();
         if (!this.media?.getUserMedia) throw Object.assign(new Error('no mediaDevices'), { name: 'NotFoundError' });
-        const s = await this.media.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-          video: false,
-        });
+        let s: MediaStream;
+        try {
+          s = await this.media.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            video: false,
+          });
+        } catch {
+          s = await this.media.getUserMedia({ audio: true, video: false });
+        }
         track = s.getAudioTracks()[0];
         label = track?.label || 'Microphone';
       }

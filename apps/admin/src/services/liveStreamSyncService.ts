@@ -89,6 +89,7 @@ class LiveStreamSyncService {
   private subscribers: Set<(streams: LiveMeStreamer[]) => void> = new Set();
   private roomSubscribers: Map<string, Set<(event: any) => void>> = new Map();
   private hostPeer: Peer | null = null;
+  private activePeerCalls: Set<any> = new Set();
   private hostPeerConnections: Map<string, RTCPeerConnection> = new Map();
   private hostMediaStream: MediaStream | null = null;
   private currentHostSession: RemoteLiveStreamPayload | null = null;
@@ -681,6 +682,25 @@ class LiveStreamSyncService {
           console.warn('Privity live error replacing tracks on pc:', e);
         }
       });
+
+      this.activePeerCalls.forEach((call) => {
+        try {
+          const pc = call.peerConnection as RTCPeerConnection | undefined;
+          if (pc) {
+            const senders = pc.getSenders();
+            stream.getTracks().forEach((track) => {
+              const sender = senders.find((s) => s.track?.kind === track.kind);
+              if (sender) {
+                sender.replaceTrack(track).catch(() => {});
+              } else {
+                pc.addTrack(track, stream);
+              }
+            });
+          }
+        } catch (e) {
+          console.warn('Privity live error replacing tracks on peer call:', e);
+        }
+      });
     }
   }
 
@@ -792,12 +812,7 @@ class LiveStreamSyncService {
 
       const peer = new Peer(peerId, {
         config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:global.stun.twilio.com:3478' },
-          ],
+          iceServers: DEFAULT_ICE_SERVERS,
         },
       });
 
@@ -822,7 +837,11 @@ class LiveStreamSyncService {
       });
 
       peer.on('call', (call) => {
-        if (this.hostMediaStream) {
+        this.activePeerCalls.add(call);
+        call.on('close', () => this.activePeerCalls.delete(call));
+        call.on('error', () => this.activePeerCalls.delete(call));
+
+        if (this.hostMediaStream && this.hostMediaStream.getVideoTracks().some((t) => t.readyState === 'live')) {
           call.answer(this.hostMediaStream);
         } else {
           const canvas = document.createElement('canvas');
@@ -1053,6 +1072,11 @@ class LiveStreamSyncService {
     });
     this.hostPeerConnections.clear();
 
+    this.activePeerCalls.forEach((call) => {
+      try { call.close(); } catch {}
+    });
+    this.activePeerCalls.clear();
+
     const session = this.currentHostSession;
     let streamId = session?.id || '';
     let handle = session?.creatorHandle || '';
@@ -1257,10 +1281,7 @@ class LiveStreamSyncService {
     try {
       viewerPeer = new Peer(viewerId, {
         config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:global.stun.twilio.com:3478' },
-          ],
+          iceServers: DEFAULT_ICE_SERVERS,
         },
       });
 
