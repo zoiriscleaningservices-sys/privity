@@ -241,7 +241,8 @@ export class LocalMediaController {
     try {
       if (!media?.enumerateDevices) throw new Error('enumerate');
       const devices = (await media.enumerateDevices()).filter((d) => d.kind === 'videoinput');
-      const currentId = this.state.videoStream?.getVideoTracks()[0]?.getSettings().deviceId;
+      const currentTrack = this.state.videoStream?.getVideoTracks()[0];
+      const currentId = currentTrack?.getSettings().deviceId;
       const other = devices.find((d) => d.deviceId && d.deviceId !== currentId);
       if (!other) {
         this.patchDual({ status: 'unsupported', message: 'Dual needs a second camera. Only one camera was found on this device.' });
@@ -252,6 +253,30 @@ export class LocalMediaController {
         s.getTracks().forEach((t) => t.stop());
         return;
       }
+
+      // Hardware conflict detection: Verify that opening the second camera did not mute or terminate the primary camera
+      const verifyPrimary = this.state.videoStream?.getVideoTracks()[0];
+      if (verifyPrimary && (verifyPrimary.readyState === 'ended' || verifyPrimary.muted)) {
+        s.getTracks().forEach((t) => t.stop());
+        await this.setCameraEnabled(true);
+        this.patchDual({
+          status: 'unsupported',
+          stream: null,
+          message: 'This device hardware cannot run both cameras at the same time.',
+        });
+        return;
+      }
+
+      // Attach event listener so if the dual track is terminated externally, state cleans up without affecting primary camera
+      const dualTrack = s.getVideoTracks()[0];
+      if (dualTrack) {
+        dualTrack.addEventListener('ended', () => {
+          if (this.state.dual.stream === s) {
+            void this.stopDual();
+          }
+        });
+      }
+
       this.patchDual({ status: 'on', stream: s, message: null });
     } catch (err) {
       const c = classifyMediaError(err, 'camera');
@@ -267,10 +292,20 @@ export class LocalMediaController {
   }
 
   async stopDual(): Promise<void> {
-    this.state.dual.stream?.getTracks().forEach((t) => t.stop());
+    const s = this.state.dual.stream;
+    if (s) {
+      s.getTracks().forEach((t) => t.stop());
+    }
     this.dualPattern?.stop();
     this.dualPattern = null;
-    if (this.state.dual.status !== 'off') this.patchDual({ status: 'off', stream: null, message: null });
+    if (this.state.dual.status !== 'off') {
+      this.patchDual({ status: 'off', stream: null, message: null });
+    }
+    // Verify primary camera is still healthy
+    const primary = this.state.videoStream?.getVideoTracks()[0];
+    if (this.state.camera.enabled && (!primary || primary.readyState !== 'live')) {
+      void this.setCameraEnabled(true);
+    }
   }
 
   /** Clears a dual-mode error/unsupported notice. */

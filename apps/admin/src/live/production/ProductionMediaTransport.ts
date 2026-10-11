@@ -26,6 +26,7 @@ export class ProductionMediaTransport implements MediaTransport {
   private cleanupViewerStream: (() => void) | null = null;
   private cleanupGuestStreams: (() => void) | null = null;
   private cleanupGuestStage: (() => void) | null = null;
+  private activeParticipantCleanups = new Map<string, () => void>();
   private disposed = false;
 
   constructor(private readonly opts: ProductionMediaTransportOptions) {
@@ -140,24 +141,31 @@ export class ProductionMediaTransport implements MediaTransport {
     } else if (!this.opts.isHost && participantId === this.opts.myId && media.stream) {
       // Viewer accepted on stage as guest -> publish guest media to host WebRTC
       const hostHandle = this.opts.streamerHandle || this.opts.streamerId;
-      this.cleanupGuestStage?.();
-      this.cleanupGuestStage = liveStreamSync.connectGuestStage(
-        hostHandle,
-        this.opts.myHandle,
-        media.stream,
-        (hostStream) => {
-          if (!this.disposed) {
-            this.remote.set(this.opts.streamerId, {
-              id: this.opts.streamerId,
-              status: 'connected',
-              cameraOn: true,
-              micOn: true,
-              stream: hostStream,
-            });
-            this.rebuild();
+      const prevStream = prev?.stream;
+      const tracksChanged =
+        !prevStream ||
+        prevStream.getTracks().map((t) => t.id).join(',') !== media.stream.getTracks().map((t) => t.id).join(',');
+
+      if (tracksChanged || !this.cleanupGuestStage) {
+        this.cleanupGuestStage?.();
+        this.cleanupGuestStage = liveStreamSync.connectGuestStage(
+          hostHandle,
+          this.opts.myHandle,
+          media.stream,
+          (hostStream) => {
+            if (!this.disposed) {
+              this.remote.set(this.opts.streamerId, {
+                id: this.opts.streamerId,
+                status: 'connected',
+                cameraOn: true,
+                micOn: true,
+                stream: hostStream,
+              });
+              this.rebuild();
+            }
           }
-        }
-      );
+        );
+      }
     }
 
     this.rebuild();
@@ -181,11 +189,76 @@ export class ProductionMediaTransport implements MediaTransport {
     }
   }
 
+  /**
+   * Synchronizes remote participant media connections (guests and battle opponents)
+   * so all connected viewers and hosts receive real WebRTC audio/video feeds.
+   */
+  public syncParticipants(participants: ReadonlyArray<{ id: string; handle?: string | null }>): void {
+    if (this.disposed) return;
+    const cleanMyId = (this.opts.myId || '').toLowerCase().trim();
+    const cleanMyHandle = (this.opts.myHandle || '').replace(/^@/, '').toLowerCase().trim();
+    const currentKeys = new Set<string>();
+
+    for (const p of participants) {
+      if (!p || !p.id) continue;
+      const pid = p.id;
+      const handle = (p.handle || p.id).replace(/^@/, '').toLowerCase().trim();
+      if (pid === cleanMyId || handle === cleanMyHandle) continue;
+
+      currentKeys.add(pid);
+      if (handle) currentKeys.add(handle);
+
+      if (!this.activeParticipantCleanups.has(pid)) {
+        const cleanup = liveStreamSync.connectToRemoteStream(
+          handle || pid,
+          (remoteStream) => {
+            if (this.disposed) return;
+            const mediaObj: ParticipantMedia = {
+              id: pid,
+              status: 'connected',
+              cameraOn: true,
+              micOn: true,
+              stream: remoteStream,
+            };
+            this.remote.set(pid, mediaObj);
+            if (handle && handle !== pid) {
+              this.remote.set(handle, mediaObj);
+            }
+            this.rebuild();
+          },
+          (status) => {
+            if (this.disposed) return;
+            const current = this.remote.get(pid);
+            if (current) {
+              current.status = status === 'connecting' ? 'reconnecting' : status === 'failed' ? 'disconnected' : 'connected';
+              this.rebuild();
+            }
+          }
+        );
+        this.activeParticipantCleanups.set(pid, cleanup);
+      }
+    }
+
+    // Clean up participants no longer on stage
+    for (const [key, cleanup] of Array.from(this.activeParticipantCleanups.entries())) {
+      if (!currentKeys.has(key)) {
+        try { cleanup(); } catch {}
+        this.activeParticipantCleanups.delete(key);
+        this.remote.delete(key);
+        this.rebuild();
+      }
+    }
+  }
+
   dispose(): void {
     this.disposed = true;
     this.cleanupViewerStream?.();
     this.cleanupGuestStreams?.();
     this.cleanupGuestStage?.();
+    this.activeParticipantCleanups.forEach((cleanup) => {
+      try { cleanup(); } catch {}
+    });
+    this.activeParticipantCleanups.clear();
     this.published.clear();
     this.remote.clear();
     this.listeners.clear();

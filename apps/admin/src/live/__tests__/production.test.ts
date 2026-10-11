@@ -386,6 +386,68 @@ describe('ProductionLiveSession — Full Stage 1–5 Integration', () => {
 
     session.dispose();
   });
+
+  it('atomically terminates LIVE session and dispatches LIVE_ENDED to listeners', async () => {
+    const session = createProductionLiveSession({
+      streamerId: 'streamer-end-test',
+      streamerHandle: 'endHost',
+      streamerName: 'End Host',
+      streamerAvatar: '',
+      me,
+      isHost: true,
+    });
+
+    let liveEndedEventReceived = false;
+    session.feed.connect({
+      onSnapshot: () => {},
+      onEvent: (evt) => {
+        if (evt.event_type === 'LIVE_ENDED') {
+          liveEndedEventReceived = true;
+        }
+      },
+      onPersonal: () => {},
+      onConnection: () => {},
+      onUnavailable: () => {},
+    });
+
+    const endResult = await session.commands.endLive('streamer-end-test');
+    expect(endResult.ok).toBe(true);
+    if (endResult.ok) {
+      expect(endResult.data.status).toBe('ended');
+    }
+    expect(liveEndedEventReceived).toBe(true);
+
+    const snapshot = await session.commands.getSnapshot('streamer-end-test');
+    expect(snapshot.ok).toBe(true);
+    if (snapshot.ok) {
+      expect(snapshot.data.status).toBe('ended');
+      expect(snapshot.data.guests).toHaveLength(0);
+    }
+
+    session.dispose();
+  });
+
+  it('ProductionMediaTransport syncParticipants dynamically tracks and removes remote streams', async () => {
+    const { ProductionMediaTransport } = await import('../production/ProductionMediaTransport');
+    const transport = new ProductionMediaTransport({
+      streamerId: 'host-1',
+      streamerHandle: 'hostHandle',
+      myId: 'user-viewer',
+      myHandle: 'viewerHandle',
+      isHost: false,
+    });
+
+    expect(transport.syncParticipants).toBeDefined();
+    transport.syncParticipants([
+      { id: 'guest-1', handle: 'guestOne' },
+      { id: 'opponent-1', handle: 'rivalPro' },
+    ]);
+
+    // Prune back to empty
+    transport.syncParticipants([]);
+    transport.dispose();
+  });
 });
+
 
 

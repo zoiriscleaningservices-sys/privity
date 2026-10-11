@@ -257,9 +257,15 @@ export const FilteredPreview = memo(function FilteredPreview({
     };
     void v.play().catch(() => undefined);
     if (v.readyState >= 2) begin();
-    else v.addEventListener('loadeddata', begin, { once: true });
+    else {
+      v.addEventListener('loadeddata', begin, { once: true });
+      v.addEventListener('canplay', begin, { once: true });
+      v.addEventListener('playing', begin, { once: true });
+    }
     return () => {
       v.removeEventListener('loadeddata', begin);
+      v.removeEventListener('canplay', begin);
+      v.removeEventListener('playing', begin);
       pipeline.stop();
     };
   }, [stream, pipeline]);

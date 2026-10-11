@@ -133,6 +133,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   let commentsEnabled = true;
   let activeHandlers: LiveFeedHandlers | null = null;
   let disposed = false;
+  let isEnded = false;
 
   // Real-time audience presence tracking
   const presenceMap = new Map<string, { lastSeen: number; handle: string; isHost: boolean }>();
@@ -425,6 +426,36 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
           },
         });
       }
+    } else if (
+      raw.type === 'LIVE_ENDED' ||
+      raw.action === 'LIVE_ENDED' ||
+      raw.type === 'STREAM_ENDED' ||
+      raw.action === 'STREAM_ENDED' ||
+      raw.type === 'LIVE_HOST_ENDED'
+    ) {
+      if (!isEnded) {
+        isEnded = true;
+        if (battleTimer) {
+          clearInterval(battleTimer);
+          battleTimer = null;
+        }
+        if (presenceHeartbeatTimer) {
+          clearInterval(presenceHeartbeatTimer);
+          presenceHeartbeatTimer = null;
+        }
+        activeGuests.length = 0;
+        dispatchEvent({
+          event_id: raw.event_id || `evt-ended-${Date.now()}`,
+          live_id: liveId,
+          battle_id: null,
+          event_type: 'LIVE_ENDED',
+          actor_id: null,
+          server_ts: raw.server_ts || iso(),
+          seq: ++seqCounter,
+          schema_version: 1,
+          payload: { reason: raw.reason || 'host_ended' },
+        });
+      }
     }
   };
 
@@ -432,16 +463,28 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
 
   if (bus) {
     bus.onmessage = (e) => {
-      if (e.data?.streamId === liveId && e.data?.event) {
+      if (!e.data) return;
+      if (e.data.streamId === liveId && e.data.event) {
         handleIncomingNetworkEvent(e.data.event);
+      } else if (
+        (e.data.streamId === liveId || (cleanHostHandle && e.data.handle === cleanHostHandle)) &&
+        (e.data.type === 'LIVE_HOST_ENDED' || e.data.action === 'LIVE_ENDED' || e.data.type === 'STREAM_ENDED')
+      ) {
+        handleIncomingNetworkEvent({ type: 'LIVE_ENDED', reason: 'host_ended' });
       }
     };
   }
 
   try {
     onSupabaseBroadcast((payload: any) => {
-      if (payload?.action === 'ROOM_EVENT' && payload?.streamId === liveId && payload?.event) {
+      if (!payload) return;
+      if (payload.action === 'ROOM_EVENT' && payload.streamId === liveId && payload.event) {
         handleIncomingNetworkEvent(payload.event);
+      } else if (
+        (payload.streamId === liveId || (cleanHostHandle && (payload.handle === cleanHostHandle || payload.creatorHandle === cleanHostHandle))) &&
+        (payload.action === 'STREAM_ENDED' || payload.action === 'LIVE_ENDED')
+      ) {
+        handleIncomingNetworkEvent({ type: 'LIVE_ENDED', reason: 'host_ended' });
       }
     });
   } catch {}
@@ -743,7 +786,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       live_id: liveId,
       last_seq: seqCounter,
       server_now: iso(),
-      status: 'live',
+      status: isEnded ? 'ended' : 'live',
       title: streamerName ? `${streamerName}'s LIVE Broadcast` : 'Live Broadcast',
       visibility: 'public',
       started_at: new Date(sessionStartedAt).toISOString(),
@@ -754,7 +797,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       battle: battleState,
       config_version: 1,
       comments_enabled: commentsEnabled,
-      guests: [...activeGuests],
+      guests: isEnded ? [] : [...activeGuests],
       recent_comments: recentComments,
       me: {
         user_id: me.id,
@@ -1032,11 +1075,45 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       return { ok: true, data: { battle_id: battleState?.battle_id || 'battle' } };
     },
     async endLive(_id) {
+      if (isEnded) return { ok: true, data: { status: 'ended' } };
+      isEnded = true;
+
+      if (battleTimer) {
+        clearInterval(battleTimer);
+        battleTimer = null;
+      }
+      if (presenceHeartbeatTimer) {
+        clearInterval(presenceHeartbeatTimer);
+        presenceHeartbeatTimer = null;
+      }
+      activeGuests.length = 0;
+
       try {
         localStorage.removeItem(storageStartedKey);
+        if (handleStartedKey) localStorage.removeItem(handleStartedKey);
+        localStorage.removeItem('privity_current_live_host');
+        localStorage.removeItem('privity_is_host_broadcasting');
       } catch {}
-      broadcastRoomEvent({ type: 'LIVE_ENDED', streamId: liveId });
+
+      // 1. Dispatch locally so the host's studio immediately displays summary
+      dispatchEvent({
+        event_id: `evt-ended-${Date.now()}`,
+        live_id: liveId,
+        battle_id: null,
+        event_type: 'LIVE_ENDED',
+        actor_id: me.id,
+        server_ts: iso(),
+        seq: ++seqCounter,
+        schema_version: 1,
+        payload: { reason: 'host_ended' },
+      });
+
+      // 2. Broadcast room event to all connected clients
+      broadcastRoomEvent({ type: 'LIVE_ENDED', streamId: liveId, reason: 'host_ended' });
+
+      // 3. Mark stream ended across local storage, peer connections, MQTT and sync service
       liveStreamSync.stopHostBroadcast();
+
       return { ok: true, data: { status: 'ended' } };
     },
   };

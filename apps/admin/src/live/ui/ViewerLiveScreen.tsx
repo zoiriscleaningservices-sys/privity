@@ -138,6 +138,24 @@ function ViewerBody({
     return () => unsub();
   }, [room?.liveId]);
 
+  // Synchronize remote participant media (guests on stage and battle opponents)
+  useEffect(() => {
+    if (!media?.syncParticipants || !room) return;
+    const participants: Array<{ id: string; handle?: string | null }> = [];
+    if (room.guests) {
+      for (const g of room.guests) {
+        if (g.id !== me.id) participants.push({ id: g.id, handle: g.handle });
+      }
+    }
+    if (room.battle && (room.battle.status === 'accepted' || room.battle.status === 'live' || room.battle.status === 'locked')) {
+      const oppA = room.battle.side_a.host;
+      const oppB = room.battle.side_b.host;
+      if (oppA && oppA.id !== me.id && oppA.id !== room.host.id) participants.push({ id: oppA.id, handle: oppA.handle });
+      if (oppB && oppB.id !== me.id && oppB.id !== room.host.id) participants.push({ id: oppB.id, handle: oppB.handle });
+    }
+    media.syncParticipants(participants);
+  }, [media, room?.guests, room?.battle, room?.host.id, me.id]);
+
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const target = e.target as HTMLElement | null;

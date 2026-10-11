@@ -202,6 +202,22 @@ function StudioBody({
   }, [media, me.id, processed, cameraLive, micLive, local.audioTrack, live, liveVideoTracks]);
   useEffect(() => () => media?.unpublish(me.id), [media, me.id]);
 
+  // Synchronize remote participant media (guests on stage and battle opponents)
+  useEffect(() => {
+    if (!media?.syncParticipants || !room) return;
+    const participants: Array<{ id: string; handle?: string | null }> = [];
+    if (room.guests) {
+      for (const g of room.guests) {
+        if (g.id !== me.id) participants.push({ id: g.id, handle: g.handle });
+      }
+    }
+    if (room.battle && (room.battle.status === 'accepted' || room.battle.status === 'live' || room.battle.status === 'locked')) {
+      const opp = room.battle.side_b.host;
+      if (opp && opp.id !== me.id) participants.push({ id: opp.id, handle: opp.handle });
+    }
+    media.syncParticipants(participants);
+  }, [media, room?.guests, room?.battle, me.id]);
+
   // Stop my devices as soon as the LIVE has ended.
   useEffect(() => {
     if (room && !live) {

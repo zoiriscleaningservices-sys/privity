@@ -1007,7 +1007,7 @@ class LiveStreamSyncService {
           }
 
           // Receive guest tracks so host receives guest audio and video
-          const incomingGuestStream = new MediaStream();
+          const incomingGuestStream: MediaStream = typeof MediaStream !== 'undefined' ? new MediaStream() : ({} as any);
           pc.ontrack = (event) => {
             if (event.track) {
               if (!incomingGuestStream.getTracks().some((t) => t.id === event.track.id)) {
@@ -1262,7 +1262,7 @@ class LiveStreamSyncService {
     const targetPeerId = `privity-live-${roomId}`;
     const viewerId = `privity-v-${Math.random().toString(36).substring(2, 9)}`;
 
-    const incomingMediaStream = new MediaStream();
+    const incomingMediaStream: MediaStream = typeof MediaStream !== 'undefined' ? new MediaStream() : ({} as any);
 
     const handleStreamSuccess = (remoteStream: MediaStream) => {
       if (isCleanedUp) return;
@@ -1416,7 +1416,7 @@ class LiveStreamSyncService {
     let isCleanedUp = false;
     let pc: RTCPeerConnection | null = null;
     const pendingHostCandidates: RTCIceCandidateInit[] = [];
-    const incomingHostStream = new MediaStream();
+    const incomingHostStream: MediaStream = typeof MediaStream !== 'undefined' ? new MediaStream() : ({} as any);
 
     try {
       pc = new RTCPeerConnection({

@@ -22,4 +22,5 @@ export interface PublishedMedia {
 export interface MediaTransport extends MediaPresenceSource {
   publish(participantId: string, media: PublishedMedia): void;
   unpublish(participantId: string): void;
+  syncParticipants?(participants: ReadonlyArray<{ id: string; handle?: string | null }>): void;
 }
