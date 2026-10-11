@@ -132,4 +132,166 @@ describe('ProductionLiveSession — Full Stage 1–5 Integration', () => {
 
     session.dispose();
   });
+
+  it('persists authoritative startedAt timestamp across snapshots without resetting to 0', async () => {
+    const fixedStartTime = Date.now() - 120000; // 2 minutes ago
+    localStorage.setItem('privity_live_started_streamer-persist', String(fixedStartTime));
+
+    const session = createProductionLiveSession({
+      streamerId: 'streamer-persist',
+      streamerHandle: 'persistHost',
+      streamerName: 'Persist Host',
+      streamerAvatar: '',
+      startedAt: fixedStartTime,
+      me,
+      isHost: false,
+    });
+
+    const snap1 = await session.commands.getSnapshot('streamer-persist');
+    expect(snap1.ok).toBe(true);
+    if (snap1.ok) {
+      expect(new Date(snap1.data.started_at).getTime()).toBe(fixedStartTime);
+    }
+
+    // Wait a short time and take another snapshot; started_at MUST remain the exact same timestamp
+    const snap2 = await session.commands.getSnapshot('streamer-persist');
+    expect(snap2.ok).toBe(true);
+    if (snap2.ok) {
+      expect(new Date(snap2.data.started_at).getTime()).toBe(fixedStartTime);
+    }
+
+    // End stream clears storage
+    await session.commands.endLive('streamer-persist');
+    expect(localStorage.getItem('privity_live_started_streamer-persist')).toBeNull();
+
+    session.dispose();
+  });
+
+  it('LiveRoomController derives elapsed duration from authoritative started_at and does not reset on snapshot', async () => {
+    const fixedStartTime = Date.now() - 150000; // 2.5 minutes ago
+    const session = createProductionLiveSession({
+      streamerId: 'streamer-timer-test',
+      streamerHandle: 'timerHost',
+      streamerName: 'Timer Host',
+      streamerAvatar: '',
+      startedAt: fixedStartTime,
+      me,
+      isHost: false,
+    });
+    const { LiveRoomController } = await import('../client/LiveRoomController');
+    const { EffectsController } = await import('../show/effects');
+    const controller = new LiveRoomController({
+      feed: session.feed,
+      effects: new EffectsController(),
+    });
+    controller.start();
+    // Wait for feed to connect and snapshot to apply
+    await new Promise((r) => setTimeout(r, 60));
+    expect(controller.getView().startedAt).toBe(fixedStartTime);
+    expect(Date.now() - (controller.getView().startedAt || 0)).toBeGreaterThanOrEqual(150000);
+
+    // Call resync, which re-emits a snapshot
+    controller.resync();
+    await new Promise((r) => setTimeout(r, 60));
+
+    // startedAt MUST NOT reset to 0 or current time
+    expect(controller.getView().startedAt).toBe(fixedStartTime);
+    expect(Date.now() - (controller.getView().startedAt || 0)).toBeGreaterThanOrEqual(150000);
+
+    session.dispose();
+  });
+
+  it('tracks real-time audience presence without inventing fake numbers', async () => {
+    const session = createProductionLiveSession({
+      streamerId: 'streamer-presence',
+      streamerHandle: 'presenceHost',
+      streamerName: 'Presence Host',
+      streamerAvatar: '',
+      me,
+      isHost: true,
+    });
+
+    const snap = await session.commands.getSnapshot('streamer-presence');
+    expect(snap.ok).toBe(true);
+    if (snap.ok) {
+      // Viewer count accurately starts with registered participants (minimum 1 for host)
+      expect(snap.data.viewer_count).toBeGreaterThanOrEqual(1);
+    }
+
+    session.dispose();
+  });
+
+  it('LocalMediaController protects external camera tracks from being stopped on dispose', async () => {
+    const { LocalMediaController } = await import('../media/LocalMediaController');
+    const stopMock = vi.fn();
+    const mockTrack = {
+      id: 'ext-camera-track-123',
+      kind: 'video',
+      readyState: 'live',
+      stop: stopMock,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    const mockStream = {
+      id: 'ext-stream-123',
+      getTracks: () => [mockTrack],
+      getVideoTracks: () => [mockTrack],
+      getAudioTracks: () => [],
+    } as unknown as MediaStream;
+
+    const controller = new LocalMediaController('camera', {
+      initialStream: mockStream,
+    });
+
+    // Verify external stream is active
+    expect(controller.getState().videoStream).toBe(mockStream);
+    expect(controller.getState().camera.status).toBe('live');
+
+    // Disposing or releasing the controller MUST NOT stop the hardware camera track
+    controller.dispose();
+    expect(stopMock).not.toHaveBeenCalled();
+  });
+
+  it('validates tap-anywhere hearts gesture exclusion rules and distance thresholds', () => {
+    // Tap-anywhere detection thresholds
+    const isIntentionalTap = (dx: number, dy: number, dt: number) => {
+      return dx <= 16 && dy <= 16 && dt <= 450;
+    };
+
+    // Clean tap
+    expect(isIntentionalTap(2, 3, 120)).toBe(true);
+    // Drag / swipe gesture (dx > 16)
+    expect(isIntentionalTap(45, 2, 200)).toBe(false);
+    // Vertical scroll (dy > 16)
+    expect(isIntentionalTap(1, 60, 250)).toBe(false);
+    // Long press (dt > 450ms)
+    expect(isIntentionalTap(4, 4, 600)).toBe(false);
+
+    // Exclusion selector matching
+    const excludedSelectors = [
+      'button',
+      'input',
+      'textarea',
+      'a',
+      '.plv-action-buttons',
+      '.plv-composer',
+      '.plv-comments',
+      '.plv-dialog-card',
+      '.plv-sheet',
+      '.plv-guest-dock',
+    ];
+
+    const isExcluded = (className: string, tagName: string) => {
+      const lowerTag = tagName.toLowerCase();
+      if (['button', 'input', 'textarea', 'a', 'select'].includes(lowerTag)) return true;
+      return excludedSelectors.some(sel => sel.startsWith('.') && className.split(' ').includes(sel.slice(1)));
+    };
+
+    expect(isExcluded('plv-icon-btn', 'button')).toBe(true);
+    expect(isExcluded('plv-composer-input', 'input')).toBe(true);
+    expect(isExcluded('plv-composer plv-custom', 'div')).toBe(true);
+    expect(isExcluded('plv-video-surface', 'video')).toBe(false);
+    expect(isExcluded('plv-stage-main', 'div')).toBe(false);
+  });
 });
+

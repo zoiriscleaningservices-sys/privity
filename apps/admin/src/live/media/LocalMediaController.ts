@@ -110,9 +110,11 @@ export class LocalMediaController {
   private patternAudio: { track: MediaStreamTrack; close: () => void } | null = null;
   private disposed = false;
   private epoch = 0;
+  private hasExternalStream = false;
 
   constructor(source: MediaSourceKind = 'camera', deps: LocalMediaDeps = {}) {
     this.state = initialState(source);
+    this.hasExternalStream = !!deps.initialStream;
     this.media =
       deps.mediaDevices !== undefined
         ? deps.mediaDevices
@@ -404,15 +406,19 @@ export class LocalMediaController {
       this.pattern?.stop();
       this.pattern = null;
     } else {
-      s?.getTracks().forEach((t) => t.stop());
+      if (!this.hasExternalStream) {
+        s?.getTracks().forEach((t) => t.stop());
+      }
     }
     this.state = { ...this.state, videoStream: null };
   }
 
   private releaseAll(): void {
     this.epoch += 1;
-    this.state.videoStream?.getTracks().forEach((t) => t.stop());
-    this.state.audioTrack?.stop();
+    if (!this.hasExternalStream) {
+      this.state.videoStream?.getTracks().forEach((t) => t.stop());
+      this.state.audioTrack?.stop();
+    }
     this.state.dual.stream?.getTracks().forEach((t) => t.stop());
     this.patternAudio?.close();
     this.pattern?.stop();

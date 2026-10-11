@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Mic,
   MicOff,
@@ -43,6 +43,8 @@ import { StageManagerSheet } from './StageManagerSheet';
 import { BattleInviteCard, HostSettingsSheet, ModerationSheet } from './HostSheets';
 import { useGuestRequests, useStagePresentation } from './useHostStage';
 import { SupportersSheet } from './ViewerSheets';
+import { HeartsHandle, HeartsLayer } from './Hearts';
+import { liveStreamSync } from '../../services/liveStreamSyncService';
 
 export interface HostStudioProps {
   feed: LiveFeed;
@@ -118,6 +120,7 @@ function StudioBody({
   const local = useLocalMedia(localMedia);
   const library = useFilterLibrary(filterStore);
   const { items: toasts, push: toast } = useToasts();
+  const hearts = useRef<HeartsHandle>(null);
 
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [draft, setDraft] = useState<{ params: FilterParams; intensity: number } | null>(null);
@@ -135,6 +138,16 @@ function StudioBody({
   const stageReq = useGuestRequests(controller, commands, room?.liveId ?? null, guests);
   const pres = useStagePresentation(guests);
   const pendingCount = stageReq.requests.filter((r) => r.status === 'pending' || r.status === 'failed').length;
+
+  useEffect(() => {
+    if (!room?.liveId) return;
+    const unsub = liveStreamSync.subscribeToRoomEvents(room.liveId, (evt: any) => {
+      if (evt?.type === 'REACTION_SENT') {
+        hearts.current?.burst();
+      }
+    });
+    return () => unsub();
+  }, [room?.liveId]);
 
   const onNotice = useCallback(
     (n: PersonalNotice) => {
@@ -353,6 +366,7 @@ function StudioBody({
       )}
 
       <ShowOverlay engine={controller.engine} />
+      <HeartsLayer ref={hearts} />
 
       {invite && opponent && (
         <BattleInviteCard

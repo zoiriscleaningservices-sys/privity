@@ -469,6 +469,7 @@ export interface LiveStreamSession {
   multiGuests: LiveGuestSlot[];
   participants: Array<{ name: string; avatar: string; role: string }>;
   tags: string[];
+  startedAt?: number;
 }
 
 export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [];
@@ -1273,44 +1274,8 @@ export function App() {
     document.body.scrollTop = 0;
   }, []);
 
-  // Save active section across refreshes and sync with URL hash
-  useEffect(() => {
-    safeSaveStorage('privity_active_tab_v5', activeTab);
-    try {
-      const curH = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-      if (import.meta.env.DEV && ['live-lab', 'live-sim'].includes(curH)) return;
-      if (curH === 'live' && activeTab === 'feed' && feedFilter === 'live') return;
-      if (activeTab === 'feed' && feedFilter === 'live') {
-        window.location.hash = 'live';
-      } else if (curH !== activeTab) {
-        window.location.hash = activeTab;
-      }
-    } catch (e) {}
-  }, [activeTab, feedFilter]);
+  // Production URL hash routing & active section persistence is consolidated with full LIVE state below
 
-  useEffect(() => {
-    const handleHash = () => {
-      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-      if (import.meta.env.DEV && ['live-lab', 'live-sim'].includes(hash)) {
-        setLiveLabActive(true);
-        return;
-      }
-      setLiveLabActive(false);
-      if (hash === 'live') {
-        setActiveTab('feed');
-        setFeedFilter('live');
-        return;
-      }
-      if (['feed', 'discover', 'messages', 'activity', 'profile', 'safety'].includes(hash)) {
-        setActiveTab(hash as any);
-        if (hash === 'messages') {
-          setActiveChatUser(null);
-        }
-      }
-    };
-    window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
-  }, []);
 
   useEffect(() => {
     safeSaveStorage('privity_feed_view_mode_v1', feedViewMode);
@@ -5510,6 +5475,96 @@ export function App() {
     setTimeout(() => setToastMsg(null), 3000);
   }, []);
 
+  // Sync URL hash when active section or active live stream changes
+  useEffect(() => {
+    safeSaveStorage('privity_active_tab_v5', activeTab);
+    try {
+      if (activeLiveStream?.id) {
+        const streamHash = `live/${encodeURIComponent(activeLiveStream.id)}`;
+        if (window.location.hash.replace(/^#\/?/, '') !== streamHash) {
+          window.location.hash = streamHash;
+        }
+        return;
+      }
+      const curH = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (import.meta.env.DEV && ['live-lab', 'live-sim'].includes(curH)) return;
+      if (curH.startsWith('live/')) {
+        window.location.hash = (activeTab === 'feed' && feedFilter === 'live') ? 'live' : activeTab;
+      } else if (activeTab === 'feed' && feedFilter === 'live') {
+        window.location.hash = 'live';
+      } else if (curH !== activeTab) {
+        window.location.hash = activeTab;
+      }
+    } catch (e) {}
+  }, [activeTab, feedFilter, activeLiveStream?.id]);
+
+  // Production Hash Change & Direct Live Link Routing
+  useEffect(() => {
+    const handleHash = () => {
+      const rawHash = window.location.hash.replace(/^#\/?/, '');
+      const hash = rawHash.toLowerCase();
+
+      if (import.meta.env.DEV && ['live-lab', 'live-sim'].includes(hash)) {
+        setLiveLabActive(true);
+        return;
+      }
+      setLiveLabActive(false);
+
+      // Handle direct stream links: #live/:streamId
+      if (hash.startsWith('live/')) {
+        const streamId = decodeURIComponent(rawHash.slice(5)).trim();
+        setActiveTab('feed');
+        setFeedFilter('live');
+        if (streamId && (!activeLiveStream || activeLiveStream.id !== streamId)) {
+          const syncList = liveStreamSync.getStreamersList();
+          const target =
+            syncList.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase()) ||
+            LIVEME_STREAMERS.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase()) ||
+            networkLiveStreamers.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase());
+
+          if (target) {
+            setActiveLiveStream(target as any);
+          } else {
+            const activePayload = liveStreamSync.getActiveStreamPayload(streamId);
+            if (activePayload && (activePayload.id === streamId || (activePayload.creatorHandle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase())) {
+              setActiveLiveStream(activePayload as any);
+            } else {
+              triggerToast('This LIVE stream has ended or is unavailable.');
+              window.location.hash = 'live';
+            }
+          }
+        }
+        return;
+      }
+
+      if (hash === 'live') {
+        setActiveTab('feed');
+        setFeedFilter('live');
+        // Back navigation: if viewing a live stream (and not broadcasting as host), exit viewer cleanly
+        if (activeLiveStream && !isHostBroadcasting) {
+          setActiveLiveStream(null);
+        }
+        return;
+      }
+
+      if (['feed', 'discover', 'messages', 'activity', 'profile', 'safety'].includes(hash)) {
+        setActiveTab(hash as any);
+        if (hash === 'messages') {
+          setActiveChatUser(null);
+        }
+        if (activeLiveStream && !isHostBroadcasting) {
+          setActiveLiveStream(null);
+        }
+      }
+    };
+
+    window.addEventListener('hashchange', handleHash);
+    // Process on initial page load / refresh
+    handleHash();
+
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, [activeLiveStream?.id, isHostBroadcasting, networkLiveStreamers]);
+
   const handleCreateGroup = () => {
     if (!newGroupName.trim()) {
       triggerToast('Please enter a group name');
@@ -7283,6 +7338,7 @@ export function App() {
       multiGuests: [],
       participants: [{ name: myProfile.name, avatar: myProfile.avatar, role: 'Host' }],
       tags: ['Live', 'P2P', 'Privity'],
+      startedAt: Date.now(),
     };
 
     setLiveStreamsList((prev) => [userStream, ...prev]);

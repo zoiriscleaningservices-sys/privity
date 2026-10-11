@@ -19,6 +19,7 @@ export interface LiveMeStreamer {
   isHost?: boolean;
   isCameraStream?: boolean;
   peerId?: string;
+  startedAt?: number;
   topContributors: LiveMeContributor[];
 }
 

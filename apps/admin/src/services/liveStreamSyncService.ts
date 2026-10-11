@@ -614,6 +614,7 @@ class LiveStreamSyncService {
         isHost: isHost,
         isCameraStream: true,
         peerId: s.peerId,
+        startedAt: s.startedAt,
         topContributors: [],
       });
     }
@@ -664,6 +665,22 @@ class LiveStreamSyncService {
     return null;
   }
 
+  public getActiveStreamPayload(streamIdOrHandle: string): RemoteLiveStreamPayload | null {
+    if (!streamIdOrHandle) return null;
+    const clean = streamIdOrHandle.toLowerCase().replace('@', '').trim();
+    if (this.currentHostSession && (this.currentHostSession.id === streamIdOrHandle || this.currentHostSession.creatorHandle.toLowerCase().replace('@', '').trim() === clean)) {
+      return this.currentHostSession;
+    }
+    const byId = this.activeStreams.get(streamIdOrHandle);
+    if (byId) return byId;
+    for (const s of this.activeStreams.values()) {
+      if (s.id === streamIdOrHandle || s.creatorHandle.toLowerCase().replace('@', '').trim() === clean) {
+        return s;
+      }
+    }
+    return null;
+  }
+
   public updateHostMediaStream(stream: MediaStream | null) {
     this.hostMediaStream = stream;
     if (stream) {
@@ -673,7 +690,9 @@ class LiveStreamSyncService {
           stream.getTracks().forEach((track) => {
             const sender = senders.find((s) => s.track?.kind === track.kind);
             if (sender) {
-              sender.replaceTrack(track).catch(() => {});
+              if (sender.track?.id !== track.id) {
+                sender.replaceTrack(track).catch(() => {});
+              }
             } else {
               pc.addTrack(track, stream);
             }
@@ -691,7 +710,9 @@ class LiveStreamSyncService {
             stream.getTracks().forEach((track) => {
               const sender = senders.find((s) => s.track?.kind === track.kind);
               if (sender) {
-                sender.replaceTrack(track).catch(() => {});
+                if (sender.track?.id !== track.id) {
+                  sender.replaceTrack(track).catch(() => {});
+                }
               } else {
                 pc.addTrack(track, stream);
               }

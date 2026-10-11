@@ -29,10 +29,33 @@ export class ProductionMediaTransport implements MediaTransport {
   private disposed = false;
 
   constructor(private readonly opts: ProductionMediaTransportOptions) {
+    if (opts.isHost && opts.initialStream) {
+      this.published.set(opts.myId, {
+        stream: opts.initialStream,
+        cameraOn: true,
+        micOn: true,
+        status: 'connected',
+      });
+    }
     if (!opts.isHost) {
       this.initViewerConnection();
     }
     this.initGuestStreamsListener();
+    this.rebuild();
+  }
+
+  public updateInitialStream(stream: MediaStream | null): void {
+    if (this.disposed || !this.opts.isHost) return;
+    const prev = this.published.get(this.opts.myId);
+    this.published.set(this.opts.myId, {
+      stream,
+      cameraOn: !!stream && stream.getVideoTracks().some((t) => t.readyState === 'live'),
+      micOn: prev?.micOn ?? true,
+      status: 'connected',
+    });
+    if (stream) {
+      liveStreamSync.updateHostMediaStream(stream);
+    }
     this.rebuild();
   }
 

@@ -23,6 +23,7 @@ export interface ProductionLiveSessionOptions {
   streamerHandle: string;
   streamerName: string;
   streamerAvatar: string;
+  startedAt?: number | string;
   me: UserRef;
   isHost: boolean;
   onCoinsChange?: (delta: number) => void;
@@ -62,7 +63,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   const now = () => Date.now();
   const iso = () => new Date(now()).toISOString();
 
-  // Host info
+  // Authoritative startedAt derivation and persistence across rerenders/reconnects
   const cleanHostHandle = (streamerHandle || streamerId || '').replace(/^@/, '').toLowerCase().trim();
   const hostUserRef: UserRef = {
     id: cleanHostHandle || streamerId,
@@ -71,7 +72,56 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     avatar_url: streamerAvatar || null,
   };
 
+  const storageStartedKey = `privity_live_started_${liveId}`;
+  const handleStartedKey = cleanHostHandle ? `privity_live_started_${cleanHostHandle}` : null;
+  let sessionStartedAt = 0;
+  if (opts.startedAt) {
+    sessionStartedAt = typeof opts.startedAt === 'number'
+      ? opts.startedAt
+      : new Date(opts.startedAt).getTime();
+  }
+  if (!sessionStartedAt || isNaN(sessionStartedAt)) {
+    const remote = liveStreamSync.getActiveStreamPayload(liveId) || (cleanHostHandle ? liveStreamSync.getActiveStreamPayload(cleanHostHandle) : null);
+    if (remote && remote.startedAt) {
+      sessionStartedAt = remote.startedAt;
+    }
+  }
+  if (!sessionStartedAt || isNaN(sessionStartedAt)) {
+    try {
+      const saved = localStorage.getItem(storageStartedKey) || (handleStartedKey ? localStorage.getItem(handleStartedKey) : null);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed > 0 && parsed <= Date.now()) {
+          sessionStartedAt = parsed;
+        }
+      }
+    } catch {}
+  }
+  if (!sessionStartedAt || isNaN(sessionStartedAt)) {
+    try {
+      const hostMetaRaw = localStorage.getItem('privity_current_live_host');
+      if (hostMetaRaw) {
+        const hostMeta = JSON.parse(hostMetaRaw);
+        if (hostMeta && hostMeta.startedAt) {
+          const parsed = typeof hostMeta.startedAt === 'number' ? hostMeta.startedAt : new Date(hostMeta.startedAt).getTime();
+          if (!isNaN(parsed) && parsed > 0 && parsed <= Date.now()) {
+            sessionStartedAt = parsed;
+          }
+        }
+      }
+    } catch {}
+  }
+  if (!sessionStartedAt || isNaN(sessionStartedAt)) {
+    sessionStartedAt = Date.now();
+  }
+  try {
+    localStorage.setItem(storageStartedKey, String(sessionStartedAt));
+    if (handleStartedKey) localStorage.setItem(handleStartedKey, String(sessionStartedAt));
+  } catch {}
+
   // State caches
+  const processedTxIds = new Set<string>();
+  const processedBattleTxs = new Set<string>();
   const idempotency = new Set<string>();
   const guestRequests = new Map<string, { user: UserRef; requestedAt: number }>();
   const activeGuests: LiveGuest[] = [];
@@ -83,6 +133,18 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   let commentsEnabled = true;
   let activeHandlers: LiveFeedHandlers | null = null;
   let disposed = false;
+
+  // Real-time audience presence tracking
+  const presenceMap = new Map<string, { lastSeen: number; handle: string; isHost: boolean }>();
+  let lastViewerCount = 1;
+  let peakViewerCount = 1;
+  let presenceHeartbeatTimer: any = null;
+
+  presenceMap.set(me.id, {
+    lastSeen: Date.now(),
+    handle: me.handle,
+    isHost,
+  });
 
   // Broadcast channel for multi-tab synchronization
   let bus: BroadcastChannel | null = null;
@@ -100,6 +162,64 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     activeHandlers.onPersonal(notice);
   }
 
+  function broadcastPresenceHeartbeat() {
+    if (disposed) return;
+    const msg = {
+      type: 'PRESENCE_HEARTBEAT',
+      liveId,
+      userId: me.id,
+      handle: me.handle,
+      isHost,
+      timestamp: Date.now(),
+    };
+    liveStreamSync.sendRoomEvent(roomId, msg);
+    try {
+      bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event: msg });
+    } catch {}
+    try {
+      broadcastViaSupabase({ action: 'ROOM_EVENT', streamId: liveId, event: msg });
+    } catch {}
+  }
+
+  function prunePresenceAndEmitCount() {
+    if (disposed) return;
+    const nowMs = Date.now();
+    for (const [uid, entry] of presenceMap.entries()) {
+      if (nowMs - entry.lastSeen > 14000) {
+        presenceMap.delete(uid);
+      }
+    }
+    let nonHostViewers = 0;
+    for (const [uid, entry] of presenceMap.entries()) {
+      if (!entry.isHost && uid !== hostUserRef.id) {
+        nonHostViewers++;
+      }
+    }
+    const currentCount = isHost ? nonHostViewers : Math.max(1, nonHostViewers + 1);
+    peakViewerCount = Math.max(peakViewerCount, currentCount);
+
+    if (currentCount !== lastViewerCount) {
+      lastViewerCount = currentCount;
+      if (isHost) {
+        liveStreamSync.updateHostStats({ viewersCount: currentCount });
+      }
+      dispatchEvent({
+        event_id: `evt-vc-${Date.now()}`,
+        live_id: liveId,
+        battle_id: null,
+        event_type: 'VIEWER_COUNT',
+        actor_id: null,
+        server_ts: iso(),
+        seq: ++seqCounter,
+        schema_version: 1,
+        payload: {
+          count: currentCount,
+          peak: peakViewerCount,
+        },
+      });
+    }
+  }
+
   function broadcastRoomEvent(event: any) {
     liveStreamSync.sendRoomEvent(roomId, { ...event, server_ts: iso() });
     try {
@@ -114,6 +234,35 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   const handleIncomingNetworkEvent = (raw: any) => {
     if (!raw || disposed) return;
     if (raw.type === 'GIFT_RECEIVED' && raw.gift) {
+      const txId = raw.tx_id || raw.payload?.tx_id || `tx-${Date.now()}`;
+      if (processedTxIds.has(txId)) return;
+      processedTxIds.add(txId);
+
+      // Enqueue visual gift animation on screen for all remote participants
+      if (raw.sender?.id !== me.id) {
+        const animGift = DEFAULT_GIFTS.find((g) => g.id === raw.gift.id) || DEFAULT_GIFTS[0];
+        if (animGift) {
+          globalGiftQueue.enqueue(
+            {
+              id: raw.event_id || `gift-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              livestreamId: liveId,
+              senderId: raw.sender?.id || 'supporter',
+              senderName: raw.sender?.display_name || raw.sender?.handle || 'Supporter',
+              senderAvatar: raw.sender?.avatar_url || '',
+              recipientId: streamerId,
+              recipientName: streamerName,
+              giftId: animGift.id,
+              giftName: animGift.name,
+              giftIcon: animGift.icon,
+              quantity: raw.quantity || 1,
+              coinValue: raw.coin_value || 10,
+              createdAt: iso(),
+            },
+            animGift
+          );
+        }
+      }
+
       const e: AnyLiveEvent = {
         event_id: raw.event_id || `evt-gift-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         live_id: liveId,
@@ -124,7 +273,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
         seq: ++seqCounter,
         schema_version: 1,
         payload: {
-          tx_id: raw.tx_id || `tx-${Date.now()}`,
+          tx_id: txId,
           sender: raw.sender || { id: 'supporter', handle: 'supporter', display_name: 'Supporter', avatar_url: null },
           recipient_id: hostUserRef.id,
           gift: raw.gift,
@@ -140,7 +289,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       };
       dispatchEvent(e);
       if (battleState) {
-        applyBattlePoints(raw.battle_side === 'b' ? 'b' : 'a', raw.battle_points || raw.coin_value || 10);
+        applyBattlePoints(raw.battle_side === 'b' ? 'b' : 'a', raw.battle_points || raw.coin_value || 10, txId, true);
       }
     } else if (raw.type === 'COMMENT_CREATED' && raw.text) {
       const e: AnyLiveEvent = {
@@ -238,12 +387,22 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
           server_ts: iso(),
         });
       }
+    } else if (raw.type === 'PRESENCE_HEARTBEAT' && raw.userId) {
+      presenceMap.set(raw.userId, {
+        lastSeen: Date.now(),
+        handle: raw.handle || raw.userId,
+        isHost: !!raw.isHost,
+      });
+      prunePresenceAndEmitCount();
+    } else if (raw.type === 'PRESENCE_LEAVE' && raw.userId) {
+      presenceMap.delete(raw.userId);
+      prunePresenceAndEmitCount();
     } else if (raw.type === 'PK_BATTLE_START' || raw.type === 'BATTLE_ACCEPTED') {
-      startLocalBattle(raw.format || 'classic_double', raw.opponent);
+      startLocalBattle(raw.format || 'classic_double', raw.opponent, raw.starts_at);
     } else if (raw.type === 'BATTLE_SCORE' && raw.battle_id) {
       if (battleState) {
-        battleState.score_a = raw.score_a ?? battleState.score_a;
-        battleState.score_b = raw.score_b ?? battleState.score_b;
+        battleState.score_a = typeof raw.score_a === 'number' ? Math.max(battleState.score_a, raw.score_a) : battleState.score_a;
+        battleState.score_b = typeof raw.score_b === 'number' ? Math.max(battleState.score_b, raw.score_b) : battleState.score_b;
         battleState.lead_side = raw.lead_side ?? battleState.lead_side;
         battleState.score_version += 1;
         dispatchEvent({
@@ -287,8 +446,23 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     });
   } catch {}
 
-  function applyBattlePoints(side: Side, points: number) {
+  // Periodic audience presence heartbeats
+  presenceHeartbeatTimer = setInterval(() => {
+    if (disposed) return;
+    broadcastPresenceHeartbeat();
+    prunePresenceAndEmitCount();
+  }, 4000);
+  setTimeout(() => {
+    broadcastPresenceHeartbeat();
+    prunePresenceAndEmitCount();
+  }, 120);
+
+  function applyBattlePoints(side: Side, points: number, txId?: string, isRemoteEvent = false) {
     if (!battleState) return;
+    if (txId) {
+      if (processedBattleTxs.has(txId)) return;
+      processedBattleTxs.add(txId);
+    }
     if (side === 'a') battleState.score_a += points;
     else battleState.score_b += points;
 
@@ -343,18 +517,20 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       });
     }
 
-    broadcastRoomEvent({
-      type: 'BATTLE_SCORE',
-      battle_id: battleState.battle_id,
-      score_a: battleState.score_a,
-      score_b: battleState.score_b,
-      lead_side: newLead,
-    });
+    if (!isRemoteEvent) {
+      broadcastRoomEvent({
+        type: 'BATTLE_SCORE',
+        battle_id: battleState.battle_id,
+        score_a: battleState.score_a,
+        score_b: battleState.score_b,
+        lead_side: newLead,
+      });
+    }
   }
 
-  function startLocalBattle(formatId = 'classic_double', customOpponent?: UserRef) {
+  function startLocalBattle(formatId = 'classic_double', customOpponent?: UserRef, customStartsAt?: number) {
     const fmt = BUILTIN_FORMATS[formatId as keyof typeof BUILTIN_FORMATS] || BUILTIN_FORMATS.classic_double;
-    const startsAt = now() + (fmt.intro_ms || 3000);
+    const startsAt = customStartsAt && customStartsAt > now() - 60000 ? customStartsAt : now() + (fmt.intro_ms || 3000);
     const compiled = compileTimeline(fmt, startsAt);
     battleTimeline = compiled.timeline;
 
@@ -570,10 +746,10 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       status: 'live',
       title: streamerName ? `${streamerName}'s LIVE Broadcast` : 'Live Broadcast',
       visibility: 'public',
-      started_at: iso(),
+      started_at: new Date(sessionStartedAt).toISOString(),
       host: hostUserRef,
-      viewer_count: Math.max(1, (opts as any).streamer?.viewersCount || 14),
-      peak_viewers: Math.max(1, (opts as any).streamer?.viewersCount || 50),
+      viewer_count: lastViewerCount,
+      peak_viewers: peakViewerCount,
       top_supporters: [],
       battle: battleState,
       config_version: 1,
@@ -714,7 +890,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       const points = totalCost * multiplier;
 
       if (outcome === 'counted') {
-        applyBattlePoints(targetSide, points);
+        applyBattlePoints(targetSide, points, txId);
       }
 
       broadcastRoomEvent({
@@ -845,6 +1021,9 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       return { ok: true, data: {} };
     },
     async endLive(_id) {
+      try {
+        localStorage.removeItem(storageStartedKey);
+      } catch {}
       broadcastRoomEvent({ type: 'LIVE_ENDED', streamId: liveId });
       liveStreamSync.stopHostBroadcast();
       return { ok: true, data: { status: 'ended' } };
@@ -857,6 +1036,13 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     dispose() {
       disposed = true;
       if (battleTimer) clearInterval(battleTimer);
+      if (presenceHeartbeatTimer) clearInterval(presenceHeartbeatTimer);
+      try {
+        const leaveMsg = { type: 'PRESENCE_LEAVE', liveId, userId: me.id };
+        liveStreamSync.sendRoomEvent(roomId, leaveMsg);
+        bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event: leaveMsg });
+        broadcastViaSupabase({ action: 'ROOM_EVENT', streamId: liveId, event: leaveMsg });
+      } catch {}
       unsubRoom();
       bus?.close();
     },

@@ -163,7 +163,12 @@ export class LiveRoomController {
   private onSnapshot(s: LiveSnapshot): void {
     const room = roomStateFromSnapshot(s);
     this.comments.reset(s.recent_comments ?? []);
-    this.patch({ phase: 'ready', unavailable: null, room, me: s.me, startedAt: toMs(s.started_at) });
+    const snapshotStartedAt = toMs(s.started_at);
+    const existingStartedAt = this.view.startedAt;
+    const finalStartedAt = existingStartedAt && existingStartedAt > 0
+      ? (snapshotStartedAt && snapshotStartedAt > 0 ? Math.min(existingStartedAt, snapshotStartedAt) : existingStartedAt)
+      : snapshotStartedAt;
+    this.patch({ phase: 'ready', unavailable: null, room, me: s.me, startedAt: finalStartedAt });
     this.engine.applySnapshot(room);
   }
 
