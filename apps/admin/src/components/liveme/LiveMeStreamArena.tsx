@@ -3299,17 +3299,25 @@ export const LiveMeStreamArena: React.FC<LiveMeStreamArenaProps> = ({
     isCoHostConnectedRef.current = true;
     setIsPkBattleActive(true);
     isPkBattleActiveRef.current = true;
-    setHostPkScore(120);
-    hostPkScoreRef.current = 120;
-    setRivalPkScore(80);
-    rivalPkScoreRef.current = 80;
+    setHostPkScore(0);
+    hostPkScoreRef.current = 0;
+    setRivalPkScore(0);
+    rivalPkScoreRef.current = 0;
     setBattleRoundTimer(180);
     battleRoundTimerRef.current = 180;
     setBattleWinner(null);
-    setSpeedMultiplier(2);
-    speedMultiplierRef.current = 2;
-    setSpeedChallenge({ type: 'double', timeLeft: 30 });
-    showToast('⚔️ Stage 3 PK Battle Arena started! Cheering 2X active!');
+    setSpeedMultiplier(1);
+    speedMultiplierRef.current = 1;
+    setSpeedChallenge(null);
+
+    const roomId = getRoomIdFromHandle(currentStreamer.handle || currentStreamer.id);
+    const startEvt = {
+      type: 'PK_BATTLE_START',
+      startedBy: currentUser.handle,
+      roundTimer: 180,
+    };
+    liveStreamSync.sendRoomEvent(roomId, startEvt);
+    showToast('⚔️ PK Battle duel started! Send gifts to cheer!');
   };
 
   const handleAcceptBattleRequest = () => {
