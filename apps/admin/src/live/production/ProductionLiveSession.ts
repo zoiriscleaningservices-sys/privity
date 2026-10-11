@@ -1020,6 +1020,17 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       finalizeBattle('a');
       return { ok: true, data: {} };
     },
+    async startBattle(formatId = 'classic_double', customOpponent?: UserRef) {
+      const startsAt = now() + 3000;
+      startLocalBattle(formatId, customOpponent, startsAt);
+      broadcastRoomEvent({
+        type: 'PK_BATTLE_START',
+        format: formatId,
+        opponent: customOpponent,
+        starts_at: startsAt,
+      });
+      return { ok: true, data: { battle_id: battleState?.battle_id || 'battle' } };
+    },
     async endLive(_id) {
       try {
         localStorage.removeItem(storageStartedKey);

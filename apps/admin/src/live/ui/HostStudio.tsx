@@ -13,6 +13,7 @@ import {
   WandSparkles,
   X,
   MicVocal,
+  Swords,
 } from 'lucide-react';
 import type { UserRef } from '../core/events';
 import type { LiveCommands } from '../client/LiveCommands';
@@ -79,15 +80,32 @@ export function HostStudio(props: HostStudioProps) {
 
 function useHostLocalMedia(source: MediaSourceKind, initialStream?: MediaStream | null): LocalMediaController | null {
   const [c, setC] = useState<LocalMediaController | null>(null);
+  const trackIdRef = useRef<string | null>(null);
+  const controllerRef = useRef<LocalMediaController | null>(null);
+
   useEffect(() => {
+    const vTrack = initialStream?.getVideoTracks()[0];
+    const currentTrackId = vTrack?.id || null;
+
+    if (controllerRef.current && trackIdRef.current === currentTrackId && currentTrackId !== null) {
+      return;
+    }
+
+    trackIdRef.current = currentTrackId;
     const m = new LocalMediaController(source, { initialStream });
+    controllerRef.current = m;
     setC(m);
     void m.start({ video: true, audio: true });
+
     return () => {
       m.dispose();
-      setC(null);
+      if (controllerRef.current === m) {
+        controllerRef.current = null;
+        setC(null);
+      }
     };
   }, [source, initialStream]);
+
   return c;
 }
 
@@ -402,6 +420,19 @@ function StudioBody({
           pressed={dual.status === 'on'}
           disabled={dual.status === 'starting' || !cameraLive || battleOnStage}
           onClick={() => void (dual.status === 'on' ? localMedia.stopDual() : localMedia.startDual())}
+        />
+        <IconButton
+          id="plv-pk-battle"
+          label={battleOnStage ? 'PK Battle in progress' : 'Start PK Battle'}
+          icon={<Swords size={22} />}
+          pressed={battleOnStage}
+          disabled={battleOnStage}
+          onClick={async () => {
+            if (commands.startBattle) {
+              await commands.startBattle('classic_double');
+              toast('PK Battle started! Double Points period active.', 'info');
+            }
+          }}
         />
         <IconButton id="plv-settings" label="LIVE settings" icon={<Settings2 size={22} />} onClick={() => setSheet('settings')} />
       </nav>

@@ -71,7 +71,13 @@ export function buildStage(input: BuildStageInput): BuiltStage {
       local: isSelf ? self?.local : undefined,
       localCameraOn: isSelf ? self?.cameraOn : undefined,
       localMicOn: isSelf ? self?.micOn : undefined,
-      media: isSelf ? undefined : presence.get(id) ?? null,
+      media: isSelf
+        ? undefined
+        : presence.get(id) ??
+          (user.handle ? presence.get(user.handle.replace(/^@/, '').toLowerCase().trim()) : null) ??
+          (user.id ? presence.get(user.id) : null) ??
+          (role === 'host' ? presence.get(room.host.id) ?? (room.host.handle ? presence.get(room.host.handle.replace(/^@/, '').toLowerCase().trim()) : null) : null) ??
+          null,
       featured: input.featuredId === id,
       localPlaybackMuted: input.localPlaybackMuted?.has(id),
       caption: isSelf ? (role === 'host' ? undefined : 'You') : undefined,

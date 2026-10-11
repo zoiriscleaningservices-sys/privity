@@ -104,6 +104,7 @@ export interface LiveCommands {
 
   battleRespond(battleId: string, accept: boolean): Promise<CommandResult<Record<string, unknown>>>;
   battleForfeit(battleId: string): Promise<CommandResult<Record<string, unknown>>>;
+  startBattle?(formatId?: string, opponent?: UserRef): Promise<CommandResult<{ battle_id: string }>>;
 
   endLive(liveId: string): Promise<CommandResult<Record<string, unknown>>>;
 }

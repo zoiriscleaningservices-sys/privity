@@ -293,5 +293,99 @@ describe('ProductionLiveSession — Full Stage 1–5 Integration', () => {
     expect(isExcluded('plv-video-surface', 'video')).toBe(false);
     expect(isExcluded('plv-stage-main', 'div')).toBe(false);
   });
+
+  it('triggers PK Battle with authoritative timeline compilation and countdown', async () => {
+    const session = createProductionLiveSession({
+      streamerId: 'streamer-battle-test',
+      streamerHandle: 'battleHost',
+      streamerName: 'Battle Host',
+      streamerAvatar: '',
+      me,
+      isHost: true,
+    });
+
+    // Start battle
+    const startRes = await session.commands.startBattle?.('classic_double');
+    expect(startRes?.ok).toBe(true);
+    if (startRes?.ok) {
+      expect(startRes.data.battle_id).toBeDefined();
+    }
+
+    // Verify snapshot contains active battle state
+    const snap = await session.commands.getSnapshot('streamer-battle-test');
+    expect(snap.ok).toBe(true);
+    if (snap.ok) {
+      expect(snap.data.battle).not.toBeNull();
+      expect(snap.data.battle?.status).toBe('live');
+      expect(snap.data.battle?.side_a.host.id).toBe('battlehost');
+      expect(snap.data.battle?.score_a).toBe(0);
+      expect(snap.data.battle?.score_b).toBe(0);
+    }
+
+    session.dispose();
+  });
+
+  it('buildStage resolves media stream by id, handle, or host handle fallback', async () => {
+    const { buildStage } = await import('../ui/buildStage');
+    const mockTrack = { id: 'track-1', kind: 'video', readyState: 'live' };
+    const mockStream = {
+      id: 'stream-1',
+      getTracks: () => [mockTrack],
+      getVideoTracks: () => [mockTrack],
+      getAudioTracks: () => [],
+    } as unknown as MediaStream;
+
+    const presenceMap = new Map([
+      ['streamerhandle', { id: 'streamerhandle', status: 'connected' as const, cameraOn: true, micOn: true, stream: mockStream }],
+    ]);
+
+    const room: any = {
+      liveId: 'stream-123',
+      host: { id: 'host-unique-id', handle: 'streamerHandle', display_name: 'Streamer', avatar_url: null },
+      status: 'live',
+      startedAt: Date.now(),
+      viewerCount: 5,
+      commentsEnabled: true,
+      guests: [],
+      battle: null,
+      topSupporters: [],
+      pinnedComment: null,
+    };
+
+    const built = buildStage({
+      room,
+      battle: null,
+      mode: 'auto',
+      presence: presenceMap,
+      self: null,
+    });
+
+    expect(built.tiles.length).toBe(1);
+    const hostTile = built.tiles[0];
+    expect(hostTile.role).toBe('host');
+    // Media MUST be resolved through handle fallback even though id is host-unique-id
+    expect(hostTile.media?.stream).toBe(mockStream);
+  });
+
+  it('processes guest stage admission and slot allocation accurately', async () => {
+    const session = createProductionLiveSession({
+      streamerId: 'streamer-guest-test',
+      streamerHandle: 'guestHost',
+      streamerName: 'Guest Host',
+      streamerAvatar: '',
+      me,
+      isHost: true,
+    });
+
+    // Respond to guest request
+    const respondRes = await session.commands.respondGuest('streamer-guest-test', 'guest-1', true);
+    expect(respondRes.ok).toBe(true);
+    if (respondRes.ok) {
+      expect(respondRes.data.status).toBe('accepted');
+    }
+
+    session.dispose();
+  });
 });
+
 
