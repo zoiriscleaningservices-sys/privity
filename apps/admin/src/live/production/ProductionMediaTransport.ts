@@ -36,6 +36,7 @@ export class ProductionMediaTransport implements MediaTransport {
         micOn: true,
         status: 'connected',
       });
+      liveStreamSync.updateHostMediaStream(opts.initialStream);
     }
     if (!opts.isHost) {
       this.initViewerConnection();
@@ -73,9 +74,19 @@ export class ProductionMediaTransport implements MediaTransport {
           stream: remoteStream,
         });
         const cleanHandle = (this.opts.streamerHandle || this.opts.streamerId || '').replace(/^@/, '').toLowerCase().trim();
+        const roomId = cleanHandle.replace(/[^a-zA-Z0-9]/g, '');
         if (cleanHandle && cleanHandle !== this.opts.streamerId) {
           this.remote.set(cleanHandle, {
             id: cleanHandle,
+            status: 'connected',
+            cameraOn: true,
+            micOn: true,
+            stream: remoteStream,
+          });
+        }
+        if (roomId && roomId !== cleanHandle && roomId !== this.opts.streamerId) {
+          this.remote.set(roomId, {
+            id: roomId,
             status: 'connected',
             cameraOn: true,
             micOn: true,

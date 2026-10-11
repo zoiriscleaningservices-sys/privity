@@ -266,21 +266,30 @@ class LiveStreamSyncService {
           const parsed = JSON.parse(savedHost);
           if (parsed && parsed.id) {
             const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
-            // If the host session was marked ended or heartbeat is older than 12s:
+            // If the host session was marked ended or heartbeat is older than 35s:
             if (
               this.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
-              (parsed.lastHeartbeat && now - parsed.lastHeartbeat > 12000)
+              (parsed.lastHeartbeat && now - parsed.lastHeartbeat > 35000)
             ) {
-              localStorage.removeItem('privity_current_live_host');
-              localStorage.removeItem('privity_is_host_broadcasting');
-              localStorage.removeItem('privity_active_live_session');
+              if (this.currentHostSession && this.currentHostSession.id === parsed.id) {
+                localStorage.removeItem('privity_current_live_host');
+                localStorage.removeItem('privity_is_host_broadcasting');
+                localStorage.removeItem('privity_active_live_session');
+              }
             } else if (this.currentHostSession) {
               this.activeStreams.set(this.currentHostSession.id, this.currentHostSession);
+            } else {
+              // Populate activeStreams for viewer tabs so explore grid and discovery instantly see the host
+              this.activeStreams.set(parsed.id, {
+                ...parsed,
+                isLive: true,
+                isCameraStream: true,
+                isHost: false,
+              });
             }
           }
         } catch {
-          localStorage.removeItem('privity_current_live_host');
-          localStorage.removeItem('privity_is_host_broadcasting');
+          // ignore
         }
       }
 
@@ -290,7 +299,7 @@ class LiveStreamSyncService {
         list.forEach((s) => {
           const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
           if (this.isStreamEnded(s.id, normHandle, s.startedAt)) return;
-          if (now - (s.lastHeartbeat || s.startedAt) < 12000) {
+          if (now - (s.lastHeartbeat || s.startedAt) < 35000) {
             s.creatorHandle = normHandle;
             s.creatorName = s.creatorName || (s as any).name || 'Host';
             s.creatorAvatar = s.creatorAvatar || (s as any).avatar || '';
@@ -307,7 +316,7 @@ class LiveStreamSyncService {
       const list = Array.from(this.activeStreams.values()).filter((s) => {
         const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
         if (this.isStreamEnded(s.id, normHandle, s.startedAt)) return false;
-        if (now - (s.lastHeartbeat || s.startedAt) > 12000) return false;
+        if (now - (s.lastHeartbeat || s.startedAt) > 35000) return false;
         return true;
       });
       localStorage.setItem('privity_remote_active_streams', JSON.stringify(list));
@@ -447,9 +456,9 @@ class LiveStreamSyncService {
     }
 
     // 3. Strict timestamp staleness check:
-    // If the message has a timestamp older than 8 seconds, it is stale / delayed / retained!
+    // If the message has a timestamp older than 35 seconds, it is stale / delayed / retained!
     const msgTimestamp = stream.lastHeartbeat || stream.startedAt;
-    if (msgTimestamp && (now - msgTimestamp > 8000)) {
+    if (msgTimestamp && (now - msgTimestamp > 35000)) {
       return;
     }
 
@@ -523,10 +532,9 @@ class LiveStreamSyncService {
           changed = true;
           continue;
         }
-        // Remote streams without a heartbeat for 8 seconds are considered ended
+        // Remote streams without a heartbeat for 35 seconds are purged from memory
         const lastHb = stream.lastHeartbeat || stream.startedAt || now;
-        if (now - lastHb > 8000) {
-          this.markStreamEnded(id, normHandle);
+        if (now - lastHb > 35000) {
           this.activeStreams.delete(id);
           changed = true;
         }
@@ -575,7 +583,7 @@ class LiveStreamSyncService {
       if (this.isStreamEnded(s.id, normHandle, s.startedAt)) {
         continue;
       }
-      if (now - (s.lastHeartbeat || s.startedAt) > 12000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
+      if (now - (s.lastHeartbeat || s.startedAt) > 35000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
         continue;
       }
 
@@ -639,19 +647,6 @@ class LiveStreamSyncService {
       if (!streamId) return true;
       return this.currentHostSession.id === streamId;
     }
-    try {
-      const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
-      if (!isBroadcasting) return false;
-      const savedHost = localStorage.getItem('privity_current_live_host');
-      if (savedHost) {
-        const parsed = JSON.parse(savedHost);
-        const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
-        if (this.isStreamEnded(parsed.id, normHandle, parsed.startedAt)) return false;
-        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500) return false;
-        if (!streamId) return true;
-        return parsed.id === streamId;
-      }
-    } catch {}
     return false;
   }
 
@@ -862,20 +857,27 @@ class LiveStreamSyncService {
         call.on('close', () => this.activePeerCalls.delete(call));
         call.on('error', () => this.activePeerCalls.delete(call));
 
-        if (this.hostMediaStream && this.hostMediaStream.getVideoTracks().some((t) => t.readyState === 'live')) {
-          call.answer(this.hostMediaStream);
-        } else {
-          const canvas = document.createElement('canvas');
-          canvas.width = 320;
-          canvas.height = 240;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = '#111827';
-            ctx.fillRect(0, 0, 320, 240);
+        let retries = 15;
+        const tryAnswer = () => {
+          if (this.hostMediaStream && this.hostMediaStream.getVideoTracks().some((t) => t.readyState === 'live')) {
+            call.answer(this.hostMediaStream);
+          } else if (retries > 0) {
+            retries--;
+            setTimeout(tryAnswer, 100);
+          } else {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 240;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.fillStyle = '#111827';
+              ctx.fillRect(0, 0, 320, 240);
+            }
+            const fallbackStream = canvas.captureStream(5);
+            call.answer(fallbackStream);
           }
-          const fallbackStream = canvas.captureStream(5);
-          call.answer(fallbackStream);
-        }
+        };
+        tryAnswer();
       });
     } catch (err) {
       console.warn('Privity host peer init notice:', err);

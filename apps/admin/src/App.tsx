@@ -4633,30 +4633,8 @@ export function App() {
   }, [myProfile.handle, activeLiveStream]);
 
   useEffect(() => {
-    // If not actively broadcasting on this tab upon mount/refresh, ensure any dead host state is cleared
-    if (!isHostBroadcasting && !hostLiveCameraStream) {
-      const savedHost = localStorage.getItem('privity_current_live_host');
-      if (savedHost) {
-        try {
-          const parsed = JSON.parse(savedHost);
-          const handle = parsed.creatorHandle || parsed.handle || '';
-          if (
-            liveStreamSync.isStreamEnded(parsed.id, handle, parsed.startedAt) ||
-            (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500)
-          ) {
-            localStorage.removeItem('privity_current_live_host');
-            localStorage.removeItem('privity_is_host_broadcasting');
-            localStorage.removeItem('privity_active_live_session');
-          }
-        } catch {
-          localStorage.removeItem('privity_current_live_host');
-          localStorage.removeItem('privity_is_host_broadcasting');
-        }
-      }
-    }
-
     const handleBeforeUnload = () => {
-      if (isHostBroadcasting) {
+      if (isHostBroadcasting && hostLiveCameraStream) {
         liveStreamSync.stopHostBroadcast();
       }
     };

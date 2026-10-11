@@ -62,7 +62,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
         const parsed = JSON.parse(saved);
         const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
         if (liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt)) return null;
-        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500) return null;
+        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 30000) return null;
         return parsed;
       }
       return null;
@@ -163,7 +163,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
             const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
             if (
               liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
-              (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500)
+              (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 30000)
             ) {
               setActiveHost(null);
             } else {
@@ -194,7 +194,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
     (activeHost &&
       activeHost.isLive !== false &&
       !liveStreamSync.isStreamEnded(activeHost.id, activeHost.creatorHandle || activeHost.handle, activeHost.startedAt) &&
-      (!activeHost.lastHeartbeat || Date.now() - activeHost.lastHeartbeat <= 4500));
+      (!activeHost.lastHeartbeat || Date.now() - activeHost.lastHeartbeat <= 30000));
 
   const currentHost = liveStreamSync.getHostSession() || (isUserBroadcasting ? activeHost : null);
 
@@ -211,6 +211,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       currentHost.avatar ||
       currentUser?.avatar ||
       'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500';
+    const isMeTheHost = liveStreamSync.isLocalHost(currentHost.id);
 
     streamersByHandle.set(hostHandle, {
       id: currentHost.id || `live-user-${hostHandle}`,
@@ -219,10 +220,10 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       avatar,
       isVerified: true,
       category: currentHost.category || 'Featured',
-      title: currentHost.title || 'My Live Broadcast · Privity Exclusive',
-      description: currentHost.description || 'Live host studio broadcast',
-      viewersCount: currentHost.viewersCount || 0,
-      totalViews: `${currentHost.viewersCount || 0}`,
+      title: currentHost.title || (isMeTheHost ? 'My Live Broadcast · Privity Exclusive' : `${cleanName}'s Live Broadcast`),
+      description: currentHost.description || 'Live broadcast · Sovereign Stream',
+      viewersCount: Math.max(1, currentHost.viewersCount || 1),
+      totalViews: `${Math.max(1, currentHost.viewersCount || 1)}`,
       popularity: `${currentHost.popularity || 0}`,
       diamonds: currentHost.diamonds || 0,
       likesCount: currentHost.likesCount || 0,
@@ -230,7 +231,7 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
       posterUrl: currentHost.posterUrl || currentHost.previewUrl || avatar,
       tags: ['Host', 'LiveNow', 'Privity'],
       tagBadge: 'LIVE NOW',
-      isHost: true,
+      isHost: isMeTheHost,
       isCameraStream: true,
       topContributors: [],
     });

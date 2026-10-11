@@ -210,6 +210,55 @@ function StudioBody({
     }
   }, [room, live, localMedia]);
 
+  // Continuous real-time frame broadcast for explore grid preview & instant viewer video
+  useEffect(() => {
+    if (!live || !cameraLive) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 426;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    let frameBus: BroadcastChannel | null = null;
+    try {
+      frameBus = new BroadcastChannel('privity_live_frames');
+    } catch {}
+
+    const hiddenVideo = document.createElement('video');
+    hiddenVideo.muted = true;
+    hiddenVideo.playsInline = true;
+    hiddenVideo.autoplay = true;
+
+    const streamToCapture = local.videoStream;
+    if (streamToCapture) {
+      hiddenVideo.srcObject = streamToCapture;
+      hiddenVideo.play().catch(() => {});
+    }
+
+    const intervalId = setInterval(() => {
+      if (hiddenVideo.videoWidth > 0 && hiddenVideo.videoHeight > 0 && ctx) {
+        try {
+          ctx.drawImage(hiddenVideo, 0, 0, 320, 426);
+          const frameJpeg = canvas.toDataURL('image/jpeg', 0.5);
+          const cleanH = (me.handle || '').toLowerCase().replace('@', '').trim();
+          if (frameBus) {
+            frameBus.postMessage({
+              type: 'FRAME',
+              handle: cleanH,
+              frame: frameJpeg,
+            });
+          }
+          const roomId = room?.liveId || cleanH;
+          liveStreamSync.sendVideoFrame(roomId, frameJpeg);
+        } catch {}
+      }
+    }, 280);
+
+    return () => {
+      clearInterval(intervalId);
+      if (frameBus) frameBus.close();
+      hiddenVideo.srcObject = null;
+    };
+  }, [live, cameraLive, local.videoStream, me.handle, room?.liveId]);
+
   const active = library.active;
   const params = draft?.params ?? active.params;
   const intensity = draft ? draft.intensity : active.id === NO_FILTER_ID ? 0 : library.selection.intensity;
