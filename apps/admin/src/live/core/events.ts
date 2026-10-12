@@ -158,7 +158,7 @@ export interface LiveEventPayloads {
     previous: UserRef | null;
     previous_total: number | null;
   };
-  BATTLE_INVITED: { battle: BattleSnapshot; from: UserRef };
+  BATTLE_INVITED: { battle: BattleSnapshot; from: UserRef; isOutgoing?: boolean };
   BATTLE_ACCEPTED: { battle: BattleSnapshot };
   BATTLE_CANCELLED: { battle_id: string; reason: 'declined' | 'expired' | 'cancelled' | 'host_left' };
   BATTLE_PHASE_CHANGED: {

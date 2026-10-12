@@ -220,10 +220,15 @@ export class ProductionMediaTransport implements MediaTransport {
               micOn: true,
               stream: remoteStream,
             };
+            const cleanPid = pid.toLowerCase().trim();
+            const cleanH = (handle || '').replace(/^@/, '').toLowerCase().trim();
+            const roomId = getRoomIdFromHandle(handle || pid);
+
             this.remote.set(pid, mediaObj);
-            if (handle && handle !== pid) {
-              this.remote.set(handle, mediaObj);
-            }
+            if (cleanPid && cleanPid !== pid) this.remote.set(cleanPid, mediaObj);
+            if (handle && handle !== pid) this.remote.set(handle, mediaObj);
+            if (cleanH && cleanH !== handle && cleanH !== pid) this.remote.set(cleanH, mediaObj);
+            if (roomId && roomId !== cleanH && roomId !== pid) this.remote.set(roomId, mediaObj);
             this.rebuild();
           },
           (status) => {

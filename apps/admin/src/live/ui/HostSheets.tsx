@@ -255,6 +255,43 @@ export function BattleInviteCard({
   );
 }
 
+/** Outgoing battle invitation sent by the host (waiting for opponent to respond). */
+export function BattleOutgoingCard({
+  battle,
+  target,
+  busy,
+  onCancel,
+}: {
+  battle: BattleSnapshot;
+  target: UserRef;
+  busy: boolean;
+  onCancel: () => void;
+}) {
+  const now = useNow(500);
+  const expires = battle.invite_expires_at ? Date.parse(battle.invite_expires_at) : null;
+  const left = expires ? Math.max(0, Math.ceil((expires - now) / 1000)) : null;
+  return (
+    <section className="plv-invite plv-invite--outgoing" role="status" aria-labelledby="plv-outgoing-title" aria-describedby="plv-outgoing-body">
+      <div className="plv-invite-head">
+        <Swords size={18} className="plv-spin" aria-hidden="true" />
+        <h2 id="plv-outgoing-title">Battle invitation sent</h2>
+        {left !== null && <span className="plv-invite-timer plv-num" aria-label={`${left} seconds remaining`}>{left}s</span>}
+      </div>
+      <div className="plv-invite-body" id="plv-outgoing-body">
+        <Avatar user={target} size={48} ring="b" decorative />
+        <p>
+          Waiting for <strong>{target.display_name || `@${target.handle}`}</strong> to accept…
+        </p>
+      </div>
+      <div className="plv-sheet-actions">
+        <button type="button" className="plv-btn plv-btn--ghost" onClick={onCancel} disabled={busy} id="plv-battle-cancel-invite">
+          {busy ? 'Cancelling…' : 'Cancel invitation'}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 /**
  * Authoritative PK Battle Matchmaker Sheet.
  * Manages explicit matching states: IDLE, SEARCHING, MATCH_FOUND, CONNECTING, CONNECTED, FAILED, CANCELLED, ENDED.

@@ -16,7 +16,7 @@ import { BUILTIN_FORMATS, compileTimeline, segmentAt } from '../battle/timeline'
 import { simCatalog } from '../dev/simCatalog';
 import { globalGiftQueue, DEFAULT_GIFTS } from '../../gifts';
 import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSyncService';
-import { onSupabaseBroadcast } from '../../services/supabaseClient';
+import { onSupabaseBroadcast, broadcastViaSupabase } from '../../services/supabaseClient';
 
 export interface ProductionLiveSessionOptions {
   streamerId: string;
@@ -239,11 +239,67 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   }
 
   function broadcastRoomEvent(event: any) {
-    liveStreamSync.sendRoomEvent(roomId, { ...event, server_ts: iso() });
+    const enriched = { ...event, server_ts: iso() };
+    liveStreamSync.sendRoomEvent(roomId, enriched);
+
+    // Deliver directly to targeted opponent or host room
+    const targetH = event.targetHandle || (event.targetHostId ? String(event.targetHostId) : '');
+    if (targetH) {
+      const targetRoom = getRoomIdFromHandle(targetH);
+      if (targetRoom && targetRoom !== roomId) {
+        liveStreamSync.sendRoomEvent(targetRoom, enriched);
+      }
+      if (event.targetHostId && event.targetHostId !== roomId && event.targetHostId !== targetRoom) {
+        liveStreamSync.sendRoomEvent(event.targetHostId, enriched);
+      }
+    }
+
+    // Deliver to opponent's room if in active/invited battle
+    if (battleState) {
+      const isSideA = (battleState.side_a.host.id === hostUserRef.id) ||
+                      (!!cleanHostHandle && battleState.side_a.host.handle === cleanHostHandle);
+      const oppHost = isSideA ? battleState.side_b.host : battleState.side_a.host;
+      if (oppHost) {
+        const oppRoom = getRoomIdFromHandle(oppHost.handle || oppHost.id);
+        if (oppRoom && oppRoom !== roomId) {
+          liveStreamSync.sendRoomEvent(oppRoom, enriched);
+        }
+        if (oppHost.id && oppHost.id !== roomId && oppHost.id !== oppRoom) {
+          liveStreamSync.sendRoomEvent(oppHost.id, enriched);
+        }
+      }
+    }
+
     try {
-      bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event });
+      bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event: enriched });
     } catch {}
-    // (No direct Supabase send: sendRoomEvent already delivers it network-wide.)
+
+    const isBattleEvent = typeof event.type === 'string' && (event.type.startsWith('BATTLE_') || event.type === 'PK_BATTLE_START');
+    if (isBattleEvent) {
+      const oppId = event.targetHostId || (battleState ? (battleState.side_a.host.id === hostUserRef.id ? battleState.side_b.host.id : battleState.side_a.host.id) : undefined);
+      const oppHandle = event.targetHandle || (battleState ? (battleState.side_a.host.id === hostUserRef.id ? battleState.side_b.host.handle : battleState.side_a.host.handle) : undefined);
+      try {
+        bus?.postMessage({
+          type: 'BATTLE_EVENT',
+          targetUserId: oppId,
+          targetHandle: oppHandle,
+          fromUserId: me.id,
+          fromHandle: me.handle,
+          event: enriched,
+        });
+      } catch {}
+      try {
+        broadcastViaSupabase({
+          action: 'BATTLE_EVENT',
+          targetUserId: oppId,
+          targetHandle: oppHandle,
+          fromUserId: me.id,
+          fromHandle: me.handle,
+          streamId: liveId,
+          event: enriched,
+        });
+      } catch {}
+    }
   }
 
   function applyCommentsEnabled(enabled: boolean) {
@@ -469,23 +525,44 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       presenceMap.delete(raw.userId);
       prunePresenceAndEmitCount();
     } else if (raw.type === 'BATTLE_INVITED' && raw.battle) {
-      // Incoming battle invitation from a real creator
-      const targetSideB = raw.battle.side_b?.host;
-      const targetSideA = raw.battle.side_a?.host;
-      const isForMe = targetSideB?.id === me.id || targetSideB?.handle === me.handle ||
-                      targetSideA?.id === me.id || targetSideA?.handle === me.handle;
-      if (isForMe || isHost) {
+      const fromHost = raw.from || raw.battle.side_a.host;
+      const cleanFromId = (fromHost?.id || '').toLowerCase().trim();
+      const cleanFromH = (fromHost?.handle || '').replace(/^@/, '').toLowerCase().trim();
+      const cleanMyId = (me.id || '').toLowerCase().trim();
+      const cleanMyH = (me.handle || '').replace(/^@/, '').toLowerCase().trim();
+      const isSender = cleanFromId === cleanMyId || (cleanFromH && cleanFromH === cleanMyH);
+
+      const targetB = raw.battle.side_b?.host;
+      const cleanTargetId = (raw.targetHostId || targetB?.id || '').toLowerCase().trim();
+      const cleanTargetH = (raw.targetHandle || targetB?.handle || '').replace(/^@/, '').toLowerCase().trim();
+      const isTarget = cleanTargetId === cleanMyId || (cleanTargetH && cleanTargetH === cleanMyH) ||
+                       cleanTargetId === cleanHostHandle || (cleanTargetH && cleanTargetH === cleanHostHandle);
+
+      if (isSender) {
         battleState = raw.battle;
         dispatchEvent({
           event_id: `evt-b-inv-${Date.now()}`,
           live_id: liveId,
           battle_id: raw.battle.battle_id,
           event_type: 'BATTLE_INVITED',
-          actor_id: raw.from?.id || null,
+          actor_id: me.id,
           server_ts: iso(),
           seq: ++seqCounter,
           schema_version: 1,
-          payload: { battle: raw.battle, from: raw.from || raw.battle.side_a.host },
+          payload: { battle: raw.battle, from: fromHost, isOutgoing: true },
+        });
+      } else if (isTarget || isHost) {
+        battleState = raw.battle;
+        dispatchEvent({
+          event_id: `evt-b-inv-${Date.now()}`,
+          live_id: liveId,
+          battle_id: raw.battle.battle_id,
+          event_type: 'BATTLE_INVITED',
+          actor_id: fromHost.id,
+          server_ts: iso(),
+          seq: ++seqCounter,
+          schema_version: 1,
+          payload: { battle: raw.battle, from: fromHost, isOutgoing: false },
         });
       }
     } else if (raw.type === 'PK_BATTLE_START' || raw.type === 'BATTLE_ACCEPTED') {
@@ -496,7 +573,10 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       }
       const opp = raw.opponent || (raw.battle?.side_b?.host?.id !== me.id ? raw.battle?.side_b?.host : raw.battle?.side_a?.host);
       if (opp) {
-        startLocalBattle(raw.format || 'classic_double', opp, raw.starts_at, bId);
+        const sideA = raw.battle?.side_a || battleState?.side_a;
+        const sideB = raw.battle?.side_b || battleState?.side_b;
+        const startsAt = (raw.battle?.starts_at ? Date.parse(raw.battle.starts_at) : null) || raw.starts_at;
+        startLocalBattle(raw.format || raw.battle?.format_id || 'classic_double', opp, startsAt, bId, sideA, sideB);
       }
     } else if (raw.type === 'BATTLE_CANCELLED') {
       const bId = raw.battle_id || raw.battle?.battle_id;
@@ -584,6 +664,19 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       if (!e.data) return;
       if (e.data.streamId === liveId && e.data.event) {
         handleIncomingNetworkEvent(e.data.event);
+      } else if (e.data.type === 'BATTLE_EVENT' && e.data.event) {
+        const cleanMyId = (me.id || '').toLowerCase().trim();
+        const cleanMyH = (me.handle || '').replace(/^@/, '').toLowerCase().trim();
+        const cleanTargetId = (e.data.targetUserId || '').toLowerCase().trim();
+        const cleanTargetH = (e.data.targetHandle || '').replace(/^@/, '').toLowerCase().trim();
+        const cleanFromId = (e.data.fromUserId || '').toLowerCase().trim();
+        const cleanFromH = (e.data.fromHandle || '').replace(/^@/, '').toLowerCase().trim();
+        const isTarget = cleanTargetId === cleanMyId || (cleanTargetH && cleanTargetH === cleanMyH) ||
+                         cleanTargetId === cleanHostHandle || (cleanTargetH && cleanTargetH === cleanHostHandle);
+        const isFrom = cleanFromId === cleanMyId || (cleanFromH && cleanFromH === cleanMyH);
+        if (isTarget || isFrom) {
+          handleIncomingNetworkEvent(e.data.event);
+        }
       } else if (
         (e.data.streamId === liveId || (cleanHostHandle && e.data.handle === cleanHostHandle)) &&
         (e.data.type === 'LIVE_HOST_ENDED' || e.data.action === 'LIVE_ENDED' || e.data.type === 'STREAM_ENDED')
@@ -599,6 +692,19 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       if (!payload || disposed) return;
       if (payload.action === 'ROOM_EVENT' && payload.streamId === liveId && payload.event) {
         handleIncomingNetworkEvent(payload.event);
+      } else if (payload.action === 'BATTLE_EVENT' && payload.event) {
+        const cleanMyId = (me.id || '').toLowerCase().trim();
+        const cleanMyH = (me.handle || '').replace(/^@/, '').toLowerCase().trim();
+        const cleanTargetId = (payload.targetUserId || '').toLowerCase().trim();
+        const cleanTargetH = (payload.targetHandle || '').replace(/^@/, '').toLowerCase().trim();
+        const cleanFromId = (payload.fromUserId || '').toLowerCase().trim();
+        const cleanFromH = (payload.fromHandle || '').replace(/^@/, '').toLowerCase().trim();
+        const isTarget = cleanTargetId === cleanMyId || (cleanTargetH && cleanTargetH === cleanMyH) ||
+                         cleanTargetId === cleanHostHandle || (cleanTargetH && cleanTargetH === cleanHostHandle);
+        const isFrom = cleanFromId === cleanMyId || (cleanFromH && cleanFromH === cleanMyH);
+        if (isTarget || isFrom) {
+          handleIncomingNetworkEvent(payload.event);
+        }
       } else if (
         (payload.streamId === liveId || (cleanHostHandle && (payload.handle === cleanHostHandle || payload.creatorHandle === cleanHostHandle))) &&
         (payload.action === 'STREAM_ENDED' || payload.action === 'LIVE_ENDED')
@@ -690,7 +796,14 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     }
   }
 
-  function startLocalBattle(formatId = 'classic_double', customOpponent?: UserRef, customStartsAt?: number, customBattleId?: string) {
+  function startLocalBattle(
+    formatId = 'classic_double',
+    customOpponent?: UserRef,
+    customStartsAt?: number,
+    customBattleId?: string,
+    customSideA?: { live_id: string; host: UserRef },
+    customSideB?: { live_id: string; host: UserRef }
+  ) {
     const fmt = BUILTIN_FORMATS[formatId as keyof typeof BUILTIN_FORMATS] || BUILTIN_FORMATS.classic_double;
     const startsAt = customStartsAt && customStartsAt > now() - 60000 ? customStartsAt : now() + (fmt.intro_ms || 3000);
     const compiled = compileTimeline(fmt, startsAt);
@@ -709,12 +822,15 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       return;
     }
 
+    const sideA = customSideA || battleState?.side_a || { live_id: liveId, host: hostUserRef };
+    const sideB = customSideB || battleState?.side_b || { live_id: `live-${opponent.id}`, host: opponent };
+
     battleState = {
       battle_id: targetBattleId,
       format_id: formatId,
       status: 'live',
-      side_a: { live_id: liveId, host: hostUserRef },
-      side_b: { live_id: `live-${opponent.id}`, host: opponent },
+      side_a: sideA,
+      side_b: sideB,
       scoring: fmt.scoring,
       invite_expires_at: null,
       intro_at: compiled.intro_at,
@@ -1046,7 +1162,12 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
 
       let multiplier = 1;
       let outcome: 'no_battle' | 'counted' | 'excluded' = 'no_battle';
-      const targetSide: Side = (input as any).targetSide || 'a';
+      const isSideBHost = !!battleState && (
+        battleState.side_b.host.id === hostUserRef.id ||
+        (!!cleanHostHandle && battleState.side_b.host.handle === cleanHostHandle)
+      );
+      const defaultSide: Side = isSideBHost ? 'b' : 'a';
+      const targetSide: Side = (input as any).targetSide || defaultSide;
       if (battleState && battleState.status === 'live') {
         outcome = 'counted';
         const t = now();
@@ -1230,6 +1351,17 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
         result: null,
       };
       battleState = inviteSnapshot;
+      dispatchEvent({
+        event_id: `evt-b-inv-${Date.now()}`,
+        live_id: liveId,
+        battle_id: bId,
+        event_type: 'BATTLE_INVITED',
+        actor_id: me.id,
+        server_ts: iso(),
+        seq: ++seqCounter,
+        schema_version: 1,
+        payload: { battle: inviteSnapshot, from: me, isOutgoing: true },
+      });
       broadcastRoomEvent({
         type: 'BATTLE_INVITED',
         battle: inviteSnapshot,
@@ -1244,14 +1376,17 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
         if (!battleState || battleState.battle_id !== _battleId) {
           return { ok: false, code: 'BATTLE_NOT_FOUND', message: 'This battle invitation is no longer available.' };
         }
+        const norm = (s?: string | null) => (s || '').replace(/^@/, '').toLowerCase().trim();
+        const isMe = (u: UserRef) => u.id === me.id || (!!norm(u.handle) && norm(u.handle) === norm(me.handle));
+        const opponent = isMe(battleState.side_a.host) ? battleState.side_b.host : battleState.side_a.host;
+        if (isMe(opponent)) {
+          return { ok: false, code: 'SELF_MATCH', message: 'You cannot battle yourself.' };
+        }
+        const sideA = battleState.side_a;
+        const sideB = battleState.side_b;
+        const synchronizedStartsAt = Date.parse(battleState.starts_at || '') || (now() + 3000);
         if (battleState.status !== 'live') {
-          const norm = (s?: string | null) => (s || '').replace(/^@/, '').toLowerCase().trim();
-          const isMe = (u: UserRef) => u.id === me.id || (!!norm(u.handle) && norm(u.handle) === norm(me.handle));
-          const opponent = isMe(battleState.side_a.host) ? battleState.side_b.host : battleState.side_a.host;
-          if (isMe(opponent)) {
-            return { ok: false, code: 'SELF_MATCH', message: 'You cannot battle yourself.' };
-          }
-          startLocalBattle(battleState.format_id, opponent, Date.parse(battleState.starts_at || '') || undefined, battleState.battle_id);
+          startLocalBattle(battleState.format_id, opponent, synchronizedStartsAt, battleState.battle_id, sideA, sideB);
         }
         if (battleState) {
           broadcastRoomEvent({
@@ -1260,15 +1395,43 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
             battle: battleState,
             opponent: me,
             format: battleState.format_id,
+            starts_at: battleState.starts_at,
+            targetHostId: opponent.id,
+            targetHandle: opponent.handle,
           });
         }
       } else {
+        const prevBattle = battleState;
         if (battleTimer) {
           clearInterval(battleTimer);
           battleTimer = null;
         }
         battleState = null;
-        broadcastRoomEvent({ type: 'BATTLE_CANCELLED', battle_id: _battleId });
+        let opp: UserRef | null = null;
+        if (prevBattle) {
+          const norm = (s?: string | null) => (s || '').replace(/^@/, '').toLowerCase().trim();
+          const isMe = (u: UserRef) => u.id === me.id || (!!norm(u.handle) && norm(u.handle) === norm(me.handle));
+          opp = isMe(prevBattle.side_a.host) ? prevBattle.side_b.host : prevBattle.side_a.host;
+        }
+        dispatchEvent({
+          event_id: `evt-b-cancel-${Date.now()}`,
+          live_id: liveId,
+          battle_id: _battleId,
+          event_type: 'BATTLE_CANCELLED',
+          actor_id: me.id,
+          server_ts: iso(),
+          seq: ++seqCounter,
+          schema_version: 1,
+          payload: { battle_id: _battleId, reason: 'declined' },
+        });
+        broadcastRoomEvent({
+          type: 'BATTLE_CANCELLED',
+          battle_id: _battleId,
+          reason: 'declined',
+          from: me,
+          targetHostId: opp?.id,
+          targetHandle: opp?.handle,
+        });
       }
       return { ok: true, data: { status: accept ? 'accepted' : 'cancelled' } };
     },
