@@ -214,11 +214,43 @@ describe('ProductionLiveSession — Full Stage 1–5 Integration', () => {
     const snap = await session.commands.getSnapshot('streamer-presence');
     expect(snap.ok).toBe(true);
     if (snap.ok) {
-      // Viewer count accurately starts with registered participants (minimum 1 for host)
-      expect(snap.data.viewer_count).toBeGreaterThanOrEqual(1);
+      // A host alone in their LIVE has zero viewers: the host is never counted as audience.
+      expect(snap.data.viewer_count).toBe(0);
     }
 
     session.dispose();
+  });
+
+  it('enforces host-only moderation and comment settings instead of reporting fake success', async () => {
+    const viewer = createProductionLiveSession({
+      streamerId: 'streamer-mod',
+      streamerHandle: 'modHost',
+      streamerName: 'Mod Host',
+      streamerAvatar: '',
+      me,
+      isHost: false,
+    });
+    const toggle = await viewer.commands.setCommentsEnabled('streamer-mod', false);
+    expect(toggle.ok).toBe(false);
+    const mute = await viewer.commands.mute('streamer-mod', 'someone', 5);
+    expect(mute.ok).toBe(false);
+    viewer.dispose();
+
+    const host = createProductionLiveSession({
+      streamerId: me.id,
+      streamerHandle: me.handle,
+      streamerName: 'Luciano',
+      streamerAvatar: '',
+      me,
+      isHost: true,
+    });
+    expect((await host.commands.mute(me.id, me.id, 5)).ok).toBe(false);
+    const ok = await host.commands.mute(me.id, 'user-troll', 5);
+    expect(ok.ok).toBe(true);
+    expect((await host.commands.setCommentsEnabled(me.id, false)).ok).toBe(true);
+    const snap = await host.commands.getSnapshot(me.id);
+    if (snap.ok) expect(snap.data.comments_enabled).toBe(false);
+    host.dispose();
   });
 
   it('LocalMediaController protects external camera tracks from being stopped on dispose', async () => {

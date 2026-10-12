@@ -131,14 +131,29 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   let lastSegIdx: number | null = null;
   let warnedSegs = new Set<number>();
   let commentsEnabled = true;
+  // Moderation state. Only events signed by this LIVE's host are honoured (see MODERATION_ACTION).
+  const mutedUntil = new Map<string, number>();
+  const removedUsers = new Set<string>();
+  const blockedKey = `privity_live_blocked_${me.id}`;
+  const blockedUsers = new Set<string>(
+    (() => {
+      try {
+        const arr = JSON.parse(localStorage.getItem(blockedKey) || '[]');
+        return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+      } catch {
+        return [];
+      }
+    })(),
+  );
+  const isMuted = (uid: string | undefined | null) => !!uid && (mutedUntil.get(uid) ?? 0) > Date.now();
   let activeHandlers: LiveFeedHandlers | null = null;
   let disposed = false;
   let isEnded = false;
 
   // Real-time audience presence tracking
   const presenceMap = new Map<string, { lastSeen: number; handle: string; isHost: boolean }>();
-  let lastViewerCount = 1;
-  let peakViewerCount = 1;
+  let lastViewerCount = -1;
+  let peakViewerCount = 0;
   let presenceHeartbeatTimer: any = null;
 
   presenceMap.set(me.id, {
@@ -171,6 +186,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       userId: me.id,
       handle: me.handle,
       isHost,
+      ...(isHost ? { commentsEnabled } : {}),
       timestamp: Date.now(),
     };
     liveStreamSync.sendRoomEvent(roomId, msg);
@@ -183,18 +199,21 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   function prunePresenceAndEmitCount() {
     if (disposed) return;
     const nowMs = Date.now();
+    // My own presence is known locally; never depend on the broker echoing it back.
+    presenceMap.set(me.id, { lastSeen: nowMs, handle: me.handle, isHost });
     for (const [uid, entry] of presenceMap.entries()) {
       if (nowMs - entry.lastSeen > 20000) {
         presenceMap.delete(uid);
       }
     }
+    // One counting rule for host and viewers: unique non-host user ids currently present.
     let nonHostViewers = 0;
     for (const [uid, entry] of presenceMap.entries()) {
       if (!entry.isHost && uid !== hostUserRef.id) {
         nonHostViewers++;
       }
     }
-    const currentCount = isHost ? nonHostViewers : Math.max(1, nonHostViewers + 1);
+    const currentCount = nonHostViewers;
     peakViewerCount = Math.max(peakViewerCount, currentCount);
 
     if (currentCount !== lastViewerCount) {
@@ -227,17 +246,63 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     // (No direct Supabase send: sendRoomEvent already delivers it network-wide.)
   }
 
+  function applyCommentsEnabled(enabled: boolean) {
+    if (commentsEnabled === enabled) return;
+    commentsEnabled = enabled;
+    const base = { live_id: liveId, battle_id: null, actor_id: hostUserRef.id, server_ts: iso(), seq: ++seqCounter, schema_version: 1 };
+    if (enabled) {
+      dispatchEvent({
+        ...base,
+        event_id: `evt-ce-${Date.now()}`,
+        event_type: 'SYSTEM_NOTICE',
+        payload: { code: 'comments_enabled', message: 'Comments are on.', severity: 'info' },
+      } as AnyLiveEvent);
+    } else {
+      dispatchEvent({
+        ...base,
+        event_id: `evt-cd-${Date.now()}`,
+        event_type: 'MODERATION_NOTICE',
+        payload: { action: 'room_muted', target: null, message: 'The host turned comments off.' },
+      } as AnyLiveEvent);
+    }
+  }
+
   // Handle incoming network events
   const handleIncomingNetworkEvent = (raw: any) => {
     if (!raw || disposed) return;
+    const actorId: string | undefined = raw.author?.id || raw.user?.id || raw.userId;
+    if (actorId && actorId !== hostUserRef.id && (removedUsers.has(actorId) || blockedUsers.has(actorId))) {
+      if (raw.type === 'COMMENT_CREATED' || raw.type === 'GUEST_REQUESTED' || raw.type === 'PRESENCE_HEARTBEAT') return;
+    }
+    if (raw.type === 'MODERATION_ACTION' && raw.targetUserId) {
+      if (raw.actorId !== hostUserRef.id) return; // only the host of this LIVE may moderate it
+      const target: string = raw.targetUserId;
+      const ts = iso();
+      if (raw.action === 'mute' && typeof raw.until === 'number') {
+        mutedUntil.set(target, raw.until);
+        if (target === me.id) dispatchPersonal({ type: 'MUTED', live_id: liveId, muted_until: new Date(raw.until).toISOString(), server_ts: ts });
+      } else if (raw.action === 'unmute') {
+        mutedUntil.delete(target);
+        if (target === me.id) dispatchPersonal({ type: 'UNMUTED', live_id: liveId, server_ts: ts });
+      } else if (raw.action === 'remove') {
+        removedUsers.add(target);
+        presenceMap.delete(target);
+        prunePresenceAndEmitCount();
+        if (target === me.id) dispatchPersonal({ type: 'REMOVED_FROM_LIVE', live_id: liveId, server_ts: ts });
+      }
+      return;
+    }
     if (raw.type === 'GIFT_RECEIVED' && raw.gift) {
-      const txId = raw.tx_id || raw.payload?.tx_id || `tx-${Date.now()}`;
+      // Never invent values: a gift without a sender, id, or numeric value is dropped.
+      if (!raw.sender?.id || !raw.gift.id || typeof raw.coin_value !== 'number' || raw.coin_value <= 0) return;
+      const txId = raw.tx_id || raw.payload?.tx_id;
+      if (!txId) return;
       if (processedTxIds.has(txId)) return;
       processedTxIds.add(txId);
 
       // Enqueue visual gift animation on screen for all remote participants
       if (raw.sender?.id !== me.id) {
-        const animGift = DEFAULT_GIFTS.find((g) => g.id === raw.gift.id) || DEFAULT_GIFTS[0];
+        const animGift = DEFAULT_GIFTS.find((g) => g.id === raw.gift.id);
         if (animGift) {
           globalGiftQueue.enqueue(
             {
@@ -271,24 +336,30 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
         schema_version: 1,
         payload: {
           tx_id: txId,
-          sender: raw.sender || { id: 'supporter', handle: 'supporter', display_name: 'Supporter', avatar_url: null },
+          sender: raw.sender,
           recipient_id: hostUserRef.id,
           gift: raw.gift,
           quantity: raw.quantity || 1,
-          coin_value: raw.coin_value || 10,
+          coin_value: raw.coin_value,
           battle_id: battleState?.battle_id || null,
           battle_side: raw.battle_side || 'a',
-          battle_points: raw.battle_points || raw.coin_value || 10,
+          battle_points: raw.battle_points || raw.coin_value,
           multiplier: raw.multiplier || 1,
-          sender_live_total: raw.sender_live_total || 100,
+          sender_live_total: typeof raw.sender_live_total === 'number' ? raw.sender_live_total : raw.coin_value,
           battle_outcome: battleState ? 'counted' : 'no_battle',
         },
       };
       dispatchEvent(e);
       if (battleState) {
-        applyBattlePoints(raw.battle_side === 'b' ? 'b' : 'a', raw.battle_points || raw.coin_value || 10, txId, true);
+        applyBattlePoints(raw.battle_side === 'b' ? 'b' : 'a', raw.battle_points || raw.coin_value, txId, true);
       }
+    } else if (raw.type === 'COMMENTS_TOGGLED' && typeof raw.enabled === 'boolean') {
+      // Only the host of this LIVE may change the comment setting.
+      if (raw.actorId !== hostUserRef.id) return;
+      applyCommentsEnabled(raw.enabled);
     } else if (raw.type === 'COMMENT_CREATED' && raw.text) {
+      if (!commentsEnabled && raw.author?.id !== hostUserRef.id) return;
+      if (isMuted(raw.author?.id)) return;
       const e: AnyLiveEvent = {
         event_id: raw.event_id || `evt-comm-${Date.now()}`,
         live_id: liveId,
@@ -385,6 +456,9 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
         });
       }
     } else if (raw.type === 'PRESENCE_HEARTBEAT' && raw.userId) {
+      if (raw.isHost && raw.userId === hostUserRef.id && typeof raw.commentsEnabled === 'boolean' && !isHost) {
+        applyCommentsEnabled(raw.commentsEnabled);
+      }
       presenceMap.set(raw.userId, {
         lastSeen: Date.now(),
         handle: raw.handle || raw.userId,
@@ -842,7 +916,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       visibility: 'public',
       started_at: new Date(sessionStartedAt).toISOString(),
       host: hostUserRef,
-      viewer_count: lastViewerCount,
+      viewer_count: Math.max(0, lastViewerCount),
       peak_viewers: peakViewerCount,
       top_supporters: [],
       battle: battleState,
@@ -1025,6 +1099,8 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     },
     async comment(_id, text) {
       if (!text || !text.trim()) return { ok: false, code: 'INVALID_TEXT', message: 'Comment cannot be blank' };
+      if (!commentsEnabled && !isHost) return { ok: false, code: 'COMMENTS_DISABLED', message: 'The host turned comments off.' };
+      if (isMuted(me.id)) return { ok: false, code: 'MUTED', message: 'The host muted you in this LIVE.' };
       const commentId = `comm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const createdAt = iso();
       broadcastRoomEvent({
@@ -1041,17 +1117,35 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       return { ok: true, data: {} };
     },
     async setCommentsEnabled(_id, enabled) {
-      commentsEnabled = enabled;
+      if (!isHost) return { ok: false, code: 'FORBIDDEN', message: 'Only the host can change comment settings.' };
+      applyCommentsEnabled(enabled);
+      broadcastRoomEvent({ type: 'COMMENTS_TOGGLED', enabled, actorId: me.id });
       return { ok: true, data: { comments_enabled: enabled } };
     },
-    async mute(_id, _userId, minutes) {
-      const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();
-      return { ok: true, data: { muted_until: until } };
+    async mute(_id, userId, minutes) {
+      if (!isHost) return { ok: false, code: 'FORBIDDEN', message: 'Only the host can mute people in this LIVE.' };
+      if (!userId || userId === me.id) return { ok: false, code: 'INVALID_TARGET', message: 'You cannot mute yourself.' };
+      const untilMs = Date.now() + Math.max(1, minutes) * 60 * 1000;
+      mutedUntil.set(userId, untilMs);
+      broadcastRoomEvent({ type: 'MODERATION_ACTION', action: 'mute', targetUserId: userId, until: untilMs, actorId: me.id });
+      return { ok: true, data: { muted_until: new Date(untilMs).toISOString() } };
     },
-    async unmute(_id, _userId) {
+    async unmute(_id, userId) {
+      if (!isHost) return { ok: false, code: 'FORBIDDEN', message: 'Only the host can unmute people in this LIVE.' };
+      mutedUntil.delete(userId);
+      broadcastRoomEvent({ type: 'MODERATION_ACTION', action: 'unmute', targetUserId: userId, actorId: me.id });
       return { ok: true, data: {} };
     },
-    async kick(_id, _userId, _reason) {
+    async kick(_id, userId, _reason) {
+      if (!isHost) return { ok: false, code: 'FORBIDDEN', message: 'Only the host can remove people from this LIVE.' };
+      if (!userId || userId === me.id) return { ok: false, code: 'INVALID_TARGET', message: 'You cannot remove yourself.' };
+      removedUsers.add(userId);
+      presenceMap.delete(userId);
+      prunePresenceAndEmitCount();
+      if (activeGuests.some((g) => g.id === userId)) {
+        broadcastRoomEvent({ type: 'GUEST_REMOVED', targetUserId: userId });
+      }
+      broadcastRoomEvent({ type: 'MODERATION_ACTION', action: 'remove', targetUserId: userId, actorId: me.id });
       return { ok: true, data: {} };
     },
     async follow(_userId) {
@@ -1061,7 +1155,12 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     async unfollow(_userId) {
       return { ok: true, data: { following: false } };
     },
-    async block(_userId) {
+    async block(userId) {
+      if (!userId || userId === me.id) return { ok: false, code: 'INVALID_TARGET', message: 'You cannot block yourself.' };
+      blockedUsers.add(userId);
+      try {
+        localStorage.setItem(blockedKey, JSON.stringify(Array.from(blockedUsers)));
+      } catch {}
       return { ok: true, data: { blocked: true } };
     },
     async requestGuest(_id) {

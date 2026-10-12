@@ -91,6 +91,7 @@ class LiveStreamSyncService {
   private hostPeer: Peer | null = null;
   private activePeerCalls: Set<any> = new Set();
   private hostPeerConnections: Map<string, RTCPeerConnection> = new Map();
+  private hostSignalingUnsub: (() => void) | null = null;
   private hostMediaStream: MediaStream | null = null;
   private currentHostSession: RemoteLiveStreamPayload | null = null;
   private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
@@ -966,16 +967,9 @@ class LiveStreamSyncService {
             retries--;
             setTimeout(tryAnswer, 100);
           } else {
-            const canvas = document.createElement('canvas');
-            canvas.width = 320;
-            canvas.height = 240;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.fillStyle = '#111827';
-              ctx.fillRect(0, 0, 320, 240);
-            }
-            const fallbackStream = canvas.captureStream(5);
-            call.answer(fallbackStream);
+            // Camera not live: answer with the real tracks that exist (possibly audio only).
+            // Never substitute a synthetic canvas for the host's camera.
+            call.answer(this.hostMediaStream ?? undefined);
           }
         };
         tryAnswer();
@@ -985,9 +979,48 @@ class LiveStreamSyncService {
     }
   }
 
+  /**
+   * Adaptive uplink: a P2P host sends one encode per viewer, so split a fixed upload budget
+   * across viewers (bounded per viewer) instead of giving each viewer 4 Mbps.
+   */
+  private rebalanceHostBitrates() {
+    const viewers = Array.from(this.hostPeerConnections.entries()).filter(([k]) => !k.startsWith('guest-'));
+    const n = Math.max(1, viewers.length);
+    const TOTAL_BUDGET = 6_000_000;
+    const perViewer = Math.max(250_000, Math.min(2_500_000, Math.floor(TOTAL_BUDGET / n)));
+    for (const [, pc] of viewers) {
+      try {
+        pc.getSenders().forEach((sender) => {
+          if (sender.track?.kind !== 'video') return;
+          const params = sender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+          if (params.encodings[0].maxBitrate === perViewer) return;
+          params.encodings[0].maxBitrate = perViewer;
+          params.encodings[0].networkPriority = 'high';
+          sender.setParameters(params).catch(() => {});
+        });
+      } catch {}
+    }
+  }
+
+  private dropHostPeer(key: string) {
+    const pc = this.hostPeerConnections.get(key);
+    if (!pc) return;
+    try { pc.close(); } catch {}
+    this.hostPeerConnections.delete(key);
+    this.pendingIceCandidates.delete(key);
+    this.rebalanceHostBitrates();
+  }
+
   private setupHostWebRTCSignaling(roomId: string) {
-    this.subscribeToRoomEvents(roomId, async (evt) => {
+    this.hostSignalingUnsub?.();
+    this.hostSignalingUnsub = this.subscribeToRoomEvents(roomId, async (evt) => {
       if (!this.currentHostSession || !evt) return;
+
+      if (evt.type === 'RTC_VIEWER_LEAVE' && evt.viewerId) {
+        this.dropHostPeer(evt.viewerId);
+        return;
+      }
 
       // 1. Viewer WebRTC Offer handling
       if (evt.type === 'RTC_OFFER' && evt.offer && evt.viewerId) {
@@ -1005,18 +1038,17 @@ class LiveStreamSyncService {
             this.hostMediaStream.getTracks().forEach((track) => {
               if (this.hostMediaStream) pc!.addTrack(track, this.hostMediaStream);
             });
-            try {
-              pc.getSenders().forEach((sender) => {
-                if (sender.track?.kind === 'video') {
-                  const params = sender.getParameters();
-                  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-                  params.encodings[0].maxBitrate = 4000000;
-                  params.encodings[0].networkPriority = 'high';
-                  sender.setParameters(params).catch(() => {});
-                }
-              });
-            } catch {}
           }
+          const viewerKey = evt.viewerId as string;
+          const thisPc = pc;
+          pc.onconnectionstatechange = () => {
+            if (this.hostPeerConnections.get(viewerKey) !== thisPc) return;
+            if (thisPc.connectionState === 'failed' || thisPc.connectionState === 'closed') {
+              this.dropHostPeer(viewerKey);
+            } else if (thisPc.connectionState === 'connected') {
+              this.rebalanceHostBitrates();
+            }
+          };
 
           pc.onicecandidate = (event) => {
             if (event.candidate) {
@@ -1223,6 +1255,8 @@ class LiveStreamSyncService {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+    this.hostSignalingUnsub?.();
+    this.hostSignalingUnsub = null;
 
     this.hostPeerConnections.forEach((pc) => {
       try { pc.close(); } catch {}
@@ -1363,49 +1397,105 @@ class LiveStreamSyncService {
       onStream(remoteStream);
     };
 
-    // 1. Direct WebRTC Signaling over MQTT Room
-    try {
-      const pc = new RTCPeerConnection({
-        iceServers: DEFAULT_ICE_SERVERS,
-      });
+    // 1. Direct WebRTC Signaling over MQTT Room — with bounded, backed-off recovery.
+    let unsubscribeRoom: (() => void) | null = null;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 8;
+    let currentPc: RTCPeerConnection | null = null;
+    let peerJsConnected = false;
+
+    const clearWatchdog = () => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = null;
+    };
+
+    const scheduleRetry = (delayMs: number) => {
+      clearWatchdog();
+      if (isCleanedUp) return;
+      watchdog = setTimeout(() => {
+        if (isCleanedUp) return;
+        // The PeerJS path is already delivering the host's media: no need to renegotiate.
+        if (peerJsConnected) return;
+        if (attempt >= MAX_ATTEMPTS) {
+          if (onStatusChange) onStatusChange('failed');
+          return;
+        }
+        startAttempt();
+      }, delayMs);
+    };
+
+    const startAttempt = () => {
+      if (isCleanedUp || typeof RTCPeerConnection === 'undefined') return;
+      attempt++;
+      try {
+        if (currentPc) currentPc.close();
+      } catch {}
+      pendingHostCandidates.length = 0;
+      if (attempt > 1 && onStatusChange) onStatusChange('connecting');
+
+      const pc = new RTCPeerConnection({ iceServers: DEFAULT_ICE_SERVERS });
+      currentPc = pc;
       rtcPeerConnection = pc;
+      const attemptStream: MediaStream = attempt === 1 ? incomingMediaStream : new MediaStream();
 
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
       pc.ontrack = (event) => {
-        if (event.track) {
-          if (!incomingMediaStream.getTracks().some((t) => t.id === event.track.id)) {
-            incomingMediaStream.addTrack(event.track);
-          }
+        if (pc !== currentPc) return;
+        if (event.track && !attemptStream.getTracks().some((t) => t.id === event.track.id)) {
+          attemptStream.addTrack(event.track);
         }
-        if (event.streams && event.streams[0]) {
-          event.streams[0].getTracks().forEach((t) => {
-            if (!incomingMediaStream.getTracks().some((it) => it.id === t.id)) {
-              incomingMediaStream.addTrack(t);
-            }
-          });
-        }
-        handleStreamSuccess(incomingMediaStream);
+        event.streams?.[0]?.getTracks().forEach((t) => {
+          if (!attemptStream.getTracks().some((it) => it.id === t.id)) attemptStream.addTrack(t);
+        });
+        clearWatchdog();
+        attempt = 1; // healthy again: reset the backoff budget
+        handleStreamSuccess(attemptStream);
       };
 
       pc.onicecandidate = (event) => {
-        if (event.candidate && !isCleanedUp) {
-          this.sendRoomEvent(roomId, {
-            type: 'RTC_VIEWER_CANDIDATE',
-            viewerId,
-            candidate: event.candidate,
-          });
+        if (event.candidate && !isCleanedUp && pc === currentPc) {
+          this.sendRoomEvent(roomId, { type: 'RTC_VIEWER_CANDIDATE', viewerId, candidate: event.candidate });
         }
       };
 
-      this.subscribeToRoomEvents(roomId, async (evt) => {
-        if (isCleanedUp || !evt) return;
+      pc.onconnectionstatechange = () => {
+        if (pc !== currentPc || isCleanedUp) return;
+        const s = pc.connectionState;
+        if (s === 'failed') {
+          scheduleRetry(Math.min(15000, 1000 * 2 ** attempt));
+        } else if (s === 'disconnected') {
+          if (onStatusChange) onStatusChange('connecting');
+          // Give ICE a few seconds to self-heal before renegotiating from scratch.
+          scheduleRetry(5000);
+        } else if (s === 'connected') {
+          clearWatchdog();
+          if (hasStreamConnected && onStatusChange) onStatusChange('connected');
+        }
+      };
+
+      pc.createOffer()
+        .then(async (offer) => {
+          if (isCleanedUp || pc !== currentPc) return;
+          await pc.setLocalDescription(offer);
+          this.sendRoomEvent(roomId, { type: 'RTC_OFFER', viewerId, offer });
+        })
+        .catch(() => {});
+
+      // No media within the window (offer lost, host not yet listening, NAT failure) → retry.
+      scheduleRetry(Math.min(20000, 6000 + 2000 * attempt));
+    };
+
+    try {
+      unsubscribeRoom = this.subscribeToRoomEvents(roomId, async (evt) => {
+        const pc = currentPc;
+        if (isCleanedUp || !evt || !pc) return;
         if (evt.type === 'RTC_ANSWER' && evt.viewerId === viewerId && evt.answer) {
           try {
-            if (pc.signalingState !== 'stable') {
+            if (pc.signalingState === 'have-local-offer') {
               await pc.setRemoteDescription(new RTCSessionDescription(evt.answer));
-              // Flush any queued candidates that arrived before remote description was set
               for (const cand of pendingHostCandidates) {
                 await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
               }
@@ -1420,18 +1510,11 @@ class LiveStreamSyncService {
               pendingHostCandidates.push(evt.candidate);
             }
           } catch {}
+        } else if (evt.type === 'STREAM_ENDED' || evt.type === 'LIVE_ENDED') {
+          clearWatchdog();
         }
       });
-
-      pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true }).then(async (offer) => {
-        if (isCleanedUp) return;
-        await pc.setLocalDescription(offer);
-        this.sendRoomEvent(roomId, {
-          type: 'RTC_OFFER',
-          viewerId,
-          offer,
-        });
-      }).catch(() => {});
+      startAttempt();
     } catch {}
 
     // 2. PeerJS in parallel as secondary P2P transport
@@ -1455,7 +1538,13 @@ class LiveStreamSyncService {
           callInstance = call;
 
           call.on('stream', (remoteStream: MediaStream) => {
+            peerJsConnected = true;
+            clearWatchdog();
             handleStreamSuccess(remoteStream);
+          });
+          call.on('close', () => {
+            peerJsConnected = false;
+            if (!isCleanedUp && currentPc?.connectionState !== 'connected') scheduleRetry(1000);
           });
         } catch {}
       });
@@ -1463,6 +1552,13 @@ class LiveStreamSyncService {
 
     return () => {
       isCleanedUp = true;
+      clearWatchdog();
+      try {
+        unsubscribeRoom?.();
+      } catch {}
+      try {
+        this.sendRoomEvent(roomId, { type: 'RTC_VIEWER_LEAVE', viewerId });
+      } catch {}
       try {
         if (rtcPeerConnection) rtcPeerConnection.close();
       } catch {}

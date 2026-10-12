@@ -14,7 +14,9 @@ import {
   X,
   MicVocal,
   Swords,
+  ArrowLeftRight,
 } from 'lucide-react';
+import { DualCompositor, canComposite } from '../media/DualCompositor';
 import type { UserRef } from '../core/events';
 import type { LiveCommands } from '../client/LiveCommands';
 import type { LiveFeed, LiveRoomController, PersonalNotice } from '../client/LiveRoomController';
@@ -185,6 +187,37 @@ function StudioBody({
   }, [processed, local.videoStream]);
   const cameraLive = local.camera.status === 'live' && liveVideoTracks.length > 0;
   const micLive = local.mic.status === 'live' && local.mic.enabled && !!local.audioTrack;
+
+  // ---- Dual camera: composite BOTH real cameras into the published video track ------
+  const [dualSwap, setDualSwap] = useState(false);
+  const [dualCompositor, setDualCompositor] = useState<DualCompositor | null>(null);
+  const dualSecondaryTrack = local.dual.status === 'on' ? local.dual.stream?.getVideoTracks()[0] ?? null : null;
+  const primaryTrack = cameraLive ? liveVideoTracks[0] ?? null : null;
+  useEffect(() => {
+    if (!live || !primaryTrack || !dualSecondaryTrack || !canComposite()) {
+      setDualCompositor(null);
+      return;
+    }
+    let c: DualCompositor | null = null;
+    try {
+      c = new DualCompositor(primaryTrack, dualSecondaryTrack);
+    } catch (err) {
+      console.warn('Privity Dual compositor unavailable:', err);
+    }
+    setDualCompositor(c);
+    return () => {
+      c?.dispose();
+    };
+  }, [live, primaryTrack, dualSecondaryTrack]);
+  useEffect(() => {
+    dualCompositor?.setSwapped(dualSwap);
+  }, [dualCompositor, dualSwap]);
+  useEffect(() => {
+    if (local.dual.status !== 'on') setDualSwap(false);
+  }, [local.dual.status]);
+  const dualTrack = dualCompositor?.track ?? null;
+  const dualStream = useMemo(() => (dualTrack ? new MediaStream([dualTrack]) : null), [dualTrack]);
+
   useEffect(() => {
     if (!media) return;
     if (!live) {
@@ -192,14 +225,15 @@ function StudioBody({
       return;
     }
     const tracks: MediaStreamTrack[] = [];
-    if (cameraLive && liveVideoTracks[0]) tracks.push(liveVideoTracks[0]);
+    const videoOut = dualTrack ?? primaryTrack;
+    if (cameraLive && videoOut) tracks.push(videoOut);
     if (micLive && local.audioTrack) tracks.push(local.audioTrack);
     media.publish(me.id, {
       stream: tracks.length ? new MediaStream(tracks) : null,
       cameraOn: cameraLive,
       micOn: micLive,
     });
-  }, [media, me.id, processed, cameraLive, micLive, local.audioTrack, live, liveVideoTracks]);
+  }, [media, me.id, cameraLive, micLive, local.audioTrack, live, primaryTrack, dualTrack]);
   useEffect(() => () => media?.unpublish(me.id), [media, me.id]);
 
   // Synchronize remote participant media (guests on stage and battle opponents)
@@ -266,7 +300,7 @@ function StudioBody({
           liveStreamSync.sendVideoFrame(roomId, frameJpeg);
         } catch {}
       }
-    }, 280);
+    }, 1000);
 
     return () => {
       clearInterval(intervalId);
@@ -386,10 +420,15 @@ function StudioBody({
     <div className="plv-studio">
       <div className="plv-video-layer">
         {stage && <VideoStage layout={stage.layout} columns={stage.columns} tiles={stage.tiles} overflow={stage.overflow} onOverflow={() => setSheet('stage')} />}
-        {dual.status === 'on' && dual.stream && (
+        {dual.status === 'on' && dualStream && (
+          <div className="plv-dual-composite" aria-label="Dual: both cameras, as viewers see them">
+            <StreamVideo stream={dualStream} className="plv-tile-video" label="Both cameras" />
+          </div>
+        )}
+        {dual.status === 'on' && dual.stream && !dualStream && (
           <div className="plv-dual-pip" aria-label="Dual: second camera">
             <StreamVideo stream={dual.stream} className="plv-tile-video" label="Second camera" />
-            <span className="plv-dual-tag">Dual · preview</span>
+            <span className="plv-dual-tag">Preview only · not sent</span>
           </div>
         )}
       </div>
@@ -486,6 +525,15 @@ function StudioBody({
           disabled={dual.status === 'starting' || !cameraLive || battleOnStage}
           onClick={() => void (dual.status === 'on' ? localMedia.stopDual() : localMedia.startDual())}
         />
+        {dual.status === 'on' && dualStream && (
+          <IconButton
+            id="plv-dual-swap"
+            label="Swap main and small camera"
+            icon={<ArrowLeftRight size={22} />}
+            pressed={dualSwap}
+            onClick={() => setDualSwap((v) => !v)}
+          />
+        )}
         <IconButton
           id="plv-pk-battle"
           label={battleOnStage ? 'PK Battle in progress' : 'Start PK Battle'}

@@ -231,11 +231,15 @@ function ViewerBody({
         case 'UNMUTED':
           toast('You can comment again.', 'info');
           break;
+        case 'REMOVED_FROM_LIVE':
+          toast('The host removed you from this LIVE.', 'warn');
+          setTimeout(() => onLeave(), 1800);
+          break;
         default:
           break;
       }
     },
-    [toast],
+    [toast, onLeave],
   );
   usePersonalNotices(controller, onNotice);
 

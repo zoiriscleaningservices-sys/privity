@@ -403,8 +403,8 @@ button.plv-tile {
   border-radius: 999px;
   background: rgba(10, 12, 22, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--plv-blur);
+  -webkit-backdrop-filter: var(--plv-blur);
   font-size: 12px;
   font-weight: 600;
   color: var(--plv-text);
@@ -581,8 +581,8 @@ button.plv-tile {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 50%;
   background: rgba(10, 12, 22, 0.48);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: var(--plv-blur);
+  -webkit-backdrop-filter: var(--plv-blur);
   color: #fff;
   cursor: pointer;
   transition: transform 160ms var(--plv-ease), background 160ms var(--plv-ease), opacity 160ms;
@@ -826,8 +826,8 @@ button.plv-tile {
   border-radius: 999px;
   background: rgba(10, 12, 22, 0.46);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: var(--plv-blur);
+  -webkit-backdrop-filter: var(--plv-blur);
 }
 
 .plv-creator-text {
@@ -915,8 +915,8 @@ button.plv-tile {
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--plv-blur);
+  -webkit-backdrop-filter: var(--plv-blur);
 }
 
 .plv-top-chip-name {
@@ -948,8 +948,8 @@ button.plv-tile {
   font-weight: 800;
   letter-spacing: 0.02em;
   cursor: pointer;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: var(--plv-blur);
+  -webkit-backdrop-filter: var(--plv-blur);
   transition: background 160ms;
 }
 
@@ -1076,6 +1076,20 @@ button.plv-tile {
   background: rgba(6, 8, 14, 0.7);
   font-size: 10px;
   font-weight: 700;
+}
+
+.plv-dual-composite {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  background: #000;
+  animation: plv-pop-in 280ms var(--plv-ease);
+}
+
+.plv-dual-composite .plv-tile-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .plv-inline-alert {
@@ -1325,8 +1339,8 @@ button.plv-comment:hover {
   border-radius: 999px;
   background: rgba(12, 14, 24, 0.58);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: var(--plv-blur);
+  -webkit-backdrop-filter: var(--plv-blur);
   transition: border-color 160ms, background 160ms;
 }
 
@@ -1782,8 +1796,8 @@ button.plv-comment:hover {
 
 .plv-sheet-layer--light .plv-sheet {
   background: rgba(14, 16, 26, 0.9);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  backdrop-filter: var(--plv-blur-strong);
+  -webkit-backdrop-filter: var(--plv-blur-strong);
 }
 
 .plv-sheet-grip {
@@ -2956,8 +2970,8 @@ button.plv-comment:hover {
 
 .live-stage-lane--opaque {
   background: rgba(4, 5, 10, 0.72);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: var(--plv-blur-soft);
+  -webkit-backdrop-filter: var(--plv-blur-soft);
   animation: plv-fade-in 240ms ease-out;
 }
 

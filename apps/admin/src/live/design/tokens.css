@@ -92,4 +92,23 @@
   --plv-touch: 48px;
   --plv-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --plv-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+
+  /* Unified glass system — every LIVE surface uses these (no ad-hoc blur values). */
+  --plv-blur-soft: blur(8px) saturate(140%);
+  --plv-blur: blur(16px) saturate(160%);
+  --plv-blur-strong: blur(24px) saturate(170%);
+  --plv-glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --plv-glass-edge: 1px solid rgba(255, 255, 255, 0.1);
+  --plv-dur-fast: 160ms;
+  --plv-dur: 240ms;
+  --plv-dur-slow: 380ms;
+}
+
+/* Browsers without backdrop-filter: fall back to more opaque surfaces so text stays readable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --plv-glass: rgba(14, 16, 26, 0.9);
+    --plv-glass-strong: rgba(14, 16, 26, 0.96);
+    --live-surface: rgba(12, 17, 29, 0.94);
+  }
 }

@@ -242,7 +242,7 @@
   align-items: center;
   justify-content: center;
   background: radial-gradient(circle at center, rgba(15, 23, 42, 0.9) 0%, rgba(3, 4, 7, 0.96) 80%);
-  backdrop-filter: blur(24px);
+  backdrop-filter: var(--plv-blur-strong);
   z-index: 50;
   animation: live-stage-bloom 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   padding: 24px;
@@ -324,7 +324,7 @@
   align-items: center;
   justify-content: center;
   background: radial-gradient(circle at center, rgba(15, 23, 42, 0.94) 0%, rgba(3, 4, 7, 0.98) 85%);
-  backdrop-filter: blur(28px);
+  backdrop-filter: var(--plv-blur-strong);
   z-index: 60;
   animation: live-stage-bloom 0.5s ease;
   padding: 20px;
