@@ -304,8 +304,14 @@ describe('ProductionLiveSession — Full Stage 1–5 Integration', () => {
       isHost: true,
     });
 
-    // Start battle
-    const startRes = await session.commands.startBattle?.('classic_double');
+    // Without a real opponent the command must refuse rather than invent one
+    const noOpp = await session.commands.startBattle?.('classic_double');
+    expect(noOpp?.ok).toBe(false);
+    if (noOpp && !noOpp.ok) expect(noOpp.code).toBe('OPPONENT_REQUIRED');
+
+    // Start battle against an explicit participant
+    const rival: UserRef = { id: 'user-rival', handle: 'rival', display_name: 'Rival', avatar_url: null };
+    const startRes = await session.commands.startBattle?.('classic_double', rival);
     expect(startRes?.ok).toBe(true);
     if (startRes?.ok) {
       expect(startRes.data.battle_id).toBeDefined();
@@ -318,6 +324,7 @@ describe('ProductionLiveSession — Full Stage 1–5 Integration', () => {
       expect(snap.data.battle).not.toBeNull();
       expect(snap.data.battle?.status).toBe('live');
       expect(snap.data.battle?.side_a.host.id).toBe('battlehost');
+      expect(snap.data.battle?.side_b.host.id).toBe('user-rival');
       expect(snap.data.battle?.score_a).toBe(0);
       expect(snap.data.battle?.score_b).toBe(0);
     }

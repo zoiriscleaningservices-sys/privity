@@ -625,14 +625,10 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     const compiled = compileTimeline(fmt, startsAt);
     battleTimeline = compiled.timeline;
 
-    let opponent: UserRef | undefined = customOpponent;
+    const opponent: UserRef | undefined = customOpponent;
     if (!opponent) {
-      if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
-        opponent = { id: 'test-rival', handle: 'testrival', display_name: 'Test Rival', avatar_url: '' };
-      } else {
-        console.warn('[Privity Live] startLocalBattle rejected: Real opponent required. Fabricated participants are disabled.');
-        return;
-      }
+      console.warn('[Privity Live] startLocalBattle rejected: a real invited opponent is required.');
+      return;
     }
 
     const targetBattleId = customBattleId || (battleState?.status === 'invited' && battleState.battle_id ? battleState.battle_id : `battle-${Date.now()}`);
@@ -1149,12 +1145,17 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     },
     async battleRespond(_battleId, accept) {
       if (accept) {
-        if (battleState) {
-          battleState.status = 'live';
-          const opponent = battleState.side_a.host.id === me.id ? battleState.side_b.host : battleState.side_a.host;
+        if (!battleState || battleState.battle_id !== _battleId) {
+          return { ok: false, code: 'BATTLE_NOT_FOUND', message: 'This battle invitation is no longer available.' };
+        }
+        if (battleState.status !== 'live') {
+          const norm = (s?: string | null) => (s || '').replace(/^@/, '').toLowerCase().trim();
+          const isMe = (u: UserRef) => u.id === me.id || (!!norm(u.handle) && norm(u.handle) === norm(me.handle));
+          const opponent = isMe(battleState.side_a.host) ? battleState.side_b.host : battleState.side_a.host;
+          if (isMe(opponent)) {
+            return { ok: false, code: 'SELF_MATCH', message: 'You cannot battle yourself.' };
+          }
           startLocalBattle(battleState.format_id, opponent, Date.parse(battleState.starts_at || '') || undefined, battleState.battle_id);
-        } else {
-          startLocalBattle('classic_double', undefined, undefined, _battleId);
         }
         if (battleState) {
           broadcastRoomEvent({
@@ -1180,13 +1181,9 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       return { ok: true, data: {} };
     },
     async startBattle(formatId = 'classic_double', customOpponent?: UserRef) {
-      let opponent = customOpponent;
+      const opponent = customOpponent;
       if (!opponent) {
-        if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
-          opponent = { id: 'test-rival', handle: 'testrival', display_name: 'Test Rival', avatar_url: '' };
-        } else {
-          return { ok: false, code: 'OPPONENT_REQUIRED', message: 'A verified live opponent is required to start a battle.' };
-        }
+        return { ok: false, code: 'OPPONENT_REQUIRED', message: 'A verified live opponent is required to start a battle.' };
       }
       const startsAt = now() + 3000;
       const bId = `battle-${Date.now()}`;

@@ -88,8 +88,16 @@ describe('Matchmaking & Discovery Authoritative Tests', () => {
       onUnavailable: () => {},
     });
 
-    // Accept battle with opponent
-    const respondRes = await session.commands.battleRespond('battle-123', true);
+    // Accepting an invitation that does not exist must fail (no fabricated battle)
+    const ghost = await session.commands.battleRespond('battle-does-not-exist', true);
+    expect(ghost.ok).toBe(false);
+
+    // Real flow: invite a real opponent, then accept that exact invitation
+    const invite = await session.commands.battleInvite?.(opponentUser, 'classic_double');
+    expect(invite?.ok).toBe(true);
+    const battleId = invite?.ok ? invite.data.battle_id : '';
+
+    const respondRes = await session.commands.battleRespond(battleId, true);
     expect(respondRes.ok).toBe(true);
     if (respondRes.ok) {
       expect(respondRes.data.status).toBe('accepted');
@@ -100,11 +108,12 @@ describe('Matchmaking & Discovery Authoritative Tests', () => {
     if (snap1.ok) {
       expect(snap1.data.battle).not.toBeNull();
       expect(snap1.data.battle?.status).toBe('live');
-      expect(snap1.data.battle?.battle_id).toBe('battle-123');
+      expect(snap1.data.battle?.battle_id).toBe(battleId);
+      expect(snap1.data.battle?.side_b.host.id).toBe('user-opponent-1');
     }
 
-    // Attempting duplicate respond or incoming acceptance must NOT re-emit BATTLE_STARTED
-    const respondRes2 = await session.commands.battleRespond('battle-123', true);
+    // A duplicate accept (repeated tap / echoed event) must NOT re-start the battle
+    const respondRes2 = await session.commands.battleRespond(battleId, true);
     expect(respondRes2.ok).toBe(true);
 
     // Only 1 BATTLE_STARTED was dispatched (prevents duplicate "Battle: X vs Y" chat message)
