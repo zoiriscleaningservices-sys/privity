@@ -102,6 +102,7 @@ export interface LiveCommands {
   leaveGuest(liveId: string): Promise<CommandResult<Record<string, never>>>;
   listGuestRequests(liveId: string): Promise<CommandResult<GuestRequestRow[]>>;
 
+  battleInvite?(targetOpponent: UserRef, formatId?: string): Promise<CommandResult<{ battle_id: string }>>;
   battleRespond(battleId: string, accept: boolean): Promise<CommandResult<Record<string, unknown>>>;
   battleForfeit(battleId: string): Promise<CommandResult<Record<string, unknown>>>;
   startBattle?(formatId?: string, opponent?: UserRef): Promise<CommandResult<{ battle_id: string }>>;

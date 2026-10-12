@@ -41,15 +41,50 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
+  const [isLoadingStreams, setIsLoadingStreams] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Network Active Streamers (synchronized across all physical devices)
   const [internalStreamers, setInternalStreamers] = useState<LiveMeStreamer[]>(() =>
     liveStreamSync.getStreamersList()
   );
 
+  const refreshStreams = useCallback(() => {
+    setIsLoadingStreams(true);
+    setFetchError(null);
+    try {
+      liveStreamSync.queryNetworkStreams();
+    } catch (e: any) {
+      setFetchError('Failed to query live streams');
+    }
+    const timer = setTimeout(() => {
+      setIsLoadingStreams(false);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const cancel = refreshStreams();
+    const handleVis = () => {
+      if (document.visibilityState === 'visible') {
+        refreshStreams();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVis);
+    window.addEventListener('focus', handleVis);
+    return () => {
+      cancel();
+      document.removeEventListener('visibilitychange', handleVis);
+      window.removeEventListener('focus', handleVis);
+    };
+  }, [refreshStreams]);
+
   useEffect(() => {
     return liveStreamSync.subscribeToActiveStreams((streams) => {
       setInternalStreamers(streams);
+      if (streams.length > 0) {
+        setIsLoadingStreams(false);
+      }
     });
   }, []);
 
@@ -750,8 +785,59 @@ export const LiveExploreGrid: React.FC<LiveExploreGridProps> = ({
           })}
         </div>
 
-        {/* Empty state if no live streams or search returns nothing */}
-        {filteredStreamers.length === 0 && (
+        {/* Loading state while querying live network */}
+        {isLoadingStreams && filteredStreamers.length === 0 && (
+          <div className="live-explore-loading-state" style={{ padding: '60px 20px', textAlign: 'center' }}>
+            <div className="live-loading-spinner" style={{
+              width: '42px',
+              height: '42px',
+              margin: '0 auto 16px auto',
+              border: '3px solid rgba(255, 255, 255, 0.15)',
+              borderTopColor: '#ef4444',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite'
+            }} />
+            <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>
+              Checking Live Broadcasts...
+            </div>
+            <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.6)' }}>
+              Querying active creators across the live network
+            </div>
+          </div>
+        )}
+
+        {/* Error state if request failed */}
+        {!isLoadingStreams && fetchError && filteredStreamers.length === 0 && (
+          <div className="live-explore-error-state" style={{ padding: '60px 20px', textAlign: 'center' }}>
+            <div style={{ fontSize: '40px', marginBottom: '16px' }}>⚠️</div>
+            <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>
+              Live Network Connection Error
+            </div>
+            <div style={{ fontSize: '14px', color: 'rgba(255,255,255,0.65)', maxWidth: '380px', margin: '0 auto 20px auto', lineHeight: 1.5 }}>
+              Could not retrieve live broadcasts from the authoritative source. Please check your network connection and retry.
+            </div>
+            <button
+              type="button"
+              className="live-empty-golive-btn"
+              onClick={refreshStreams}
+              style={{
+                background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '10px 24px',
+                borderRadius: '30px',
+                fontWeight: 700,
+                fontSize: '14px',
+                cursor: 'pointer',
+              }}
+            >
+              Retry Discovery
+            </button>
+          </div>
+        )}
+
+        {/* Genuine empty state: only when request finished and truly 0 live streams */}
+        {!isLoadingStreams && !fetchError && filteredStreamers.length === 0 && (
           <div className="live-explore-empty-state" style={{ padding: '60px 20px', textAlign: 'center' }}>
             <div className="empty-icon" style={{ fontSize: '48px', marginBottom: '16px' }}>📡</div>
             <div className="empty-title" style={{ fontSize: '20px', fontWeight: 700, color: '#fff', marginBottom: '8px' }}>

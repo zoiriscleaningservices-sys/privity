@@ -398,8 +398,56 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     } else if (raw.type === 'PRESENCE_LEAVE' && raw.userId) {
       presenceMap.delete(raw.userId);
       prunePresenceAndEmitCount();
+    } else if (raw.type === 'BATTLE_INVITED' && raw.battle) {
+      // Incoming battle invitation from a real creator
+      const targetSideB = raw.battle.side_b?.host;
+      const targetSideA = raw.battle.side_a?.host;
+      const isForMe = targetSideB?.id === me.id || targetSideB?.handle === me.handle ||
+                      targetSideA?.id === me.id || targetSideA?.handle === me.handle;
+      if (isForMe || isHost) {
+        battleState = raw.battle;
+        dispatchEvent({
+          event_id: `evt-b-inv-${Date.now()}`,
+          live_id: liveId,
+          battle_id: raw.battle.battle_id,
+          event_type: 'BATTLE_INVITED',
+          actor_id: raw.from?.id || null,
+          server_ts: iso(),
+          seq: ++seqCounter,
+          schema_version: 1,
+          payload: { battle: raw.battle, from: raw.from || raw.battle.side_a.host },
+        });
+      }
     } else if (raw.type === 'PK_BATTLE_START' || raw.type === 'BATTLE_ACCEPTED') {
-      startLocalBattle(raw.format || 'classic_double', raw.opponent, raw.starts_at);
+      const bId = raw.battle_id || raw.battle?.battle_id;
+      // Drop if already live with this exact battle ID (prevents duplicate start & duplicate chat banners)
+      if (battleState && battleState.status === 'live' && (!bId || battleState.battle_id === bId)) {
+        return;
+      }
+      const opp = raw.opponent || (raw.battle?.side_b?.host?.id !== me.id ? raw.battle?.side_b?.host : raw.battle?.side_a?.host);
+      if (opp) {
+        startLocalBattle(raw.format || 'classic_double', opp, raw.starts_at, bId);
+      }
+    } else if (raw.type === 'BATTLE_CANCELLED') {
+      const bId = raw.battle_id || raw.battle?.battle_id;
+      if (battleState && (!bId || battleState.battle_id === bId)) {
+        if (battleTimer) {
+          clearInterval(battleTimer);
+          battleTimer = null;
+        }
+        battleState = null;
+        dispatchEvent({
+          event_id: `evt-b-cancel-${Date.now()}`,
+          live_id: liveId,
+          battle_id: bId || 'cancelled',
+          event_type: 'BATTLE_CANCELLED',
+          actor_id: null,
+          server_ts: iso(),
+          seq: ++seqCounter,
+          schema_version: 1,
+          payload: { battle_id: bId || 'cancelled', reason: (raw.reason as 'declined' | 'expired' | 'cancelled' | 'host_left') || 'cancelled' },
+        });
+      }
     } else if (raw.type === 'BATTLE_SCORE' && raw.battle_id) {
       if (battleState) {
         battleState.score_a = typeof raw.score_a === 'number' ? Math.max(battleState.score_a, raw.score_a) : battleState.score_a;
@@ -571,21 +619,31 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     }
   }
 
-  function startLocalBattle(formatId = 'classic_double', customOpponent?: UserRef, customStartsAt?: number) {
+  function startLocalBattle(formatId = 'classic_double', customOpponent?: UserRef, customStartsAt?: number, customBattleId?: string) {
     const fmt = BUILTIN_FORMATS[formatId as keyof typeof BUILTIN_FORMATS] || BUILTIN_FORMATS.classic_double;
     const startsAt = customStartsAt && customStartsAt > now() - 60000 ? customStartsAt : now() + (fmt.intro_ms || 3000);
     const compiled = compileTimeline(fmt, startsAt);
     battleTimeline = compiled.timeline;
 
-    const opponent: UserRef = customOpponent || {
-      id: 'rival-host',
-      handle: 'rival.pro',
-      display_name: 'Kai Vortex',
-      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-    };
+    let opponent: UserRef | undefined = customOpponent;
+    if (!opponent) {
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
+        opponent = { id: 'test-rival', handle: 'testrival', display_name: 'Test Rival', avatar_url: '' };
+      } else {
+        console.warn('[Privity Live] startLocalBattle rejected: Real opponent required. Fabricated participants are disabled.');
+        return;
+      }
+    }
+
+    const targetBattleId = customBattleId || (battleState?.status === 'invited' && battleState.battle_id ? battleState.battle_id : `battle-${Date.now()}`);
+
+    // If this exact battle is already live, do not re-initialize or emit duplicate events
+    if (battleState && battleState.battle_id === targetBattleId && battleState.status === 'live') {
+      return;
+    }
 
     battleState = {
-      battle_id: `battle-${Date.now()}`,
+      battle_id: targetBattleId,
       format_id: formatId,
       status: 'live',
       side_a: { live_id: liveId, host: hostUserRef },
@@ -1051,10 +1109,68 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       }
       return { ok: true, data: rows };
     },
+    async battleInvite(targetOpponent: UserRef, formatId = 'classic_double') {
+      if (!targetOpponent || targetOpponent.id === me.id) {
+        return { ok: false, code: 'INVALID_OPPONENT', message: 'Cannot battle yourself or invalid opponent.' };
+      }
+      const bId = `battle-${Date.now()}`;
+      const fmt = BUILTIN_FORMATS[formatId as keyof typeof BUILTIN_FORMATS] || BUILTIN_FORMATS.classic_double;
+      const startsAt = now() + (fmt.intro_ms || 3000);
+      const compiled = compileTimeline(fmt, startsAt);
+      const inviteSnapshot: BattleSnapshot = {
+        battle_id: bId,
+        format_id: formatId,
+        status: 'invited',
+        side_a: { live_id: liveId, host: hostUserRef },
+        side_b: { live_id: `live-${targetOpponent.id}`, host: targetOpponent },
+        scoring: fmt.scoring,
+        invite_expires_at: new Date(Date.now() + 30000).toISOString(),
+        intro_at: compiled.intro_at,
+        starts_at: compiled.starts_at,
+        ends_at: compiled.ends_at,
+        final_countdown_ms: compiled.final_countdown_ms,
+        timeline: compiled.timeline,
+        score_a: 0,
+        score_b: 0,
+        pull_scores: [],
+        lead_side: null,
+        score_version: 1,
+        result: null,
+      };
+      battleState = inviteSnapshot;
+      broadcastRoomEvent({
+        type: 'BATTLE_INVITED',
+        battle: inviteSnapshot,
+        from: me,
+        targetHostId: targetOpponent.id,
+        targetHandle: targetOpponent.handle,
+      });
+      return { ok: true, data: { battle_id: bId } };
+    },
     async battleRespond(_battleId, accept) {
       if (accept) {
-        broadcastRoomEvent({ type: 'PK_BATTLE_START', format: 'classic_double' });
+        if (battleState) {
+          battleState.status = 'live';
+          const opponent = battleState.side_a.host.id === me.id ? battleState.side_b.host : battleState.side_a.host;
+          startLocalBattle(battleState.format_id, opponent, Date.parse(battleState.starts_at || '') || undefined, battleState.battle_id);
+        } else {
+          startLocalBattle('classic_double', undefined, undefined, _battleId);
+        }
+        if (battleState) {
+          broadcastRoomEvent({
+            type: 'BATTLE_ACCEPTED',
+            battle_id: battleState.battle_id,
+            battle: battleState,
+            opponent: me,
+            format: battleState.format_id,
+          });
+        }
       } else {
+        if (battleTimer) {
+          clearInterval(battleTimer);
+          battleTimer = null;
+        }
+        battleState = null;
         broadcastRoomEvent({ type: 'BATTLE_CANCELLED', battle_id: _battleId });
       }
       return { ok: true, data: { status: accept ? 'accepted' : 'cancelled' } };
@@ -1064,15 +1180,25 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       return { ok: true, data: {} };
     },
     async startBattle(formatId = 'classic_double', customOpponent?: UserRef) {
+      let opponent = customOpponent;
+      if (!opponent) {
+        if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
+          opponent = { id: 'test-rival', handle: 'testrival', display_name: 'Test Rival', avatar_url: '' };
+        } else {
+          return { ok: false, code: 'OPPONENT_REQUIRED', message: 'A verified live opponent is required to start a battle.' };
+        }
+      }
       const startsAt = now() + 3000;
-      startLocalBattle(formatId, customOpponent, startsAt);
+      const bId = `battle-${Date.now()}`;
+      startLocalBattle(formatId, opponent, startsAt, bId);
       broadcastRoomEvent({
         type: 'PK_BATTLE_START',
+        battle_id: bId,
         format: formatId,
-        opponent: customOpponent,
+        opponent,
         starts_at: startsAt,
       });
-      return { ok: true, data: { battle_id: battleState?.battle_id || 'battle' } };
+      return { ok: true, data: { battle_id: bId } };
     },
     async endLive(_id) {
       if (isEnded) return { ok: true, data: { status: 'ended' } };

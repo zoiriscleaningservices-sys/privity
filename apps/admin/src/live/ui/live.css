@@ -968,8 +968,22 @@ button.plv-tile {
   gap: 10px;
 }
 
-.plv-studio:has(.plv-battle-slot) .plv-rail {
-  top: calc(var(--sat) + 190px);
+/* During battle: dock rail neatly below video stage so opponent video tile & name are 100% unobstructed */
+.plv-studio:has(.plv-battle-slot) .plv-rail,
+.plv-rail--battle {
+  top: auto;
+  bottom: calc(var(--sab) + 76px);
+  right: calc(var(--sar) + 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 32;
+}
+
+.plv-studio:has(.plv-battle-slot) .plv-rail .plv-icon-btn,
+.plv-rail--battle .plv-icon-btn {
+  width: 38px;
+  height: 38px;
 }
 
 .plv-studio-bottom {
@@ -1118,7 +1132,9 @@ button.plv-tile {
   z-index: 22;
   left: 0;
   right: 0;
-  top: calc(var(--sat) + 92px);
+  top: calc(var(--sat) + 88px);
+  padding: 0 calc(var(--sar) + 8px) 0 calc(var(--sal) + 8px);
+  box-sizing: border-box;
   pointer-events: none;
 }
 
@@ -1127,7 +1143,8 @@ button.plv-tile {
 }
 
 .plv-studio .plv-battle-slot {
-  right: 64px;
+  right: 0;
+  left: 0;
 }
 
 /* =============================================================================

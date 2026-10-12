@@ -41,7 +41,7 @@ import { ShowOverlay } from './ShowOverlay';
 import { CommentComposer, CommentList } from './Comments';
 import { FilterSheet } from './FilterSheet';
 import { StageManagerSheet } from './StageManagerSheet';
-import { BattleInviteCard, HostSettingsSheet, ModerationSheet } from './HostSheets';
+import { BattleInviteCard, HostSettingsSheet, ModerationSheet, BattleMatchmakerSheet } from './HostSheets';
 import { useGuestRequests, useStagePresentation } from './useHostStage';
 import { SupportersSheet } from './ViewerSheets';
 import { HeartsHandle, HeartsLayer } from './Hearts';
@@ -109,7 +109,7 @@ function useHostLocalMedia(source: MediaSourceKind, initialStream?: MediaStream 
   return c;
 }
 
-type SheetKind = null | 'filters' | 'stage' | 'settings' | 'supporters' | 'moderate' | 'end';
+type SheetKind = null | 'filters' | 'stage' | 'settings' | 'supporters' | 'moderate' | 'end' | 'battle';
 
 const PROBLEM: Partial<Record<LocalMediaState['camera']['status'], string>> = {
   denied: 'Camera blocked',
@@ -466,7 +466,7 @@ function StudioBody({
         />
       )}
 
-      <nav className="plv-rail" aria-label="Studio tools">
+      <nav className={`plv-rail ${battleOnStage ? 'plv-rail--battle' : ''}`} aria-label="Studio tools">
         {cam.canFlip && cam.status === 'live' && (
           <IconButton id="plv-flip" label="Switch camera" icon={<SwitchCamera size={22} />} onClick={() => void localMedia.flip()} disabled={cam.flipping} />
         )}
@@ -492,10 +492,9 @@ function StudioBody({
           icon={<Swords size={22} />}
           pressed={battleOnStage}
           disabled={battleOnStage}
-          onClick={async () => {
-            if (commands.startBattle) {
-              await commands.startBattle('classic_double');
-              toast('PK Battle started! Double Points period active.', 'info');
+          onClick={() => {
+            if (!battleOnStage) {
+              setSheet('battle');
             }
           }}
         />
@@ -630,6 +629,15 @@ function StudioBody({
         }
       />
       <SupportersSheet open={sheet === 'supporters'} onClose={closeSheet} supporters={room.topSupporters} />
+      <BattleMatchmakerSheet
+        open={sheet === 'battle'}
+        onClose={closeSheet}
+        commands={commands}
+        currentHost={me}
+        onStartBattle={(opp) => {
+          toast(`PK Battle challenge issued to ${opp.display_name}!`, 'info');
+        }}
+      />
       <ModerationSheet
         open={sheet === 'moderate'}
         onClose={closeSheet}

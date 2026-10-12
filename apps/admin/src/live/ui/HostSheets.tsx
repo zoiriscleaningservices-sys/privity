@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Ban, Clock, Coins, Eye, MessageCircleOff, MessageCircle, Sparkles, Swords, Trash, UserX, Vibrate, Volume2, VolumeX } from 'lucide-react';
+import { Ban, Clock, Coins, Eye, MessageCircleOff, MessageCircle, Sparkles, Swords, Trash, UserX, Vibrate, Volume2, VolumeX, AlertCircle, CheckCircle2, Radio, RefreshCw, Zap } from 'lucide-react';
 import type { BattleSnapshot, UserRef } from '../core/events';
 import type { LiveComment } from '../client/commentStore';
 import type { LiveCommands, WalletInfo } from '../client/LiveCommands';
@@ -8,6 +8,7 @@ import { ConfirmDialog, Sheet } from './primitives';
 import { Avatar } from './Avatar';
 import { Toggle } from './ViewerSheets';
 import { formatDuration, useNow } from './hooks';
+import { liveStreamSync } from '../../services/liveStreamSyncService';
 
 /** Host moderation on a comment. Every action is a server RPC; the result is the server's. */
 export function ModerationSheet({
@@ -251,5 +252,312 @@ export function BattleInviteCard({
         </button>
       </div>
     </section>
+  );
+}
+
+/**
+ * Authoritative PK Battle Matchmaker Sheet.
+ * Manages explicit matching states: IDLE, SEARCHING, MATCH_FOUND, CONNECTING, CONNECTED, FAILED, CANCELLED, ENDED.
+ * Strictly verifies real eligible broadcasters — NEVER creates fabricated or phantom participants!
+ */
+export function BattleMatchmakerSheet({
+  open,
+  onClose,
+  commands,
+  currentHost,
+  onStartBattle,
+}: {
+  open: boolean;
+  onClose: () => void;
+  commands: LiveCommands;
+  currentHost: UserRef;
+  onStartBattle?: (opponent: UserRef) => void;
+}) {
+  const [matchState, setMatchState] = useState<'IDLE' | 'SEARCHING' | 'MATCH_FOUND' | 'CONNECTING' | 'CONNECTED' | 'FAILED' | 'CANCELLED' | 'ENDED'>('IDLE');
+  const [candidate, setCandidate] = useState<UserRef | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activeStreamers, setActiveStreamers] = useState(() =>
+    liveStreamSync.getStreamersList().filter((s) => {
+      const h = (s.creatorHandle || s.handle || '').toLowerCase().replace('@', '').trim();
+      const meH = (currentHost.handle || '').toLowerCase().replace('@', '').trim();
+      return !s.isHost && s.isLive !== false && h !== meH && !liveStreamSync.isStreamEnded(s.id, s.handle, s.startedAt);
+    })
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setMatchState('IDLE');
+      setCandidate(null);
+      setErrorMessage(null);
+      return;
+    }
+    liveStreamSync.queryNetworkStreams();
+    const unsub = liveStreamSync.subscribeToActiveStreams((streams) => {
+      const eligible = streams.filter((s) => {
+        const h = (s.creatorHandle || s.handle || '').toLowerCase().replace('@', '').trim();
+        const meH = (currentHost.handle || '').toLowerCase().replace('@', '').trim();
+        return !s.isHost && s.isLive !== false && h !== meH && !liveStreamSync.isStreamEnded(s.id, s.handle, s.startedAt);
+      });
+      setActiveStreamers(eligible);
+    });
+    return unsub;
+  }, [open, currentHost.handle]);
+
+  const startSearching = () => {
+    setMatchState('SEARCHING');
+    setCandidate(null);
+    setErrorMessage(null);
+    liveStreamSync.queryNetworkStreams();
+
+    setTimeout(() => {
+      const eligible = liveStreamSync.getStreamersList().filter((s) => {
+        const h = (s.creatorHandle || s.handle || '').toLowerCase().replace('@', '').trim();
+        const meH = (currentHost.handle || '').toLowerCase().replace('@', '').trim();
+        return !s.isHost && s.isLive !== false && h !== meH && !liveStreamSync.isStreamEnded(s.id, s.handle, s.startedAt);
+      });
+      if (eligible.length > 0) {
+        const selected = eligible[Math.floor(Math.random() * eligible.length)];
+        const opp: UserRef = {
+          id: selected.id,
+          handle: (selected.creatorHandle || selected.handle || '').replace('@', '').trim(),
+          display_name: selected.name?.replace(' (LIVE NOW 🔴)', '') || selected.handle,
+          avatar_url: selected.avatar || null,
+        };
+        setCandidate(opp);
+        setMatchState('MATCH_FOUND');
+      } else {
+        setMatchState('FAILED');
+        setErrorMessage('No other creators are currently live for matchmaking. Other creators must be actively broadcasting to match.');
+      }
+    }, 1500);
+  };
+
+  const handleSelectCreator = (s: any) => {
+    const opp: UserRef = {
+      id: s.id,
+      handle: (s.creatorHandle || s.handle || '').replace('@', '').trim(),
+      display_name: s.name?.replace(' (LIVE NOW 🔴)', '') || s.handle,
+      avatar_url: s.avatar || null,
+    };
+    setCandidate(opp);
+    setMatchState('MATCH_FOUND');
+  };
+
+  const handleSendInvite = async () => {
+    if (!candidate) return;
+    setMatchState('CONNECTING');
+    setErrorMessage(null);
+
+    try {
+      if (commands.battleInvite) {
+        await commands.battleInvite(candidate);
+      } else if (commands.startBattle) {
+        await commands.startBattle('classic_double', candidate);
+      }
+      if (onStartBattle) onStartBattle(candidate);
+
+      const timeoutTimer = setTimeout(() => {
+        setMatchState('FAILED');
+        setErrorMessage('Connection timed out. Broadcast media was not established.');
+      }, 15000);
+
+      const unsub = liveStreamSync.subscribeToRoom(candidate.handle, (evt) => {
+        if (evt.type === 'BATTLE_CANCELLED') {
+          clearTimeout(timeoutTimer);
+          setMatchState('FAILED');
+          setErrorMessage('The opponent declined the battle invitation or disconnected.');
+        } else if (evt.type === 'BATTLE_ACCEPTED' || evt.type === 'PK_BATTLE_START') {
+          clearTimeout(timeoutTimer);
+          setMatchState('CONNECTED');
+          setTimeout(() => onClose(), 800);
+        }
+      });
+
+      return () => {
+        clearTimeout(timeoutTimer);
+        unsub();
+      };
+    } catch (e: any) {
+      setMatchState('FAILED');
+      setErrorMessage(e?.message || 'Failed to initiate matchmaking.');
+    }
+  };
+
+  const handleCancel = () => {
+    setMatchState('CANCELLED');
+    onClose();
+  };
+
+  return (
+    <Sheet
+      open={open}
+      onClose={handleCancel}
+      title="PK Battle Matchmaking"
+      subtitle={
+        matchState === 'SEARCHING'
+          ? 'Scanning live network for available creators…'
+          : matchState === 'CONNECTING'
+          ? 'Establishing peer connection…'
+          : 'Real-time creator versus duels'
+      }
+      size="auto"
+      id="plv-matchmaker"
+    >
+      {/* 1. IDLE STATE */}
+      {matchState === 'IDLE' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', borderRadius: '16px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+            <Zap size={24} style={{ color: '#818cf8', flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: '14px', color: '#fff' }}>Quick Match Radar</div>
+              <div style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.65)' }}>Instantly match with an active live creator</div>
+            </div>
+            <button type="button" className="plv-btn plv-btn--iris" onClick={startSearching} id="plv-quick-match" style={{ minHeight: '36px', padding: '0 14px', fontSize: '13px' }}>
+              ⚡ Match Now
+            </button>
+          </div>
+
+          <div>
+            <h3 className="plv-sheet-section" style={{ margin: '0 0 10px 0' }}>
+              Available Live Creators ({activeStreamers.length})
+            </h3>
+            {activeStreamers.length === 0 ? (
+              <div style={{ padding: '24px 16px', textAlign: 'center', borderRadius: '16px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <Radio size={28} style={{ color: 'rgba(255, 255, 255, 0.4)', margin: '0 auto 8px auto', display: 'block' }} />
+                <p style={{ margin: '0 0 6px 0', fontSize: '14px', fontWeight: 600, color: '#fff' }}>No other creators live right now</p>
+                <p style={{ margin: 0, fontSize: '12px', color: 'rgba(255, 255, 255, 0.6)' }}>
+                  Start broadcasting on a second device or tap Match Now to refresh active broadcasts.
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {activeStreamers.map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => handleSelectCreator(s)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 12px',
+                      borderRadius: '14px',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Avatar user={{ id: s.id, handle: s.creatorHandle || s.handle, display_name: s.name, avatar_url: s.avatar || null }} size={42} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '14px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {s.name?.replace(' (LIVE NOW 🔴)', '')}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.6)' }}>
+                        @{s.creatorHandle || s.handle} · {s.viewersCount || 1} watching
+                      </div>
+                    </div>
+                    <button type="button" className="plv-btn plv-btn--ghost" style={{ minHeight: '32px', padding: '0 12px', fontSize: '12px' }}>
+                      Invite
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 2. SEARCHING STATE */}
+      {matchState === 'SEARCHING' && (
+        <div style={{ padding: '36px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.15)', border: '2px solid #818cf8', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'spin 1.5s linear infinite' }}>
+            <Swords size={28} style={{ color: '#818cf8' }} />
+          </div>
+          <div>
+            <h4 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: '#fff' }}>Searching for eligible creators…</h4>
+            <p style={{ margin: 0, fontSize: '13px', color: 'rgba(255, 255, 255, 0.65)' }}>Scanning active live nodes on the network</p>
+          </div>
+          <button type="button" className="plv-btn plv-btn--ghost" onClick={() => setMatchState('IDLE')}>
+            Cancel Search
+          </button>
+        </div>
+      )}
+
+      {/* 3. MATCH_FOUND STATE */}
+      {matchState === 'MATCH_FOUND' && candidate && (
+        <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px', borderRadius: '18px', background: 'rgba(255, 255, 255, 0.06)', border: '1px solid rgba(255, 255, 255, 0.14)' }}>
+            <Avatar user={candidate} size={54} ring="b" decorative />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 800, color: '#38bdf8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <CheckCircle2 size={13} /> Opponent Confirmed
+              </div>
+              <div style={{ fontWeight: 800, fontSize: '17px', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {candidate.display_name}
+              </div>
+              <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.65)' }}>
+                @{candidate.handle}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <button type="button" className="plv-btn plv-btn--iris" onClick={handleSendInvite} id="plv-confirm-battle">
+              <Swords size={18} /> Send Battle Challenge
+            </button>
+            <button type="button" className="plv-btn plv-btn--ghost" onClick={() => setMatchState('IDLE')}>
+              Choose Different Creator
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 4. CONNECTING STATE */}
+      {matchState === 'CONNECTING' && candidate && (
+        <div style={{ padding: '36px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '50%', border: '3px solid rgba(255, 255, 255, 0.15)', borderTopColor: '#818cf8', animation: 'spin 0.8s linear infinite' }} />
+          <div>
+            <h4 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: '#fff' }}>
+              Connecting to broadcast…
+            </h4>
+            <p style={{ margin: 0, fontSize: '13px', color: 'rgba(255, 255, 255, 0.65)' }}>
+              Waiting for @{candidate.handle} to accept and establish WebRTC media
+            </p>
+          </div>
+          <button type="button" className="plv-btn plv-btn--ghost" onClick={handleCancel}>
+            Cancel Invitation
+          </button>
+        </div>
+      )}
+
+      {/* 5. CONNECTED STATE */}
+      {matchState === 'CONNECTED' && (
+        <div style={{ padding: '36px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+          <CheckCircle2 size={42} style={{ color: '#34d399' }} />
+          <h4 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#fff' }}>Battle Connected!</h4>
+          <p style={{ margin: 0, fontSize: '13px', color: 'rgba(255, 255, 255, 0.65)' }}>Dual camera stage starting now…</p>
+        </div>
+      )}
+
+      {/* 6. FAILED STATE */}
+      {matchState === 'FAILED' && (
+        <div style={{ padding: '24px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <AlertCircle size={38} style={{ color: '#f87171' }} />
+          <div>
+            <h4 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: '#fff' }}>Matchmaking Unavailable</h4>
+            <p style={{ margin: 0, fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)', lineHeight: 1.5 }}>
+              {errorMessage || 'Unable to connect to a live opponent at this time.'}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', width: '100%', justifyContent: 'center' }}>
+            <button type="button" className="plv-btn plv-btn--iris" onClick={startSearching}>
+              <RefreshCw size={15} /> Try Again
+            </button>
+            <button type="button" className="plv-btn plv-btn--ghost" onClick={handleCancel}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </Sheet>
   );
 }

@@ -1,7 +1,7 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { Peer } from 'peerjs';
 import { LiveMeStreamer } from '../components/liveme/types';
-import { broadcastViaSupabase, onSupabaseBroadcast } from './supabaseClient';
+import { broadcastViaSupabase, onSupabaseBroadcast, getSupabaseClient } from './supabaseClient';
 
 export interface RemoteLiveStreamPayload {
   id: string;
@@ -120,10 +120,14 @@ class LiveStreamSyncService {
         const action = payload.action || payload.type;
         if (action === 'ROOM_EVENT' && payload.streamId && payload.event) {
           this.dispatchRoomEvent(payload.streamId, payload.event);
-        } else if ((action === 'STREAM_ACTIVE' || action === 'LIVE_STARTED' || action === 'LIVE_HOST_STARTED') && (payload.stream || payload.host)) {
+        } else if ((action === 'STREAM_ACTIVE' || action === 'LIVE_STARTED' || action === 'LIVE_HOST_STARTED' || action === 'STREAM_HEARTBEAT' || action === 'LIVE_HEARTBEAT') && (payload.stream || payload.host)) {
           this.handleIncomingStream(payload.stream || payload.host);
         } else if (action === 'STREAM_ENDED' || action === 'LIVE_ENDED' || action === 'LIVE_HOST_ENDED') {
           this.handleStreamEnded(payload.streamId, payload.creatorHandle || payload.handle);
+        } else if (action === 'QUERY_ACTIVE_STREAMS') {
+          if (this.currentHostSession && this.currentHostSession.isLive !== false) {
+            this.announceStream(this.currentHostSession);
+          }
         }
       });
     } catch {}
@@ -220,6 +224,10 @@ class LiveStreamSyncService {
           this.handleStreamEnded(e.data.streamId || '', e.data.handle || e.data.creatorHandle);
         } else if ((action === 'LIVE_ROOM_EVENT' || action === 'ROOM_EVENT') && e.data.streamId) {
           this.dispatchRoomEvent(e.data.streamId, e.data.event);
+        } else if (action === 'QUERY_ACTIVE_STREAMS') {
+          if (this.currentHostSession && this.currentHostSession.isLive !== false) {
+            this.announceStream(this.currentHostSession);
+          }
         }
       };
     } catch {}
@@ -448,6 +456,59 @@ class LiveStreamSyncService {
         this.mqttClient.publish(TOPIC_QUERY, JSON.stringify({ type: 'QUERY_ACTIVE_STREAMS' }));
       } catch {}
     }
+    try {
+      this.broadcastBus?.postMessage({
+        type: 'QUERY_ACTIVE_STREAMS',
+        action: 'QUERY_ACTIVE_STREAMS',
+      });
+    } catch {}
+    try {
+      broadcastViaSupabase({
+        action: 'QUERY_ACTIVE_STREAMS',
+        type: 'QUERY_ACTIVE_STREAMS',
+      });
+    } catch {}
+    this.querySupabaseActiveSessions();
+  }
+
+  public async querySupabaseActiveSessions(): Promise<RemoteLiveStreamPayload[]> {
+    const sb = getSupabaseClient();
+    if (!sb) return [];
+    try {
+      const { data, error } = await sb.rpc('live_list_active');
+      if (!error && Array.isArray(data)) {
+        const list: RemoteLiveStreamPayload[] = [];
+        data.forEach((item: any) => {
+          if (!item) return;
+          const host = item.host || {};
+          const handle = (host.handle || '').toLowerCase().replace('@', '').trim();
+          if (!handle) return;
+          const streamPayload: RemoteLiveStreamPayload = {
+            id: item.live_id || `live-${handle}`,
+            creatorHandle: host.handle || handle,
+            creatorName: host.display_name || handle,
+            creatorAvatar: host.avatar_url || '',
+            isVerified: true,
+            category: 'Featured',
+            title: item.title || 'Live Broadcast',
+            description: 'Sovereign Live Broadcast',
+            viewersCount: item.viewer_count || 1,
+            likesCount: 0,
+            previewUrl: host.avatar_url || '',
+            posterUrl: host.avatar_url || '',
+            tags: ['LiveNow', 'Privity'],
+            peerId: `privity-live-${handle}`,
+            startedAt: item.started_at ? Date.parse(item.started_at) : Date.now(),
+            isLive: true,
+            lastHeartbeat: Date.now(),
+          };
+          this.handleIncomingStream(streamPayload);
+          list.push(streamPayload);
+        });
+        return list;
+      }
+    } catch {}
+    return [];
   }
 
   private handleIncomingStream(stream: any) {
