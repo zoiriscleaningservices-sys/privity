@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Mic,
   MicOff,
@@ -13,7 +13,10 @@ import {
   WandSparkles,
   X,
   MicVocal,
+  Swords,
+  ArrowLeftRight,
 } from 'lucide-react';
+import { DualCompositor, canComposite } from '../media/DualCompositor';
 import type { UserRef } from '../core/events';
 import type { LiveCommands } from '../client/LiveCommands';
 import type { LiveFeed, LiveRoomController, PersonalNotice } from '../client/LiveRoomController';
@@ -40,9 +43,11 @@ import { ShowOverlay } from './ShowOverlay';
 import { CommentComposer, CommentList } from './Comments';
 import { FilterSheet } from './FilterSheet';
 import { StageManagerSheet } from './StageManagerSheet';
-import { BattleInviteCard, HostSettingsSheet, ModerationSheet } from './HostSheets';
+import { BattleInviteCard, HostSettingsSheet, ModerationSheet, BattleMatchmakerSheet } from './HostSheets';
 import { useGuestRequests, useStagePresentation } from './useHostStage';
 import { SupportersSheet } from './ViewerSheets';
+import { HeartsHandle, HeartsLayer } from './Hearts';
+import { liveStreamSync } from '../../services/liveStreamSyncService';
 
 export interface HostStudioProps {
   feed: LiveFeed;
@@ -77,19 +82,36 @@ export function HostStudio(props: HostStudioProps) {
 
 function useHostLocalMedia(source: MediaSourceKind, initialStream?: MediaStream | null): LocalMediaController | null {
   const [c, setC] = useState<LocalMediaController | null>(null);
+  const trackIdRef = useRef<string | null>(null);
+  const controllerRef = useRef<LocalMediaController | null>(null);
+
   useEffect(() => {
+    const vTrack = initialStream?.getVideoTracks()[0];
+    const currentTrackId = vTrack?.id || null;
+
+    if (controllerRef.current && trackIdRef.current === currentTrackId && currentTrackId !== null) {
+      return;
+    }
+
+    trackIdRef.current = currentTrackId;
     const m = new LocalMediaController(source, { initialStream });
+    controllerRef.current = m;
     setC(m);
     void m.start({ video: true, audio: true });
+
     return () => {
       m.dispose();
-      setC(null);
+      if (controllerRef.current === m) {
+        controllerRef.current = null;
+        setC(null);
+      }
     };
   }, [source, initialStream]);
+
   return c;
 }
 
-type SheetKind = null | 'filters' | 'stage' | 'settings' | 'supporters' | 'moderate' | 'end';
+type SheetKind = null | 'filters' | 'stage' | 'settings' | 'supporters' | 'moderate' | 'end' | 'battle';
 
 const PROBLEM: Partial<Record<LocalMediaState['camera']['status'], string>> = {
   denied: 'Camera blocked',
@@ -118,6 +140,7 @@ function StudioBody({
   const local = useLocalMedia(localMedia);
   const library = useFilterLibrary(filterStore);
   const { items: toasts, push: toast } = useToasts();
+  const hearts = useRef<HeartsHandle>(null);
 
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [draft, setDraft] = useState<{ params: FilterParams; intensity: number } | null>(null);
@@ -135,6 +158,16 @@ function StudioBody({
   const stageReq = useGuestRequests(controller, commands, room?.liveId ?? null, guests);
   const pres = useStagePresentation(guests);
   const pendingCount = stageReq.requests.filter((r) => r.status === 'pending' || r.status === 'failed').length;
+
+  useEffect(() => {
+    if (!room?.liveId) return;
+    const unsub = liveStreamSync.subscribeToRoomEvents(room.liveId, (evt: any) => {
+      if (evt?.type === 'REACTION_SENT') {
+        hearts.current?.burst();
+      }
+    });
+    return () => unsub();
+  }, [room?.liveId]);
 
   const onNotice = useCallback(
     (n: PersonalNotice) => {
@@ -154,6 +187,37 @@ function StudioBody({
   }, [processed, local.videoStream]);
   const cameraLive = local.camera.status === 'live' && liveVideoTracks.length > 0;
   const micLive = local.mic.status === 'live' && local.mic.enabled && !!local.audioTrack;
+
+  // ---- Dual camera: composite BOTH real cameras into the published video track ------
+  const [dualSwap, setDualSwap] = useState(false);
+  const [dualCompositor, setDualCompositor] = useState<DualCompositor | null>(null);
+  const dualSecondaryTrack = local.dual.status === 'on' ? local.dual.stream?.getVideoTracks()[0] ?? null : null;
+  const primaryTrack = cameraLive ? liveVideoTracks[0] ?? null : null;
+  useEffect(() => {
+    if (!live || !primaryTrack || !dualSecondaryTrack || !canComposite()) {
+      setDualCompositor(null);
+      return;
+    }
+    let c: DualCompositor | null = null;
+    try {
+      c = new DualCompositor(primaryTrack, dualSecondaryTrack);
+    } catch (err) {
+      console.warn('Privity Dual compositor unavailable:', err);
+    }
+    setDualCompositor(c);
+    return () => {
+      c?.dispose();
+    };
+  }, [live, primaryTrack, dualSecondaryTrack]);
+  useEffect(() => {
+    dualCompositor?.setSwapped(dualSwap);
+  }, [dualCompositor, dualSwap]);
+  useEffect(() => {
+    if (local.dual.status !== 'on') setDualSwap(false);
+  }, [local.dual.status]);
+  const dualTrack = dualCompositor?.track ?? null;
+  const dualStream = useMemo(() => (dualTrack ? new MediaStream([dualTrack]) : null), [dualTrack]);
+
   useEffect(() => {
     if (!media) return;
     if (!live) {
@@ -161,15 +225,32 @@ function StudioBody({
       return;
     }
     const tracks: MediaStreamTrack[] = [];
-    if (cameraLive && liveVideoTracks[0]) tracks.push(liveVideoTracks[0]);
+    const videoOut = dualTrack ?? primaryTrack;
+    if (cameraLive && videoOut) tracks.push(videoOut);
     if (micLive && local.audioTrack) tracks.push(local.audioTrack);
     media.publish(me.id, {
       stream: tracks.length ? new MediaStream(tracks) : null,
       cameraOn: cameraLive,
       micOn: micLive,
     });
-  }, [media, me.id, processed, cameraLive, micLive, local.audioTrack, live, liveVideoTracks]);
+  }, [media, me.id, cameraLive, micLive, local.audioTrack, live, primaryTrack, dualTrack]);
   useEffect(() => () => media?.unpublish(me.id), [media, me.id]);
+
+  // Synchronize remote participant media (guests on stage and battle opponents)
+  useEffect(() => {
+    if (!media?.syncParticipants || !room) return;
+    const participants: Array<{ id: string; handle?: string | null }> = [];
+    if (room.guests) {
+      for (const g of room.guests) {
+        if (g.id !== me.id) participants.push({ id: g.id, handle: g.handle });
+      }
+    }
+    if (room.battle && (room.battle.status === 'accepted' || room.battle.status === 'live' || room.battle.status === 'locked')) {
+      const opp = room.battle.side_b.host;
+      if (opp && opp.id !== me.id) participants.push({ id: opp.id, handle: opp.handle });
+    }
+    media.syncParticipants(participants);
+  }, [media, room?.guests, room?.battle, me.id]);
 
   // Stop my devices as soon as the LIVE has ended.
   useEffect(() => {
@@ -178,6 +259,55 @@ function StudioBody({
       void localMedia.setMicEnabled(false);
     }
   }, [room, live, localMedia]);
+
+  // Continuous real-time frame broadcast for explore grid preview & instant viewer video
+  useEffect(() => {
+    if (!live || !cameraLive) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 426;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    let frameBus: BroadcastChannel | null = null;
+    try {
+      frameBus = new BroadcastChannel('privity_live_frames');
+    } catch {}
+
+    const hiddenVideo = document.createElement('video');
+    hiddenVideo.muted = true;
+    hiddenVideo.playsInline = true;
+    hiddenVideo.autoplay = true;
+
+    const streamToCapture = local.videoStream;
+    if (streamToCapture) {
+      hiddenVideo.srcObject = streamToCapture;
+      hiddenVideo.play().catch(() => {});
+    }
+
+    const intervalId = setInterval(() => {
+      if (hiddenVideo.videoWidth > 0 && hiddenVideo.videoHeight > 0 && ctx) {
+        try {
+          ctx.drawImage(hiddenVideo, 0, 0, 320, 426);
+          const frameJpeg = canvas.toDataURL('image/jpeg', 0.5);
+          const cleanH = (me.handle || '').toLowerCase().replace('@', '').trim();
+          if (frameBus) {
+            frameBus.postMessage({
+              type: 'FRAME',
+              handle: cleanH,
+              frame: frameJpeg,
+            });
+          }
+          const roomId = room?.liveId || cleanH;
+          liveStreamSync.sendVideoFrame(roomId, frameJpeg);
+        } catch {}
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(intervalId);
+      if (frameBus) frameBus.close();
+      hiddenVideo.srcObject = null;
+    };
+  }, [live, cameraLive, local.videoStream, me.handle, room?.liveId]);
 
   const active = library.active;
   const params = draft?.params ?? active.params;
@@ -290,10 +420,15 @@ function StudioBody({
     <div className="plv-studio">
       <div className="plv-video-layer">
         {stage && <VideoStage layout={stage.layout} columns={stage.columns} tiles={stage.tiles} overflow={stage.overflow} onOverflow={() => setSheet('stage')} />}
-        {dual.status === 'on' && dual.stream && (
+        {dual.status === 'on' && dualStream && (
+          <div className="plv-dual-composite" aria-label="Dual: both cameras, as viewers see them">
+            <StreamVideo stream={dualStream} className="plv-tile-video" label="Both cameras" />
+          </div>
+        )}
+        {dual.status === 'on' && dual.stream && !dualStream && (
           <div className="plv-dual-pip" aria-label="Dual: second camera">
             <StreamVideo stream={dual.stream} className="plv-tile-video" label="Second camera" />
-            <span className="plv-dual-tag">Dual · preview</span>
+            <span className="plv-dual-tag">Preview only · not sent</span>
           </div>
         )}
       </div>
@@ -353,6 +488,7 @@ function StudioBody({
       )}
 
       <ShowOverlay engine={controller.engine} />
+      <HeartsLayer ref={hearts} />
 
       {invite && opponent && (
         <BattleInviteCard
@@ -369,7 +505,7 @@ function StudioBody({
         />
       )}
 
-      <nav className="plv-rail" aria-label="Studio tools">
+      <nav className={`plv-rail ${battleOnStage ? 'plv-rail--battle' : ''}`} aria-label="Studio tools">
         {cam.canFlip && cam.status === 'live' && (
           <IconButton id="plv-flip" label="Switch camera" icon={<SwitchCamera size={22} />} onClick={() => void localMedia.flip()} disabled={cam.flipping} />
         )}
@@ -388,6 +524,27 @@ function StudioBody({
           pressed={dual.status === 'on'}
           disabled={dual.status === 'starting' || !cameraLive || battleOnStage}
           onClick={() => void (dual.status === 'on' ? localMedia.stopDual() : localMedia.startDual())}
+        />
+        {dual.status === 'on' && dualStream && (
+          <IconButton
+            id="plv-dual-swap"
+            label="Swap main and small camera"
+            icon={<ArrowLeftRight size={22} />}
+            pressed={dualSwap}
+            onClick={() => setDualSwap((v) => !v)}
+          />
+        )}
+        <IconButton
+          id="plv-pk-battle"
+          label={battleOnStage ? 'PK Battle in progress' : 'Start PK Battle'}
+          icon={<Swords size={22} />}
+          pressed={battleOnStage}
+          disabled={battleOnStage}
+          onClick={() => {
+            if (!battleOnStage) {
+              setSheet('battle');
+            }
+          }}
         />
         <IconButton id="plv-settings" label="LIVE settings" icon={<Settings2 size={22} />} onClick={() => setSheet('settings')} />
       </nav>
@@ -520,6 +677,15 @@ function StudioBody({
         }
       />
       <SupportersSheet open={sheet === 'supporters'} onClose={closeSheet} supporters={room.topSupporters} />
+      <BattleMatchmakerSheet
+        open={sheet === 'battle'}
+        onClose={closeSheet}
+        commands={commands}
+        currentHost={me}
+        onStartBattle={(opp) => {
+          toast(`PK Battle challenge issued to ${opp.display_name}!`, 'info');
+        }}
+      />
       <ModerationSheet
         open={sheet === 'moderate'}
         onClose={closeSheet}

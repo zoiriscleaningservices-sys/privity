@@ -58,20 +58,37 @@ export function buildStage(input: BuildStageInput): BuiltStage {
   const order = (input.order ? input.order.filter((id) => guestsById.has(id)) : [...slotOrder]) as string[];
   for (const id of slotOrder) if (!order.includes(id)) order.push(id);
 
+  const cleanHostId = (room.host.id || '').replace(/^@/, '').toLowerCase().trim();
+  const cleanHostHandle = (room.host.handle || '').replace(/^@/, '').toLowerCase().trim();
+  const cleanSelfId = (self?.id || '').replace(/^@/, '').toLowerCase().trim();
+
   const tileFor = (id: string, role: TileModel['role'], area: TileModel['area'], user: UserRef): TileModel => {
+    const cleanUserId = (user.id || '').replace(/^@/, '').toLowerCase().trim();
+    const cleanUserHandle = (user.handle || '').replace(/^@/, '').toLowerCase().trim();
     const isSelf =
-      self?.id === id ||
-      (self?.id && (self.id === user.id || (user.handle && self.id.toLowerCase() === user.handle.toLowerCase()))) ||
-      (role === 'host' && (self?.id === room.host.id || (room.host.handle && self?.id.toLowerCase() === room.host.handle.toLowerCase())));
+      !!self &&
+      (self.id === id ||
+        cleanSelfId === cleanUserId ||
+        (cleanUserHandle && cleanSelfId === cleanUserHandle) ||
+        (role === 'host' && (cleanSelfId === cleanHostId || cleanSelfId === cleanHostHandle)));
+
     return {
-      id,
+      id: isSelf ? self!.id : id,
       role: isSelf && role === 'guest' ? 'self' : role,
       area,
       user,
       local: isSelf ? self?.local : undefined,
       localCameraOn: isSelf ? self?.cameraOn : undefined,
       localMicOn: isSelf ? self?.micOn : undefined,
-      media: isSelf ? undefined : presence.get(id) ?? null,
+      media: isSelf
+        ? undefined
+        : presence.get(id) ??
+          (cleanUserId ? presence.get(cleanUserId) : null) ??
+          (cleanUserHandle ? presence.get(cleanUserHandle) : null) ??
+          (user.handle ? presence.get(user.handle) : null) ??
+          (user.id ? presence.get(user.id) : null) ??
+          (role === 'host' ? presence.get(room.host.id) ?? (cleanHostHandle ? presence.get(cleanHostHandle) : null) : null) ??
+          null,
       featured: input.featuredId === id,
       localPlaybackMuted: input.localPlaybackMuted?.has(id),
       caption: isSelf ? (role === 'host' ? undefined : 'You') : undefined,
@@ -82,8 +99,14 @@ export function buildStage(input: BuildStageInput): BuiltStage {
   if (input.battle) {
     const maxStrip = input.maxStrip ?? 4;
     const strip = order.slice(0, maxStrip);
+    const isHostSide = (u: UserRef) => {
+      const uid = (u.id || '').replace(/^@/, '').toLowerCase().trim();
+      const uhandle = (u.handle || '').replace(/^@/, '').toLowerCase().trim();
+      return uid === cleanHostId || (cleanHostHandle && (uid === cleanHostHandle || uhandle === cleanHostHandle));
+    };
+
     const sideTile = (u: UserRef, side: 'a' | 'b'): TileModel => ({
-      ...tileFor(u.id, u.id === room.host.id ? 'host' : 'opponent', 'half', u),
+      ...tileFor(u.id, isHostSide(u) ? 'host' : 'opponent', 'half', u),
       side,
     });
     return {

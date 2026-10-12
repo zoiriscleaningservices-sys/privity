@@ -50,6 +50,7 @@ import {
   IconUsersPlus,
   IconMenu3Lines,
 } from './components/Icons';
+import { Bell, BellOff } from 'lucide-react';
 import {
   Gift,
   GiftEvent,
@@ -69,9 +70,10 @@ import {
   StoryItem,
 } from './components/feed/TikTokSlideFeed';
 import { authService, UserAccount } from './services/authService';
-import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnectSupabaseRealtime, isSupabaseRealtimeConnected } from './services/supabaseClient';
+import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, sanitizeOutboundPayload } from './services/supabaseClient';
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
+import { AppearancePicker } from './design/AppearancePicker';
 import { convertVideoToAnimatedLoop, isKnownVideoUrl, extractVideoThumbnail } from './services/videoMediaHelper';
 import { storePostMedia, getFreshMediaUrl, clearAllMediaBlobs } from './services/mediaDb';
 
@@ -228,6 +230,35 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   hardwareKeyLinked: false,
   sessionDevice: 'Active Web Session',
 };
+
+/** Human-readable label for the browser/OS of the current session, derived from the real user agent. */
+function describeCurrentDevice(): string {
+  if (typeof navigator === 'undefined') return 'This browser';
+  const ua = navigator.userAgent;
+  const browser = /Edg\//.test(ua)
+    ? 'Edge'
+    : /OPR\//.test(ua)
+      ? 'Opera'
+      : /Firefox\//.test(ua)
+        ? 'Firefox'
+        : /Chrome\//.test(ua)
+          ? 'Chrome'
+          : /Safari\//.test(ua)
+            ? 'Safari'
+            : 'Browser';
+  const os = /iPhone|iPad|iPod/.test(ua)
+    ? 'iOS'
+    : /Android/.test(ua)
+      ? 'Android'
+      : /Windows/.test(ua)
+        ? 'Windows'
+        : /Mac OS X/.test(ua)
+          ? 'macOS'
+          : /Linux/.test(ua)
+            ? 'Linux'
+            : '';
+  return os ? `${browser} on ${os}` : browser;
+}
 
 // ==================== REAL DATA MODELS & ASSETS ====================
 
@@ -469,6 +500,7 @@ export interface LiveStreamSession {
   multiGuests: LiveGuestSlot[];
   participants: Array<{ name: string; avatar: string; role: string }>;
   tags: string[];
+  startedAt?: number;
 }
 
 export const INITIAL_LIVE_STREAMS: LiveStreamSession[] = [];
@@ -923,7 +955,7 @@ export function App() {
     return 'feed';
   });
   const [feedViewMode, setFeedViewMode] = useState<'slide' | 'cards'>(() =>
-    readStorage('privity_feed_view_mode_v1', 'slide')
+    readStorage('privity_feed_view_mode_v2', 'cards')
   );
   const [liveStreamsList, setLiveStreamsList] = useState<LiveStreamSession[]>(INITIAL_LIVE_STREAMS);
   const [activeLiveIndex, setActiveLiveIndex] = useState(0);
@@ -1273,47 +1305,11 @@ export function App() {
     document.body.scrollTop = 0;
   }, []);
 
-  // Save active section across refreshes and sync with URL hash
-  useEffect(() => {
-    safeSaveStorage('privity_active_tab_v5', activeTab);
-    try {
-      const curH = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-      if (import.meta.env.DEV && ['live-lab', 'live-sim'].includes(curH)) return;
-      if (curH === 'live' && activeTab === 'feed' && feedFilter === 'live') return;
-      if (activeTab === 'feed' && feedFilter === 'live') {
-        window.location.hash = 'live';
-      } else if (curH !== activeTab) {
-        window.location.hash = activeTab;
-      }
-    } catch (e) {}
-  }, [activeTab, feedFilter]);
+  // Production URL hash routing & active section persistence is consolidated with full LIVE state below
+
 
   useEffect(() => {
-    const handleHash = () => {
-      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-      if (import.meta.env.DEV && ['live-lab', 'live-sim'].includes(hash)) {
-        setLiveLabActive(true);
-        return;
-      }
-      setLiveLabActive(false);
-      if (hash === 'live') {
-        setActiveTab('feed');
-        setFeedFilter('live');
-        return;
-      }
-      if (['feed', 'discover', 'messages', 'activity', 'profile', 'safety'].includes(hash)) {
-        setActiveTab(hash as any);
-        if (hash === 'messages') {
-          setActiveChatUser(null);
-        }
-      }
-    };
-    window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
-  }, []);
-
-  useEffect(() => {
-    safeSaveStorage('privity_feed_view_mode_v1', feedViewMode);
+    safeSaveStorage('privity_feed_view_mode_v2', feedViewMode);
   }, [feedViewMode]);
 
   // Save photo likes registry
@@ -1396,6 +1392,18 @@ export function App() {
   const unreadNotifsCount = useMemo(() => {
     return notifications.filter((n) => !n.isRead).length;
   }, [notifications]);
+
+  // Real unread direct messages: incoming messages in each thread not yet marked read.
+  const unreadDmCount = useMemo(() => {
+    let total = 0;
+    for (const [partner, thread] of Object.entries(directMessages || {})) {
+      const p = partner.replace(/^@/, '').toLowerCase().trim();
+      for (const m of thread || []) {
+        if (!m.isRead && (m.senderHandle || '').replace(/^@/, '').toLowerCase().trim() === p) total++;
+      }
+    }
+    return total;
+  }, [directMessages]);
 
   // 1. Persistent Profiles State (purges any mock profiles & registers all real accounts)
   const [profiles, setProfiles] = useState<Record<string, UserProfile>>(() => {
@@ -1487,6 +1495,9 @@ export function App() {
       });
   });
   const postsRef = React.useRef(posts);
+  // Egress throttles for registry replies (see QUERY_POSTS / QUERY_PROFILES handlers)
+  const lastPostsReplyAtRef = React.useRef(0);
+  const lastProfilesReplyAtRef = React.useRef(0);
   postsRef.current = posts;
 
   // 3. Persistent Following Map (strictly filters out any mock handles, IDs, and false values)
@@ -1950,7 +1961,14 @@ export function App() {
     // Periodic heartbeat ping every 12 seconds
     const interval = setInterval(sendPresencePing, 12000);
 
-    const handleUserActivity = () => sendPresencePing();
+    // Activity pings are throttled: a ping on EVERY tap was delivered to every connected user.
+    let lastActivityPing = 0;
+    const handleUserActivity = () => {
+      const t = Date.now();
+      if (t - lastActivityPing < 10000) return;
+      lastActivityPing = t;
+      sendPresencePing();
+    };
     window.addEventListener('focus', handleUserActivity);
     window.addEventListener('pointerdown', handleUserActivity);
 
@@ -2051,9 +2069,9 @@ export function App() {
       console.warn('Supabase broadcast failed', e);
     }
 
-    // 3. Cloud broadcast to all active devices (ntfy)
+    // 3. Cloud broadcast to all active devices (ntfy) — public service: same private-field scrub
     try {
-      const jsonStr = JSON.stringify(payload);
+      const jsonStr = JSON.stringify(sanitizeOutboundPayload(payload));
       if (jsonStr.length > 3500) {
         // Large payload with photo/video -> upload as ntfy attachment so it is never rejected or truncated
         fetch(`${SYNC_ENDPOINT}?filename=event.json`, {
@@ -3339,13 +3357,18 @@ export function App() {
         }
 
         case 'QUERY_PROFILES': {
+          // Reply with OUR OWN public profile only (each user answers for themselves), at most
+          // every 30 s. Never send the device's stored accounts — they contain emails.
+          const nowQ = Date.now();
+          if (nowQ - lastProfilesReplyAtRef.current < 30000) break;
+          const meKey = cleanMyHandle;
           const profs = profilesRef.current;
-          const accs = authService.getAllAccounts();
-          if ((profs && Object.keys(profs).length > 0) || Object.keys(accs).length > 0) {
+          const mine = meKey ? (profs?.[meKey] || profs?.[meKey.toLowerCase()]) : null;
+          if (mine && mine.handle) {
+            lastProfilesReplyAtRef.current = nowQ;
             broadcastSyncEventRef.current({
               action: 'SYNC_PROFILES_REGISTRY',
-              registry: profs,
-              accounts: accs,
+              registry: { [meKey]: mine },
             });
           }
           break;
@@ -3513,6 +3536,11 @@ export function App() {
         }
 
         case 'QUERY_POSTS': {
+          // Reply only with posts WE authored (each author answers for their own posts), at most
+          // every 30 s. Previously every device re-broadcast everyone's posts, media included.
+          const nowQ = Date.now();
+          if (nowQ - lastPostsReplyAtRef.current < 30000) break;
+          lastPostsReplyAtRef.current = nowQ;
           if (deletedPostIdsRef.current.size > 0) {
             broadcastSyncEventRef.current({
               action: 'SYNC_DELETED_POSTS',
@@ -3520,7 +3548,13 @@ export function App() {
             });
           }
           if (postsRef.current && postsRef.current.length > 0) {
-            const validPosts = postsRef.current.filter((p) => !isMockPost(p) && !deletedPostIdsRef.current.has(p.id));
+            const validPosts = postsRef.current.filter(
+              (p) =>
+                !isMockPost(p) &&
+                !deletedPostIdsRef.current.has(p.id) &&
+                !!cleanMyHandle &&
+                normalizeHandle(p.authorHandle) === cleanMyHandle
+            );
             for (let i = 0; i < Math.min(validPosts.length, 15); i += 3) {
               const chunk = validPosts.slice(i, i + 3);
               setTimeout(() => {
@@ -3878,38 +3912,31 @@ export function App() {
     };
     window.addEventListener('storage', handleStorageEvent);
 
-    // 6. Active Realtime Health Check & Background Heartbeat
-    let lastQueryTime = 0;
+    // 6. Background health check. The 6-second "send me ALL posts/profiles" broadcast from every
+    // device was the main Supabase egress cost (every device replied to every device), so
+    // queries now only run on startup and on wake (throttled below).
     const pollInterval = setInterval(() => {
-      // Auto-heal Supabase Realtime channel if mobile OS closed or errored it
-      if (!isSupabaseRealtimeConnected()) {
-        reconnectSupabaseRealtime(true);
-      }
-
-      // Proactive query sync every 6s so idle/resumed devices catch up 100% in real time
-      const now = Date.now();
-      if (now - lastQueryTime >= 6000) {
-        lastQueryTime = now;
-        broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
-        broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
-      }
-
-      quickCatchUp();
       if (!es || es.readyState === EventSource.CLOSED) {
+        quickCatchUp();
         connectSSE();
       }
-    }, 2000);
+    }, 5000);
 
     // 7. On window/document visibility, mobile pageshow, focus, or network return
+    let lastWakeQueryAt = 0;
     const handleWake = () => {
       if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-        reconnectSupabaseRealtime(true);
+        // (Realtime channel health is handled in supabaseClient; don't tear it down on focus.)
         quickCatchUp();
         if (!es || es.readyState === EventSource.CLOSED) {
           connectSSE();
         }
-        broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
-        broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
+        const t = Date.now();
+        if (t - lastWakeQueryAt >= 60000) {
+          lastWakeQueryAt = t;
+          broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
+          broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
+        }
       }
     };
     if (typeof document !== 'undefined') {
@@ -4668,30 +4695,8 @@ export function App() {
   }, [myProfile.handle, activeLiveStream]);
 
   useEffect(() => {
-    // If not actively broadcasting on this tab upon mount/refresh, ensure any dead host state is cleared
-    if (!isHostBroadcasting && !hostLiveCameraStream) {
-      const savedHost = localStorage.getItem('privity_current_live_host');
-      if (savedHost) {
-        try {
-          const parsed = JSON.parse(savedHost);
-          const handle = parsed.creatorHandle || parsed.handle || '';
-          if (
-            liveStreamSync.isStreamEnded(parsed.id, handle, parsed.startedAt) ||
-            (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500)
-          ) {
-            localStorage.removeItem('privity_current_live_host');
-            localStorage.removeItem('privity_is_host_broadcasting');
-            localStorage.removeItem('privity_active_live_session');
-          }
-        } catch {
-          localStorage.removeItem('privity_current_live_host');
-          localStorage.removeItem('privity_is_host_broadcasting');
-        }
-      }
-    }
-
     const handleBeforeUnload = () => {
-      if (isHostBroadcasting) {
+      if (isHostBroadcasting && hostLiveCameraStream) {
         liveStreamSync.stopHostBroadcast();
       }
     };
@@ -4711,7 +4716,9 @@ export function App() {
   useEffect(() => {
     if (!isHostBroadcasting || !activeLiveStream) return;
     const cleanHandle = (myProfile.handle || '').replace(/^@/, '');
+    let hbTick = 0;
     const hbInterval = setInterval(() => {
+      const now = Date.now();
       const hostMeta = {
         id: activeLiveStream.id,
         creatorHandle: cleanHandle,
@@ -4723,14 +4730,44 @@ export function App() {
         isVerified: myProfile.isVerified,
         category: (activeLiveStream as any).category || 'Featured',
         title: (activeLiveStream as any).title || 'Live Broadcast',
-        startedAt: (activeLiveStream as any).startedAt || Date.now(),
-        lastHeartbeat: Date.now(),
+        startedAt: (activeLiveStream as any).startedAt || now,
+        lastHeartbeat: now,
         isLive: true,
       };
-      broadcastSyncEvent({
-        action: 'LIVE_HEARTBEAT',
-        host: hostMeta,
-      });
+
+      // Keep localStorage fresh so other tabs see active host without stale timeout
+      try {
+        localStorage.setItem('privity_current_live_host', JSON.stringify(hostMeta));
+        localStorage.setItem('privity_is_host_broadcasting', 'true');
+      } catch {}
+
+      // Keep BroadcastChannel active across all tabs
+      try {
+        const syncBus = new BroadcastChannel('privity_sync_bus');
+        syncBus.postMessage({
+          type: 'LIVE_HEARTBEAT',
+          action: 'LIVE_HEARTBEAT',
+          host: hostMeta,
+          stream: hostMeta,
+        });
+        syncBus.close();
+      } catch {}
+
+      // Network heartbeat (Supabase + ntfy reach EVERY connected user): every 10 s, no
+      // embedded data-URL avatar. Same-device tabs above still refresh every 2.5 s.
+      hbTick += 1;
+      if (hbTick % 4 === 1) {
+        const isBigDataUrl = (v: unknown) => typeof v === 'string' && v.startsWith('data:') && v.length > 4096;
+        const netMeta = {
+          ...hostMeta,
+          creatorAvatar: isBigDataUrl(hostMeta.creatorAvatar) ? '' : hostMeta.creatorAvatar,
+          avatar: isBigDataUrl(hostMeta.avatar) ? '' : hostMeta.avatar,
+        };
+        broadcastSyncEvent({
+          action: 'LIVE_HEARTBEAT',
+          host: netMeta,
+        });
+      }
     }, 2500);
 
     return () => clearInterval(hbInterval);
@@ -5510,6 +5547,138 @@ export function App() {
     setTimeout(() => setToastMsg(null), 3000);
   }, []);
 
+  // Sync URL hash when active section or active live stream changes
+  useEffect(() => {
+    safeSaveStorage('privity_active_tab_v5', activeTab);
+    try {
+      if (activeLiveStream?.id) {
+        const streamHash = `live/${encodeURIComponent(activeLiveStream.id)}`;
+        if (window.location.hash.replace(/^#\/?/, '') !== streamHash) {
+          window.location.hash = streamHash;
+        }
+        return;
+      }
+      const curH = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (import.meta.env.DEV && ['live-lab', 'live-sim'].includes(curH)) return;
+      if (curH.startsWith('live/')) {
+        window.location.hash = (activeTab === 'feed' && feedFilter === 'live') ? 'live' : activeTab;
+      } else if (activeTab === 'feed' && feedFilter === 'live') {
+        window.location.hash = 'live';
+      } else if (curH !== activeTab) {
+        window.location.hash = activeTab;
+      }
+    } catch (e) {}
+  }, [activeTab, feedFilter, activeLiveStream?.id]);
+
+  // Production Hash Change & Direct Live Link Routing
+  useEffect(() => {
+    const handleHash = () => {
+      const rawHash = window.location.hash.replace(/^#\/?/, '');
+      const hash = rawHash.toLowerCase();
+
+      if (import.meta.env.DEV && ['live-lab', 'live-sim'].includes(hash)) {
+        setLiveLabActive(true);
+        return;
+      }
+      setLiveLabActive(false);
+
+      // Handle direct stream links: #live/:streamId
+      if (hash.startsWith('live/')) {
+        const streamId = decodeURIComponent(rawHash.slice(5)).trim();
+        setActiveTab('feed');
+        setFeedFilter('live');
+        if (streamId && (!activeLiveStream || activeLiveStream.id !== streamId)) {
+          const syncList = liveStreamSync.getStreamersList();
+          let target =
+            syncList.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase()) ||
+            LIVEME_STREAMERS.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase()) ||
+            networkLiveStreamers.find((s) => s.id === streamId || (s.handle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase());
+
+          if (!target) {
+            const activePayload = liveStreamSync.getActiveStreamPayload(streamId);
+            if (activePayload && (activePayload.id === streamId || (activePayload.creatorHandle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase())) {
+              target = activePayload as any;
+            }
+          }
+
+          if (!target) {
+            try {
+              const saved = localStorage.getItem('privity_current_live_host');
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.id === streamId || (parsed.creatorHandle || '').replace(/^@+/, '').toLowerCase() === streamId.replace(/^@+/, '').toLowerCase()) {
+                  target = parsed;
+                }
+              }
+            } catch {}
+          }
+
+          if (target) {
+            const isLocalHost = liveStreamSync.isLocalHost(target.id);
+            setIsHostBroadcasting(isLocalHost);
+            setActiveLiveStream(target as any);
+          } else {
+            // Construct immediate viewer streamer so deep-link never crashes or redirects prematurely
+            const rawHandle = streamId.startsWith('live-user-')
+              ? streamId.replace('live-user-', '').split('-')[0]
+              : streamId.replace(/^@+/, '');
+            const fallbackStreamer: LiveMeStreamer = {
+              id: streamId,
+              name: rawHandle ? rawHandle.charAt(0).toUpperCase() + rawHandle.slice(1) : 'Live Creator',
+              handle: `@${rawHandle || 'creator'}`,
+              avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              title: 'Live Broadcast · Sovereign Stream',
+              description: 'Live broadcast · Sovereign Stream',
+              category: 'Featured',
+              isVerified: true,
+              viewersCount: 1,
+              totalViews: '1',
+              popularity: '0',
+              diamonds: 0,
+              likesCount: 0,
+              posterUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              tags: ['Host', 'LiveNow', 'Privity'],
+              tagBadge: 'LIVE NOW',
+              isCameraStream: true,
+              startedAt: Date.now(),
+              topContributors: [],
+            };
+            setIsHostBroadcasting(false);
+            setActiveLiveStream(fallbackStreamer as any);
+            liveStreamSync.queryNetworkStreams();
+          }
+        }
+        return;
+      }
+
+      if (hash === 'live') {
+        setActiveTab('feed');
+        setFeedFilter('live');
+        // Back navigation: if viewing a live stream (and not broadcasting as host), exit viewer cleanly
+        if (activeLiveStream && !isHostBroadcasting) {
+          setActiveLiveStream(null);
+        }
+        return;
+      }
+
+      if (['feed', 'discover', 'messages', 'activity', 'profile', 'safety'].includes(hash)) {
+        setActiveTab(hash as any);
+        if (hash === 'messages') {
+          setActiveChatUser(null);
+        }
+        if (activeLiveStream && !isHostBroadcasting) {
+          setActiveLiveStream(null);
+        }
+      }
+    };
+
+    window.addEventListener('hashchange', handleHash);
+    // Process on initial page load / refresh
+    handleHash();
+
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, [activeLiveStream?.id, isHostBroadcasting, networkLiveStreamers]);
+
   const handleCreateGroup = () => {
     if (!newGroupName.trim()) {
       triggerToast('Please enter a group name');
@@ -5645,11 +5814,20 @@ export function App() {
     }
   };
 
-  const handleCopyCryptoFingerprint = () => {
-    navigator.clipboard?.writeText(userSettings.cryptoKeyFingerprint);
-    setCopiedFingerprint(true);
-    triggerToast('Ed25519 Cryptographic Fingerprint copied to clipboard');
-    setTimeout(() => setCopiedFingerprint(false), 2000);
+  const handleCopyCryptoFingerprint = async () => {
+    const fp = userSettings.cryptoKeyFingerprint;
+    if (!fp) {
+      triggerToast('No signing key has been generated on this device yet');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(fp);
+      setCopiedFingerprint(true);
+      triggerToast('Key fingerprint copied to clipboard');
+      setTimeout(() => setCopiedFingerprint(false), 2000);
+    } catch {
+      triggerToast('Could not access the clipboard');
+    }
   };
 
   // Real Like with Spring Physics & Likers Synchronization
@@ -7283,6 +7461,7 @@ export function App() {
       multiGuests: [],
       participants: [{ name: myProfile.name, avatar: myProfile.avatar, role: 'Host' }],
       tags: ['Live', 'P2P', 'Privity'],
+      startedAt: Date.now(),
     };
 
     setLiveStreamsList((prev) => [userStream, ...prev]);
@@ -7303,6 +7482,7 @@ export function App() {
       title: userStream.title,
       description: userStream.description,
       startedAt: Date.now(),
+      lastHeartbeat: Date.now(),
       viewersCount: 0,
       likesCount: 0,
       previewUrl: userStream.previewUrl,
@@ -7560,7 +7740,9 @@ export function App() {
           >
             <span className="nav-icon-wrap"><IconChat size={21} /></span>
             <span>Messages</span>
-            <span className="nav-badge-pill" style={{ background: 'var(--brand-primary)' }}>Live</span>
+            {unreadDmCount > 0 && (
+              <span className="nav-badge-pill" aria-label={`${unreadDmCount} unread messages`}>{unreadDmCount > 99 ? '99+' : unreadDmCount}</span>
+            )}
           </button>
 
           <button
@@ -7697,7 +7879,7 @@ export function App() {
                 <IconUser size={18} />
               </div>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff' }}>Guest Mode</div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Guest Mode</div>
                 <div style={{ fontSize: '11px', color: '#c084fc', fontWeight: 600 }}>Create Account / Log In</div>
               </div>
             </div>
@@ -7745,7 +7927,7 @@ export function App() {
                       borderRadius: '16px',
                       background: 'linear-gradient(135deg, rgba(254, 44, 85, 0.2), rgba(37, 244, 238, 0.2))',
                       border: '1px solid rgba(255, 255, 255, 0.2)',
-                      color: '#ffffff',
+                      color: 'var(--text-primary)',
                       fontSize: '12px',
                       fontWeight: 700,
                       cursor: 'pointer',
@@ -7827,6 +8009,7 @@ export function App() {
             {/* LIVE BROADCASTS 2-COLUMN EXPLORE DISCOVER ARENA */}
             {feedFilter === 'live' ? (
               <LiveExploreGrid
+                networkStreamers={networkLiveStreamers}
                 onOpenStream={(streamerId, streamerObj) => {
                   const targetStreamer =
                     streamerObj ||
@@ -8091,7 +8274,7 @@ export function App() {
                       <div className="circle-halo-ring active-story" style={{ border: '2.5px solid transparent', background: 'linear-gradient(135deg, #f43f5e 0%, #ec4899 40%, #8b5cf6 100%) border-box', padding: '2px' }}>
                         <MediaAvatar src={st.authorAvatar} alt={st.authorName} className="circle-user-img" showBadge={false} />
                       </div>
-                      <span className="circle-tag-name" style={{ color: '#fff', fontWeight: 600 }}>{st.authorName.split(' ')[0]}</span>
+                      <span className="circle-tag-name" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{st.authorName.split(' ')[0]}</span>
                     </div>
                   );
                 });
@@ -8164,11 +8347,11 @@ export function App() {
                     <span style={{ position: 'absolute', bottom: '-2px', right: '-2px', background: '#ef4444', color: '#fff', fontSize: '8px', fontWeight: 900, padding: '1px 4px', borderRadius: '99px' }}>LIVE</span>
                   </div>
                   <div>
-                    <div style={{ fontSize: '13px', fontWeight: 800, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>{networkLiveStreamers[0].name.replace(' (LIVE NOW 🔴)', '')} is broadcasting live</span>
                       <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444' }} />
                     </div>
-                    <div style={{ fontSize: '11.5px', color: 'rgba(255, 255, 255, 0.7)' }}>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
                       {networkLiveStreamers[0].title || 'Tap to join live stream'}
                     </div>
                   </div>
@@ -8783,7 +8966,7 @@ export function App() {
                               <button
                                 type="button"
                                 onClick={() => setReplyTarget(null)}
-                                style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: 0 }}
+                                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 }}
                                 title="Cancel reply"
                               >
                                 <IconX size={12} />
@@ -9088,7 +9271,7 @@ export function App() {
                       title="New Direct Message"
                       aria-label="New Direct Message"
                     >
-                      <IconChat size={18} color="#fff" />
+                      <IconChat size={18} color="currentColor" />
                     </button>
                     <button
                       type="button"
@@ -9100,7 +9283,7 @@ export function App() {
                       title="Create New Group"
                       aria-label="Create New Group"
                     >
-                      <IconUsersPlus size={18} color="#fff" />
+                      <IconUsersPlus size={18} color="currentColor" />
                     </button>
                   </div>
 
@@ -9140,7 +9323,7 @@ export function App() {
                     title="Search Messages"
                     aria-label="Search Messages"
                   >
-                    {isDmSearchOpen ? <IconX size={18} color="#fff" /> : <IconSearch size={19} color="#fff" />}
+                    {isDmSearchOpen ? <IconX size={18} color="currentColor" /> : <IconSearch size={19} color="currentColor" />}
                   </button>
                 </div>
 
@@ -9243,7 +9426,7 @@ export function App() {
                       {filteredChannels.length === 0 ? (
                         <div style={{ padding: '24px 16px', textAlign: 'center' }}>
                           <div style={{ fontSize: '36px', marginBottom: '10px' }}>💬</div>
-                          <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginBottom: '6px' }}>
+                          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
                             {chatSearchQuery ? `No chats matching "${chatSearchQuery}"` : 'Messages'}
                           </div>
                           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: 1.5 }}>
@@ -9318,7 +9501,7 @@ export function App() {
                                           style={{ width: '34px', height: '34px', borderRadius: '50%', objectFit: 'cover' }}
                                         />
                                         <div style={{ minWidth: 0 }}>
-                                          <div style={{ fontSize: '12px', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                          <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{creator.name}</span>
                                             {creator.isVerified && <VerifiedBadge authorName={creator.name} category={creator.verifiedCategory} />}
                                           </div>
@@ -9449,7 +9632,7 @@ export function App() {
                                     }}
                                     title={isMuted ? 'Unmute notifications' : 'Mute notifications'}
                                   >
-                                    <span style={{ fontSize: '15px' }}>{isMuted ? '🔔' : '🔕'}</span>
+                                    {isMuted ? <Bell size={13} aria-hidden="true" /> : <BellOff size={13} aria-hidden="true" />}
                                     <span>{isMuted ? 'Unmute' : 'Mute'}</span>
                                   </button>
                                   <button
@@ -9462,7 +9645,7 @@ export function App() {
                                     }}
                                     title="Delete conversation"
                                   >
-                                    <span style={{ fontSize: '15px' }}>🗑️</span>
+                                    <IconTrash size={13} />
                                     <span>Delete</span>
                                   </button>
                                 </div>
@@ -9492,7 +9675,7 @@ export function App() {
                                     showBadge={false}
                                   />
                                   <span
-                                    className={`online-presence-dot presence-dot-${presence}`}
+                                    className={`online-presence-dot presence-dot-${presence} ${presence}`}
                                     title={presence === 'active' ? 'Active now' : presence === 'inactive' ? 'Active recently' : 'Offline'}
                                   />
                                 </div>
@@ -9501,7 +9684,11 @@ export function App() {
                                     <span className="channel-creator-name">
                                       {user.name}
                                       {user.isVerified && <VerifiedBadge authorName={user.name} category={user.verifiedCategory} />}
-                                      {isMuted && <span style={{ fontSize: '11px', opacity: 0.6 }} title="Muted">🔕</span>}
+                                      {isMuted && (
+                                        <span title="Muted" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                          <BellOff size={11} color="var(--text-muted)" aria-hidden="true" />
+                                        </span>
+                                      )}
                                     </span>
                                     <span className="channel-timestamp">
                                       {presence === 'active' ? (
@@ -9613,7 +9800,7 @@ export function App() {
                       {notifications.filter((n) => notificationsFilter === 'all' || n.type === notificationsFilter).length === 0 ? (
                         <div className="notif-empty-state-card">
                           <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔔</div>
-                          <div style={{ fontWeight: 700, fontSize: '15px', color: '#fff', marginBottom: '4px' }}>
+                          <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)', marginBottom: '4px' }}>
                             No notifications yet
                           </div>
                           <div style={{ fontSize: '13px', color: 'var(--text-muted)', maxWidth: '280px', lineHeight: 1.4 }}>
@@ -9840,7 +10027,7 @@ export function App() {
                       style={{
                         background: 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(168,85,247,0.25))',
                         borderColor: 'rgba(168,85,247,0.4)',
-                        color: '#fff',
+                        color: 'var(--text-primary)',
                         padding: '10px 22px',
                         fontSize: '13px',
                         fontWeight: 700,
@@ -9902,7 +10089,7 @@ export function App() {
                               showBadge={false}
                             />
                             {!isGrp && (
-                              <span className={`online-presence-dot presence-dot-${getUserPresenceState(cleanRecipientHandle)}`} />
+                              <span className={`online-presence-dot presence-dot-${getUserPresenceState(cleanRecipientHandle)} ${getUserPresenceState(cleanRecipientHandle)}`} />
                             )}
                           </div>
                           <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
@@ -9955,8 +10142,8 @@ export function App() {
                                         getUserPresenceState(cleanRecipientHandle) === 'active'
                                           ? '#22c55e'
                                           : getUserPresenceState(cleanRecipientHandle) === 'inactive'
-                                          ? '#ef4444'
-                                          : '#475569',
+                                          ? '#f59e0b'
+                                          : '#94a3b8',
                                       boxShadow:
                                         getUserPresenceState(cleanRecipientHandle) === 'active' ? '0 0 8px #22c55e' : 'none',
                                       flexShrink: 0,
@@ -10026,7 +10213,7 @@ export function App() {
                             setIsChatHeaderMenuOpen(false);
                           }}
                         >
-                          <span style={{ fontSize: '14px' }}>{mutedChats[cleanRecipientHandle] ? '🔔' : '🔕'}</span>
+                          {mutedChats[cleanRecipientHandle] ? <Bell size={14} aria-hidden="true" /> : <BellOff size={14} aria-hidden="true" />}
                           <span>{mutedChats[cleanRecipientHandle] ? 'Unmute Notifications' : 'Mute Notifications'}</span>
                         </button>
                         <button
@@ -10049,8 +10236,22 @@ export function App() {
                 <div className="messages-thread-stream">
                   {currentThread.length === 0 ? (
                     <div className="messages-empty-selection">
-                      <div style={{ fontSize: '38px', marginBottom: '12px' }}>💬</div>
-                      <div style={{ fontSize: '17px', fontWeight: 800, color: '#fff', marginBottom: '6px' }}>
+                      <div
+                        style={{
+                          width: '56px',
+                          height: '56px',
+                          borderRadius: '50%',
+                          background: 'var(--lg-accent-soft)',
+                          color: 'var(--lg-accent)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          margin: '0 auto 12px',
+                        }}
+                      >
+                        <IconChat size={26} color="currentColor" />
+                      </div>
+                      <div style={{ fontSize: '17px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '6px' }}>
                         {currentRecipient.name}
                       </div>
                       <p style={{ maxWidth: '340px', fontSize: '13px', lineHeight: 1.5, color: 'var(--text-muted)' }}>
@@ -10304,7 +10505,7 @@ export function App() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                         <span style={{ color: 'var(--brand-cyan)', fontSize: '14px', fontWeight: 800 }}>↩</span>
                         <div style={{ minWidth: 0, fontSize: '12px' }}>
-                          <span style={{ fontWeight: 700, color: '#fff' }}>
+                          <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
                             Replying to {replyingToMessage.senderHandle === cleanMyHandle ? 'Yourself' : `@${replyingToMessage.senderHandle}`}:{' '}
                           </span>
                           <span style={{ color: 'var(--text-muted)' }}>
@@ -10417,7 +10618,7 @@ export function App() {
                     <div className="composer-input-row">
                       {/* Compact + Attachment Pill Button (reorganized from old clutter ribbon) */}
                       <label className="composer-attach-pill-btn" title="Attach Photo or Video">
-                        <IconPlus size={18} color="#fff" />
+                        <IconPlus size={18} color="currentColor" />
                         <input
                           type="file"
                           accept="image/*,video/*"
@@ -10450,7 +10651,7 @@ export function App() {
                         onClick={handleStartVoiceRecording}
                         title="Record Voice Memo"
                       >
-                        <IconMic size={17} color="#fff" />
+                        <IconMic size={17} color="currentColor" />
                       </button>
 
                       <input
@@ -10471,11 +10672,12 @@ export function App() {
                         type="submit"
                         className="composer-send-btn"
                         disabled={!chatDraftText.trim() && !chatMediaAttachment}
+                        aria-label="Send message"
                         style={{ opacity: chatDraftText.trim() || chatMediaAttachment ? 1 : 0.4 }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <IconSend size={15} />
-                          <span>Send</span>
+                          <span className="composer-send-label">Send</span>
                         </span>
                       </button>
                     </div>
@@ -10740,7 +10942,7 @@ export function App() {
                           }}
                         />
                       </div>
-                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 800, color: '#fff', marginBottom: '4px' }}>
+                      <div style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '4px' }}>
                         {selectedGroupInfo.name}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
@@ -10777,7 +10979,7 @@ export function App() {
                                     style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover' }}
                                   />
                                   <div style={{ minWidth: 0 }}>
-                                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                       {memberProf.name} {isSelf && <span style={{ fontSize: '11px', opacity: 0.6 }}>(You)</span>}
                                     </div>
                                     <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
@@ -10895,7 +11097,7 @@ export function App() {
                   <IconUserCheck size={18} color="var(--cf-emerald)" />
                 </div>
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: '14px', color: '#fff' }}>All Circle Requests Reviewed</div>
+                  <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text-primary)' }}>All Circle Requests Reviewed</div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                     No pending requests. All approved creators now have real-time access to your private circle.
                   </div>
@@ -11238,7 +11440,7 @@ export function App() {
                 >
                   <IconUser size={40} />
                 </div>
-                <h2 style={{ fontSize: '22px', fontWeight: 800, color: '#fff', marginBottom: '10px' }}>
+                <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '10px' }}>
                   Create an Account or Log In
                 </h2>
                 <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', maxWidth: '360px', lineHeight: 1.5, marginBottom: '24px' }}>
@@ -11292,7 +11494,7 @@ export function App() {
                   title="Back"
                   aria-label="Back"
                 >
-                  <IconArrowLeft size={20} color="#fff" />
+                  <IconArrowLeft size={20} color="currentColor" />
                 </button>
 
                 <button
@@ -11302,7 +11504,7 @@ export function App() {
                   title="Menu Options"
                   aria-label="Menu Options"
                 >
-                  <IconMenu3Lines size={20} color="#fff" />
+                  <IconMenu3Lines size={20} color="currentColor" />
                 </button>
               </div>
 
@@ -12193,7 +12395,7 @@ export function App() {
                                       <button
                                         type="button"
                                         onClick={() => setReplyTarget(null)}
-                                        style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}
+                                        style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}
                                       >
                                         <IconX size={12} />
                                       </button>
@@ -12253,7 +12455,7 @@ export function App() {
                             gap: '8px',
                             background: 'rgba(0, 240, 255, 0.15)',
                             border: '1px solid rgba(0, 240, 255, 0.4)',
-                            color: '#fff',
+                            color: 'var(--text-primary)',
                             padding: '8px 16px',
                             borderRadius: '20px',
                             fontSize: '13px',
@@ -13444,7 +13646,7 @@ export function App() {
                   return (
                     <div style={{ textAlign: 'center', margin: 'auto', color: 'var(--text-muted)', fontSize: '13px' }}>
                       <div style={{ marginBottom: '10px', fontSize: '28px' }}>🔐</div>
-                      <div style={{ fontWeight: 700, color: '#fff', fontSize: '15px' }}>Privity Zero-Knowledge Channel</div>
+                      <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '15px' }}>Privity Zero-Knowledge Channel</div>
                       <div style={{ marginTop: '6px', maxWidth: '320px', lineHeight: '1.5' }}>
                         Messages are delivered in real time with private encryption. No algorithms or data harvesting.
                       </div>
@@ -13536,7 +13738,7 @@ export function App() {
                   background: 'var(--glass-input)',
                   border: '1px solid var(--glass-border)',
                   borderRadius: 'var(--radius-md)',
-                  color: '#fff',
+                  color: 'var(--text-primary)',
                   padding: '14px',
                   fontSize: '15px',
                   outline: 'none',
@@ -13652,7 +13854,7 @@ export function App() {
                   background: 'var(--glass-input)',
                   border: '1px solid var(--glass-border)',
                   borderRadius: 'var(--radius-md)',
-                  color: '#fff',
+                  color: 'var(--text-primary)',
                   padding: '10px 14px',
                   fontSize: '14px',
                   outline: 'none',
@@ -14578,21 +14780,21 @@ export function App() {
                     width: '36px',
                     height: '36px',
                     borderRadius: '50%',
-                    background: 'rgba(255, 255, 255, 0.08)',
+                    background: 'var(--glass-surface-hover)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     border: '1px solid var(--glass-border)',
                   }}
                 >
-                  <IconSettings size={19} color="#fff" />
+                  <IconSettings size={19} color="var(--text-primary)" />
                 </div>
                 <div>
                   <h3 className="modal-title-bold" style={{ fontSize: '18px', margin: 0 }}>
                     Settings & System
                   </h3>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    Apple VisionOS frosted controls · Instant persistence
+                    Liquid Glass controls · Instant persistence
                   </div>
                 </div>
               </div>
@@ -14648,7 +14850,7 @@ export function App() {
                 className={`settings-nav-tab ${settingsSubTab === 'gifts' ? 'active' : ''}`}
                 onClick={() => setSettingsSubTab('gifts')}
               >
-                Virtual Gifts 🎁
+                Virtual Gifts
               </button>
             </div>
 
@@ -14714,6 +14916,15 @@ export function App() {
                     </button>
                   </div>
 
+                  {/* Appearance */}
+                  <div className="settings-card-group" style={{ padding: '16px 18px' }}>
+                    <div className="settings-row-label-group" style={{ marginBottom: '12px' }}>
+                      <div className="settings-item-title">Appearance</div>
+                      <div className="settings-item-desc">Light is the default. System follows your device setting. LIVE and full-screen video always use dark controls for legibility.</div>
+                    </div>
+                    <AppearancePicker />
+                  </div>
+
                   {/* Authentication & Identity Card */}
                   <div
                     style={{
@@ -14758,7 +14969,7 @@ export function App() {
                         style={{
                           background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.2))',
                           borderColor: 'rgba(168,85,247,0.4)',
-                          color: '#ffffff',
+                          color: 'var(--text-primary)',
                           padding: '8px 16px',
                           fontSize: '12.5px',
                           fontWeight: 700,
@@ -15070,26 +15281,33 @@ export function App() {
                           Client-side elliptic curve key pair used to sign each of your dispatches, ensuring tamper-proof cryptographic authenticity.
                         </div>
                         <div style={{ marginTop: '8px' }}>
-                          <code
-                            style={{
-                              display: 'inline-block',
-                              fontSize: '11px',
-                              fontFamily: 'var(--font-mono)',
-                              background: 'rgba(0, 0, 0, 0.45)',
-                              padding: '6px 10px',
-                              borderRadius: '6px',
-                              color: 'var(--brand-cyan)',
-                              border: '1px solid rgba(56, 189, 248, 0.25)',
-                            }}
-                          >
-                            {userSettings.cryptoKeyFingerprint}
-                          </code>
+                          {userSettings.cryptoKeyFingerprint ? (
+                            <code
+                              style={{
+                                display: 'inline-block',
+                                fontSize: '11px',
+                                fontFamily: 'var(--font-mono)',
+                                background: 'var(--glass-input)',
+                                padding: '6px 10px',
+                                borderRadius: '8px',
+                                color: 'var(--brand-cyan)',
+                                border: '1px solid var(--glass-border)',
+                                wordBreak: 'break-all',
+                              }}
+                            >
+                              {userSettings.cryptoKeyFingerprint}
+                            </code>
+                          ) : (
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No signing key on this device yet.</span>
+                          )}
                         </div>
                       </div>
                       <button
                         type="button"
                         className="btn-glass-back"
                         onClick={handleCopyCryptoFingerprint}
+                        disabled={!userSettings.cryptoKeyFingerprint}
+                        aria-label="Copy key fingerprint"
                         style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
                       >
                         <IconCopy size={14} />
@@ -15097,32 +15315,24 @@ export function App() {
                       </button>
                     </div>
 
-                    <div className="settings-row-item">
+                    <div className="settings-row-item" aria-disabled="true">
                       <div className="settings-row-label-group">
                         <div className="settings-item-title">Two-Factor Passkey (WebAuthn)</div>
-                        <div className="settings-item-desc">Hardware-backed biometric authentication (Touch ID, Optic ID, or FIDO2 key).</div>
+                        <div className="settings-item-desc">Hardware-backed biometric sign-in. Not available yet — requires server-side passkey enrollment.</div>
                       </div>
-                      <label className="apple-switch">
-                        <input
-                          type="checkbox"
-                          checked={userSettings.twoFactorEnabled}
-                          onChange={(e) => setUserSettings((prev) => ({ ...prev, twoFactorEnabled: e.target.checked }))}
-                        />
+                      <label className="apple-switch" title="Not available yet">
+                        <input type="checkbox" checked={false} disabled aria-label="Two-factor passkey (not available yet)" readOnly />
                         <span className="apple-slider"></span>
                       </label>
                     </div>
 
-                    <div className="settings-row-item">
+                    <div className="settings-row-item" aria-disabled="true">
                       <div className="settings-row-label-group">
-                        <div className="settings-item-title">Hardware Security Key Enrolled</div>
-                        <div className="settings-item-desc">Physical YubiKey cryptographic recovery token linked to ledger identity.</div>
+                        <div className="settings-item-title">Hardware Security Key</div>
+                        <div className="settings-item-desc">Physical security key (e.g. YubiKey). Not available yet.</div>
                       </div>
-                      <label className="apple-switch">
-                        <input
-                          type="checkbox"
-                          checked={userSettings.hardwareKeyLinked}
-                          onChange={(e) => setUserSettings((prev) => ({ ...prev, hardwareKeyLinked: e.target.checked }))}
-                        />
+                      <label className="apple-switch" title="Not available yet">
+                        <input type="checkbox" checked={false} disabled aria-label="Hardware security key (not available yet)" readOnly />
                         <span className="apple-slider"></span>
                       </label>
                     </div>
@@ -15147,10 +15357,10 @@ export function App() {
                         </div>
                         <div>
                           <div className="settings-item-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span>{userSettings.sessionDevice}</span>
-                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--cf-emerald)' }}></span>
+                            <span>{describeCurrentDevice()}</span>
+                            <span aria-hidden="true" style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--cf-emerald)' }}></span>
                           </div>
-                          <div className="settings-item-desc">San Francisco, CA · Local End-to-End Encrypted Tunnel · Current Session</div>
+                          <div className="settings-item-desc">This device · Current session</div>
                         </div>
                       </div>
                     </div>
@@ -15176,7 +15386,7 @@ export function App() {
                   <div className="settings-card-group" style={{ padding: '18px 20px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                       <IconFileText size={18} color="var(--brand)" />
-                      <div style={{ fontSize: '15px', fontWeight: 800, color: '#fff' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>
                         The Privity Social Covenant
                       </div>
                     </div>
@@ -15299,8 +15509,9 @@ export function App() {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
               title="Home Feed"
+              aria-current={activeTab === 'feed' ? 'page' : undefined}
             >
-              <IconHome size={22} color={activeTab === 'feed' ? '#ffffff' : 'currentColor'} />
+              <IconHome size={22} color="currentColor" />
               <span className="mobile-nav-label">Feed</span>
               {activeTab === 'feed' && <span className="mobile-nav-indicator" />}
             </button>
@@ -15338,10 +15549,12 @@ export function App() {
                 setActiveChatUser(null);
               }}
               title="Encrypted Messages"
+              aria-current={activeTab === 'messages' ? 'page' : undefined}
+              aria-label={unreadDmCount > 0 ? `Messages, ${unreadDmCount} unread` : 'Messages'}
             >
               <div style={{ position: 'relative' }}>
-                <IconChat size={22} color={activeTab === 'messages' ? '#ffffff' : 'currentColor'} />
-                <span className="mobile-badge-dot" />
+                <IconChat size={22} color="currentColor" />
+                {unreadDmCount > 0 && <span className="mobile-badge-dot" />}
               </div>
               <span className="mobile-nav-label">Messages</span>
               {activeTab === 'messages' && <span className="mobile-nav-indicator" />}

@@ -1,10 +1,11 @@
-import { ReactNode, memo, useEffect, useRef } from 'react';
+import { ReactNode, memo, useEffect, useRef, useState } from 'react';
 import { MicOff, Pin, RefreshCw, VideoOff, VolumeX, WifiOff } from 'lucide-react';
 import type { UserRef } from '../core/events';
 import type { ParticipantMedia } from '../client/connection';
 import type { ResolvedLayout, TileArea } from '../stage/stageLayout';
 import { StreamVideo } from '../media/FilteredPreview';
 import { Avatar } from './Avatar';
+import { liveStreamSync } from '../../services/liveStreamSyncService';
 
 export interface TileModel {
   id: string;
@@ -49,10 +50,61 @@ const Tile = memo(function Tile({ t }: { t: TileModel }) {
   const hasAudio = !isLocal && !!media?.stream && media.stream.getAudioTracks().length > 0;
   const hasLiveVideoTrack = !isLocal && !!media?.stream && media.stream.getVideoTracks().some((tr) => tr.readyState === 'live');
 
+  // Real-time live frame preview listener for instant video rendering while WebRTC establishes
+  const [liveFrame, setLiveFrame] = useState<string | null>(null);
+  useEffect(() => {
+    if (isLocal || !t.user.handle) return;
+    const cleanHandle = t.user.handle.toLowerCase().replace('@', '').trim();
+    let frameBus: BroadcastChannel | null = null;
+    try {
+      frameBus = new BroadcastChannel('privity_live_frames');
+      frameBus.onmessage = (e) => {
+        if (e.data?.type === 'FRAME' && e.data.handle && e.data.frame) {
+          const h = e.data.handle.toLowerCase().replace('@', '').trim();
+          if (h === cleanHandle) {
+            setLiveFrame(e.data.frame);
+          }
+        }
+      };
+    } catch {}
+
+    const unsubRoom = liveStreamSync.subscribeToRoomEvents(cleanHandle, (evt: any) => {
+      if (evt?.type === 'LIVE_FRAME' && evt.frame) {
+        setLiveFrame(evt.frame);
+      }
+    });
+
+    return () => {
+      if (frameBus) frameBus.close();
+      unsubRoom();
+    };
+  }, [isLocal, t.user.handle]);
+
   let body: ReactNode;
   if (isLocal && cameraOn) body = t.local;
   else if (!isLocal && media?.stream && (hasLiveVideoTrack || (cameraOn && status !== 'disconnected'))) {
-    body = <StreamVideo stream={media.stream} className="plv-tile-video" label={`${name} video`} />;
+    body = (
+      <>
+        {liveFrame && (
+          <img
+            src={liveFrame}
+            className="plv-tile-video"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0 }}
+            alt={`${name} live`}
+          />
+        )}
+        <StreamVideo stream={media.stream} className="plv-tile-video" label={`${name} video`} />
+      </>
+    );
+  } else if (!isLocal && liveFrame) {
+    body = (
+      <img
+        src={liveFrame}
+        className="plv-tile-video"
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+        alt={`${name} live`}
+      />
+    );
   } else {
     const reason = isLocal
       ? 'Your camera is off'

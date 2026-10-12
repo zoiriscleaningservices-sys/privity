@@ -247,10 +247,20 @@ class AuthService {
         }
         this.saveAccounts(accounts);
 
-        // Broadcast to all active tabs and global Supabase peers in real time
+        // Broadcast PUBLIC profile fields only (this reaches every connected user)
         broadcastViaSupabase({
           action: 'USER_PAGE_CREATED',
-          account: user,
+          account: {
+            id: user.id,
+            name: user.name,
+            handle: user.handle,
+            avatar: user.avatar,
+            avatarPoster: user.avatarPoster,
+            coverUrl: user.coverUrl,
+            coverPoster: user.coverPoster,
+            bio: user.bio,
+            isVerified: user.isVerified,
+          },
           timestamp: Date.now(),
         });
 

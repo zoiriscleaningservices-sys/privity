@@ -1,0 +1,926 @@
+/* =====================================================================================
+   PRIVITY — LIQUID GLASS DESIGN SYSTEM
+   Light (default) + Dark appearances, shared materials, controls and motion.
+
+   Layering:
+     index.css (legacy, dark)  →  light-theme.generated.css (colour-only light mapping)
+     →  this file (tokens, materials, hand-tuned shell & controls).
+   Everything visual for light is scoped to html[data-theme="light"], so the dark
+   appearance is exactly the original UI.
+   ===================================================================================== */
+
+/* ------------------------------------------------------------------ 1. Tokens */
+:root {
+  /* Typography — native system stack (SF on Apple, Roboto on Android, Segoe on Windows) */
+  --lg-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --lg-font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --lg-font-num: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Shape */
+  --lg-r-xs: 10px;
+  --lg-r-sm: 14px;
+  --lg-r-md: 20px;
+  --lg-r-lg: 28px;
+  --lg-r-pill: 999px;
+
+  /* Spacing scale (4 pt grid) */
+  --lg-s1: 4px; --lg-s2: 8px; --lg-s3: 12px; --lg-s4: 16px; --lg-s5: 20px; --lg-s6: 24px; --lg-s8: 32px;
+
+  /* Motion */
+  --lg-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --lg-ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --lg-ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --lg-d-press: 120ms;
+  --lg-d-fast: 180ms;
+  --lg-d-base: 240ms;
+  --lg-d-sheet: 320ms;
+
+  /* Layers */
+  --lg-z-nav: 5000;
+  --lg-z-sheet: 9000;
+  --lg-z-toast: 12000;
+
+  --lg-touch: 44px;
+}
+
+/* Light — pearl, cloud, crystal blue, lavender */
+html[data-theme='light'] {
+  --lg-bg: #f7f8fc;
+  --lg-bg-2: #eff1f8;
+  --lg-surface: #ffffff;
+  --lg-text: #171923;
+  --lg-text-2: #4a4f5e;
+  --lg-text-3: #707584;
+  --lg-text-4: #a3a8b6;
+  --lg-accent: #5b6ff2;
+  --lg-accent-press: #4b5ee0;
+  --lg-accent-soft: #e8edff;
+  --lg-lavender: #a99aff;
+  --lg-mint: #ddf7ec;
+  --lg-pearl: #fff3e8;
+  --lg-success: #16a36a;
+  --lg-warning: #c77700;
+  --lg-danger: #e5484d;
+  --lg-danger-soft: #ffe9ea;
+  --lg-border: rgba(40, 48, 75, 0.1);
+  --lg-border-strong: rgba(40, 48, 75, 0.16);
+  --lg-focus: 0 0 0 3px rgba(91, 111, 242, 0.35);
+
+  /* Materials */
+  --lg-glass: rgba(255, 255, 255, 0.72);
+  --lg-glass-elevated: rgba(255, 255, 255, 0.86);
+  --lg-glass-tint: linear-gradient(160deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.62) 100%);
+  --lg-glass-edge: 1px solid rgba(255, 255, 255, 0.7);
+  --lg-glass-hairline: 0 0 0 0.5px rgba(40, 48, 75, 0.12);
+  --lg-glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(40, 48, 75, 0.04);
+  --lg-blur: blur(22px) saturate(180%);
+  --lg-blur-strong: blur(34px) saturate(190%);
+  --lg-shadow-1: 0 1px 2px rgba(37, 45, 78, 0.06), 0 4px 14px rgba(37, 45, 78, 0.06);
+  --lg-shadow-2: 0 2px 6px rgba(37, 45, 78, 0.06), 0 12px 32px rgba(37, 45, 78, 0.1);
+  --lg-shadow-3: 0 8px 24px rgba(37, 45, 78, 0.1), 0 28px 64px rgba(37, 45, 78, 0.14);
+
+  /* Legacy token remap → every var()-based legacy rule turns light automatically */
+  --bg-deep: var(--lg-bg);
+  --bg-void: var(--lg-bg-2);
+  --glass-surface: rgba(255, 255, 255, 0.72);
+  --glass-surface-hover: rgba(255, 255, 255, 0.9);
+  --glass-surface-active: #ffffff;
+  --glass-header: rgba(247, 248, 252, 0.78);
+  --glass-input: rgba(40, 48, 75, 0.045);
+  --glass-border: var(--lg-border);
+  --glass-border-light: var(--lg-border-strong);
+  --glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --text-pure: var(--lg-text);
+  --text-primary: var(--lg-text);
+  --text-main: var(--lg-text);
+  --text-secondary: var(--lg-text-2);
+  --text-muted: var(--lg-text-3);
+  --text-faint: var(--lg-text-4);
+  --brand: var(--lg-accent);
+  --brand-light: #6d80f5;
+  --brand-cyan: #0b84b8;
+  --brand-glow: rgba(91, 111, 242, 0.22);
+  --brand-gradient: linear-gradient(135deg, #6478f5 0%, #8b7cf8 55%, #a99aff 100%);
+  --brand-surface-tint: rgba(91, 111, 242, 0.08);
+  --cf-emerald: #0f9f67;
+  --followers-iris: #5b6ff2;
+  --public-cyan: #0b84b8;
+  --heart-rose: #e5374f;
+  --font-display: var(--lg-font-display);
+  --font-body: var(--lg-font);
+  --shadow-subtle: var(--lg-shadow-1);
+  --shadow-float: var(--lg-shadow-2), var(--lg-glass-hi);
+  --shadow-elevated: var(--lg-shadow-3), var(--lg-glass-hi);
+}
+
+/* Dark — the original Privity look; tokens provided for the new shared components */
+html[data-theme='dark'] {
+  --lg-bg: #05070c;
+  --lg-bg-2: #0a0e17;
+  --lg-surface: #0e1320;
+  --lg-text: #f1f5f9;
+  --lg-text-2: #b6c0cf;
+  --lg-text-3: #94a3b8;
+  --lg-text-4: #64748b;
+  --lg-accent: #7c8cff;
+  --lg-accent-press: #6a7af0;
+  --lg-accent-soft: rgba(124, 140, 255, 0.16);
+  --lg-lavender: #b9adff;
+  --lg-mint: rgba(16, 185, 129, 0.16);
+  --lg-pearl: rgba(255, 179, 102, 0.14);
+  --lg-success: #34d399;
+  --lg-warning: #fbbf24;
+  --lg-danger: #f87171;
+  --lg-danger-soft: rgba(248, 113, 113, 0.14);
+  --lg-border: rgba(255, 255, 255, 0.09);
+  --lg-border-strong: rgba(255, 255, 255, 0.16);
+  --lg-focus: 0 0 0 3px rgba(124, 140, 255, 0.45);
+  --lg-glass: rgba(16, 22, 34, 0.62);
+  --lg-glass-elevated: rgba(20, 27, 42, 0.86);
+  --lg-glass-tint: linear-gradient(160deg, rgba(30, 38, 58, 0.78) 0%, rgba(14, 19, 32, 0.66) 100%);
+  --lg-glass-edge: 1px solid rgba(255, 255, 255, 0.1);
+  --lg-glass-hairline: 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --lg-glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --lg-blur: blur(22px) saturate(170%);
+  --lg-blur-strong: blur(34px) saturate(180%);
+  --lg-shadow-1: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --lg-shadow-2: 0 12px 36px rgba(0, 0, 0, 0.5);
+  --lg-shadow-3: 0 24px 60px rgba(0, 0, 0, 0.7);
+}
+
+/* Media contexts — LIVE, camera, stories, full-screen video, lightbox.
+   Controls float over moving video, so these keep "night glass" in every appearance:
+   the original dark palette is restored locally for everything inside them. */
+html[data-theme='light'] :is(.plv-root, .liveme-room-root, .liveme-catalog-root, .camera-studio-overlay, .story-viewer-backdrop, .lightbox-backdrop, .tiktok-feed-wrapper, .tiktok-slides-container) {
+  color-scheme: dark;
+  --bg-deep: #05070c;
+  --bg-void: #030407;
+  --glass-surface: rgba(16, 22, 34, 0.55);
+  --glass-surface-hover: rgba(22, 30, 46, 0.7);
+  --glass-surface-active: rgba(28, 38, 58, 0.85);
+  --glass-header: rgba(7, 10, 16, 0.72);
+  --glass-input: rgba(10, 14, 23, 0.65);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border-light: rgba(255, 255, 255, 0.15);
+  --glass-specular: inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  --text-pure: #ffffff;
+  --text-primary: #f1f5f9;
+  --text-main: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-faint: #334155;
+  --brand: #6366f1;
+  --brand-light: #818cf8;
+  --brand-glow: rgba(99, 102, 241, 0.35);
+  --brand-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+  --cf-emerald: #10b981;
+  --followers-iris: #818cf8;
+  --public-cyan: #38bdf8;
+  --heart-rose: #f43f5e;
+  --shadow-subtle: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 12px 36px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --shadow-elevated: 0 24px 60px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  --lg-text: #f5f6fb;
+  --lg-text-2: rgba(245, 246, 251, 0.78);
+  --lg-text-3: rgba(245, 246, 251, 0.58);
+  --lg-text-4: rgba(245, 246, 251, 0.4);
+  --lg-border: rgba(255, 255, 255, 0.1);
+  --lg-border-strong: rgba(255, 255, 255, 0.18);
+  --lg-glass: rgba(14, 16, 26, 0.58);
+  --lg-glass-elevated: rgba(14, 16, 26, 0.86);
+  --lg-glass-edge: 1px solid rgba(255, 255, 255, 0.12);
+  --lg-glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: #f1f5f9;
+}
+
+/* Inputs inside media contexts keep their dark-glass treatment */
+html[data-theme='light'] body :is(.plv-root, .liveme-room-root, .liveme-catalog-root, .camera-studio-overlay, .story-viewer-backdrop, .lightbox-backdrop, .tiktok-feed-wrapper, .tiktok-slides-container) :is(input, textarea, select) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  box-shadow: none !important;
+}
+html[data-theme='light'] body :is(.plv-root, .liveme-room-root, .liveme-catalog-root, .camera-studio-overlay, .story-viewer-backdrop, .lightbox-backdrop, .tiktok-feed-wrapper, .tiktok-slides-container) :is(input, textarea)::placeholder {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* ------------------------------------------------------------------ 2. Base (light) */
+html[data-theme='light'] body {
+  background-color: var(--lg-bg);
+  color: var(--lg-text);
+  font-family: var(--lg-font);
+  font-feature-settings: 'kern', 'liga', 'ss01';
+  text-rendering: optimizeLegibility;
+  /* Soft iridescent ambient light — static, so it costs nothing while scrolling */
+  background-image:
+    radial-gradient(1100px 620px at 8% -6%, rgba(169, 154, 255, 0.22), transparent 60%),
+    radial-gradient(900px 560px at 100% 4%, rgba(100, 120, 245, 0.16), transparent 58%),
+    radial-gradient(900px 700px at 50% 108%, rgba(221, 247, 236, 0.7), transparent 60%),
+    linear-gradient(180deg, #fbfbfe 0%, #f5f6fb 100%);
+  background-attachment: fixed;
+}
+
+html[data-theme='light'] ::selection {
+  background: rgba(91, 111, 242, 0.2);
+}
+
+html[data-theme='light'] h1,
+html[data-theme='light'] h2,
+html[data-theme='light'] h3 {
+  letter-spacing: -0.02em;
+}
+
+/* Tabular numbers for counters, balances, timers */
+.lg-num,
+[class*='stat-val'],
+[class*='-count'],
+[class*='counter'] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ 3. Materials */
+.lg-glass {
+  background: var(--lg-glass);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  border: var(--lg-glass-edge);
+  box-shadow: var(--lg-glass-hairline), var(--lg-glass-hi), var(--lg-shadow-1);
+}
+
+.lg-glass-elevated {
+  background: var(--lg-glass-elevated);
+  -webkit-backdrop-filter: var(--lg-blur-strong);
+  backdrop-filter: var(--lg-blur-strong);
+  border: var(--lg-glass-edge);
+  box-shadow: var(--lg-glass-hairline), var(--lg-glass-hi), var(--lg-shadow-3);
+}
+
+.lg-solid {
+  background: var(--lg-surface);
+  border: 1px solid var(--lg-border);
+  box-shadow: var(--lg-shadow-1);
+}
+
+/* No backdrop-filter support → solid surfaces keep text readable */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-theme='light'] {
+    --lg-glass: rgba(255, 255, 255, 0.96);
+    --lg-glass-elevated: #ffffff;
+    --glass-surface: rgba(255, 255, 255, 0.96);
+    --glass-header: rgba(247, 248, 252, 0.97);
+  }
+}
+
+/* Users who ask for less transparency get solid surfaces */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme='light'] {
+    --lg-glass: #ffffff;
+    --lg-glass-elevated: #ffffff;
+    --glass-surface: #ffffff;
+    --glass-header: #f7f8fc;
+  }
+}
+
+/* ------------------------------------------------------------------ 4. Controls */
+.lg-btn {
+  --_bg: var(--lg-accent);
+  --_fg: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--lg-touch);
+  padding: 0 20px;
+  border-radius: var(--lg-r-pill);
+  border: 0;
+  background: var(--_bg);
+  color: var(--_fg);
+  font: 600 15px/1 var(--lg-font);
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(37, 45, 78, 0.12), 0 6px 18px rgba(91, 111, 242, 0.24);
+  transition: transform var(--lg-d-press) var(--lg-ease-out), background-color var(--lg-d-fast) ease, box-shadow var(--lg-d-fast) ease, opacity var(--lg-d-fast) ease;
+}
+.lg-btn:hover { background: var(--lg-accent-press); }
+.lg-btn--secondary {
+  --_bg: var(--lg-glass);
+  --_fg: var(--lg-text);
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-glass-hairline), var(--lg-glass-hi), var(--lg-shadow-1);
+}
+.lg-btn--secondary:hover { background: var(--lg-glass-elevated); }
+.lg-btn--tertiary { --_bg: transparent; --_fg: var(--lg-accent); box-shadow: none; padding: 0 12px; }
+.lg-btn--tertiary:hover { background: var(--lg-accent-soft); }
+.lg-btn--danger { --_bg: var(--lg-danger); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 6px 18px rgba(229, 72, 77, 0.24); }
+.lg-btn--danger:hover { background: #d63c41; }
+.lg-btn[aria-busy='true'] { cursor: progress; opacity: 0.75; }
+
+/* Universal press / focus / disabled behaviour for every button in the app */
+button,
+[role='button'],
+.lg-btn {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled):active,
+[role='button']:active,
+.lg-btn:not(:disabled):active {
+  scale: 0.97;
+}
+
+button:disabled,
+.lg-btn:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+:where(button, [role='button'], a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--lg-focus, 0 0 0 3px rgba(124, 140, 255, 0.45)) !important;
+}
+
+/* Inputs */
+html[data-theme='light'] input[type='text'],
+html[data-theme='light'] input[type='password'],
+html[data-theme='light'] input[type='email'],
+html[data-theme='light'] input[type='search'],
+html[data-theme='light'] input[type='url'],
+html[data-theme='light'] input[type='tel'],
+html[data-theme='light'] input[type='number'],
+html[data-theme='light'] input:not([type]),
+html[data-theme='light'] textarea,
+html[data-theme='light'] select {
+  background: rgba(255, 255, 255, 0.78) !important;
+  color: var(--lg-text) !important;
+  border: 1px solid var(--lg-border-strong) !important;
+  box-shadow: inset 0 1px 2px rgba(37, 45, 78, 0.05) !important;
+  font-family: var(--lg-font);
+  font-size: max(16px, 1em); /* ≥16px stops iOS zooming into fields */
+}
+
+html[data-theme='light'] input:focus,
+html[data-theme='light'] textarea:focus,
+html[data-theme='light'] select:focus {
+  background: #ffffff !important;
+  border-color: var(--lg-accent) !important;
+  box-shadow: var(--lg-focus) !important;
+}
+
+html[data-theme='light'] input::placeholder,
+html[data-theme='light'] textarea::placeholder {
+  color: var(--lg-text-4) !important;
+}
+
+html[data-theme='light'] input[aria-invalid='true'],
+html[data-theme='light'] textarea[aria-invalid='true'] {
+  border-color: var(--lg-danger) !important;
+  box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.18) !important;
+}
+
+/* iOS-style switch (existing .apple-switch markup) */
+html[data-theme='light'] .apple-slider {
+  background-color: #e3e5ec !important;
+  border: 0 !important;
+  box-shadow: inset 0 0 0 1px rgba(40, 48, 75, 0.06);
+}
+html[data-theme='light'] .apple-slider::before {
+  background: #ffffff !important;
+  box-shadow: 0 3px 8px rgba(37, 45, 78, 0.18), 0 1px 1px rgba(37, 45, 78, 0.12) !important;
+}
+html[data-theme='light'] .apple-switch input:checked + .apple-slider {
+  background: var(--lg-success) !important;
+  box-shadow: none;
+}
+.apple-switch input:focus-visible + .apple-slider {
+  box-shadow: var(--lg-focus) !important;
+}
+
+/* ------------------------------------------------------------------ 5. App shell (light) */
+
+/* Desktop sidebar: a quiet floating glass column */
+html[data-theme='light'] .nav-sidebar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.4));
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  border-right: 1px solid var(--lg-border);
+}
+
+html[data-theme='light'] .nav-link-btn {
+  color: var(--lg-text-2);
+  font-family: var(--lg-font);
+  font-weight: 600;
+  border-radius: var(--lg-r-sm);
+  transition: background-color var(--lg-d-fast) ease, color var(--lg-d-fast) ease, transform var(--lg-d-press) var(--lg-ease-out);
+}
+html[data-theme='light'] .nav-link-btn:hover {
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--lg-text);
+  border-color: var(--lg-border);
+  transform: none;
+}
+html[data-theme='light'] .nav-link-btn.active {
+  background: var(--lg-glass-elevated) !important;
+  color: var(--lg-accent) !important;
+  border-color: rgba(255, 255, 255, 0.9) !important;
+  box-shadow: var(--lg-glass-hairline), var(--lg-glass-hi), var(--lg-shadow-1) !important;
+}
+html[data-theme='light'] .nav-link-btn.active svg {
+  color: var(--lg-accent);
+  stroke: currentColor;
+}
+
+/* Sticky feed header: translucent pearl bar */
+html[data-theme='light'] .feed-sticky-nav,
+html[data-theme='light'] .mobile-top-header {
+  background: rgba(247, 248, 252, 0.74) !important;
+  -webkit-backdrop-filter: var(--lg-blur-strong);
+  backdrop-filter: var(--lg-blur-strong);
+  border-bottom: 1px solid var(--lg-border) !important;
+  box-shadow: none !important;
+}
+
+/* Cards & panels */
+html[data-theme='light'] .glass-panel-card {
+  background: var(--lg-glass);
+  border: var(--lg-glass-edge);
+  border-radius: var(--lg-r-md);
+  box-shadow: var(--lg-glass-hairline), var(--lg-glass-hi), var(--lg-shadow-1);
+}
+
+html[data-theme='light'] .feed-post-card {
+  border-bottom: 1px solid var(--lg-border);
+}
+html[data-theme='light'] .feed-post-card:hover {
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+/* Settings: solid premium material for long, sensitive forms */
+html[data-theme='light'] .settings-card-group {
+  background: var(--lg-surface);
+  border: 1px solid var(--lg-border);
+  border-radius: var(--lg-r-md);
+  box-shadow: var(--lg-shadow-1);
+}
+html[data-theme='light'] .settings-row-item {
+  border-bottom: 1px solid rgba(40, 48, 75, 0.07);
+  min-height: var(--lg-touch);
+}
+html[data-theme='light'] .settings-item-title { color: var(--lg-text); }
+html[data-theme='light'] .settings-item-desc { color: var(--lg-text-3); }
+
+/* Modals: elevated glass + dimmer that keeps context visible */
+html[data-theme='light'] .frosted-modal-backdrop {
+  background: rgba(23, 25, 35, 0.28) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  backdrop-filter: blur(8px) saturate(120%);
+}
+html[data-theme='light'] .frosted-modal-window {
+  background: var(--lg-glass-elevated) !important;
+  -webkit-backdrop-filter: var(--lg-blur-strong);
+  backdrop-filter: var(--lg-blur-strong);
+  border: var(--lg-glass-edge) !important;
+  border-radius: var(--lg-r-lg) !important;
+  box-shadow: var(--lg-glass-hairline), var(--lg-glass-hi), var(--lg-shadow-3) !important;
+  animation: lg-sheet-in var(--lg-d-sheet) var(--lg-ease-out) both;
+}
+
+/* Primary actions */
+html[data-theme='light'] .btn-post-dispatch,
+html[data-theme='light'] .btn-compose-prime,
+html[data-theme='light'] .btn-primary-glow {
+  background: var(--lg-accent) !important;
+  color: #fff !important;
+  font-family: var(--lg-font);
+  font-weight: 650;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 2px rgba(37, 45, 78, 0.12), 0 8px 22px rgba(91, 111, 242, 0.26) !important;
+  transition: transform var(--lg-d-press) var(--lg-ease-out), background-color var(--lg-d-fast) ease;
+}
+html[data-theme='light'] .btn-post-dispatch:hover:not(:disabled),
+html[data-theme='light'] .btn-compose-prime:hover,
+html[data-theme='light'] .btn-primary-glow:hover {
+  background: var(--lg-accent-press) !important;
+  transform: none;
+}
+
+/* Secondary glass controls (back buttons, icon pills) */
+html[data-theme='light'] .btn-glass-back,
+html[data-theme='light'] .btn-close-strip,
+html[data-theme='light'] .settings-gear-btn {
+  background: var(--lg-glass) !important;
+  color: var(--lg-text) !important;
+  border: var(--lg-glass-edge) !important;
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+  box-shadow: var(--lg-glass-hairline), var(--lg-glass-hi), var(--lg-shadow-1) !important;
+}
+
+html[data-theme='light'] .btn-follow-toggle {
+  border-radius: var(--lg-r-pill);
+  font-family: var(--lg-font);
+  font-weight: 650;
+}
+
+/* ------------------------------------------------------------------ 5b. Feed & Stories */
+html[data-theme='light'] .circles-story-rail {
+  background: var(--lg-surface) !important;
+  border-bottom: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .circle-tag-name {
+  color: var(--lg-text-2) !important;
+}
+html[data-theme='light'] .circle-halo-ring.add-circle {
+  background: var(--lg-bg-2) !important;
+  border: 1.5px dashed var(--lg-border-strong) !important;
+}
+html[data-theme='light'] .circle-add-icon {
+  color: var(--lg-accent) !important;
+}
+html[data-theme='light'] .composer-card {
+  background: var(--lg-surface) !important;
+  border-bottom: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .composer-text-box {
+  color: var(--lg-text) !important;
+}
+html[data-theme='light'] .composer-text-box::placeholder {
+  color: var(--lg-text-3) !important;
+}
+html[data-theme='light'] .privacy-select-glass {
+  background: var(--lg-bg-2) !important;
+  color: var(--lg-text-2) !important;
+  border: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .btn-media-toggle {
+  background: var(--lg-bg-2) !important;
+  color: var(--lg-text-2) !important;
+  border: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .btn-media-toggle:hover {
+  color: var(--lg-text) !important;
+  background: var(--lg-surface) !important;
+}
+
+/* ------------------------------------------------------------------ 5c. Discover & Search */
+html[data-theme='light'] .search-glass-field {
+  background: var(--lg-surface) !important;
+  border: 1px solid var(--lg-border) !important;
+  color: var(--lg-text) !important;
+  box-shadow: var(--lg-shadow-1) !important;
+}
+html[data-theme='light'] .search-glass-field:focus {
+  border-color: var(--lg-accent) !important;
+  box-shadow: var(--lg-focus) !important;
+}
+html[data-theme='light'] .search-lens-icon {
+  color: var(--lg-text-3) !important;
+}
+html[data-theme='light'] .explore-tag-pill {
+  background: var(--lg-bg-2) !important;
+  border: 1px solid var(--lg-border) !important;
+  color: var(--lg-text-2) !important;
+}
+html[data-theme='light'] .explore-tag-pill:hover {
+  background: var(--lg-surface) !important;
+  color: var(--lg-accent) !important;
+  border-color: var(--lg-accent-soft) !important;
+}
+html[data-theme='light'] .panel-title-text {
+  color: var(--lg-text) !important;
+}
+html[data-theme='light'] .creator-entry-row {
+  border-bottom: 1px solid rgba(40, 48, 75, 0.06) !important;
+}
+html[data-theme='light'] .creator-name-text {
+  color: var(--lg-text) !important;
+}
+html[data-theme='light'] .creator-handle-text {
+  color: var(--lg-text-3) !important;
+}
+
+/* ------------------------------------------------------------------ 5d. Direct Messages & Chat */
+html[data-theme='light'] .messages-stories-rail {
+  background: var(--lg-surface) !important;
+  border-bottom: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .dm-story-name {
+  color: var(--lg-text-2) !important;
+}
+html[data-theme='light'] .dm-story-avatar-img {
+  border-color: #ffffff !important;
+}
+html[data-theme='light'] .dm-story-plus-icon,
+html[data-theme='light'] .dm-story-online-dot {
+  border-color: #ffffff !important;
+}
+html[data-theme='light'] .messages-filter-pill {
+  background: var(--lg-bg-2) !important;
+  border-color: var(--lg-border) !important;
+  color: var(--lg-text-2) !important;
+}
+html[data-theme='light'] .messages-filter-pill:hover {
+  background: var(--lg-surface) !important;
+  color: var(--lg-text) !important;
+}
+html[data-theme='light'] .messages-filter-pill.active {
+  background: var(--lg-accent-soft) !important;
+  border-color: var(--lg-accent) !important;
+  color: var(--lg-accent) !important;
+}
+html[data-theme='light'] .chat-roster-item {
+  border-bottom: 1px solid rgba(40, 48, 75, 0.05) !important;
+}
+html[data-theme='light'] .chat-roster-item:hover {
+  background: rgba(255, 255, 255, 0.8) !important;
+}
+html[data-theme='light'] .chat-roster-item.active {
+  background: var(--lg-surface) !important;
+  border-left: 3px solid var(--lg-accent) !important;
+  box-shadow: var(--lg-shadow-1) !important;
+}
+html[data-theme='light'] .messages-thread-header {
+  background: rgba(255, 255, 255, 0.82) !important;
+  border-bottom: 1px solid var(--lg-border) !important;
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+}
+html[data-theme='light'] .messages-composer-dock {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-top: 1px solid var(--lg-border) !important;
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+}
+html[data-theme='light'] .composer-attach-pill-btn,
+html[data-theme='light'] .composer-mic-pill-btn {
+  background: var(--lg-bg-2) !important;
+  color: var(--lg-text-2) !important;
+  border: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .composer-attach-pill-btn:hover,
+html[data-theme='light'] .composer-mic-pill-btn:hover {
+  color: var(--lg-text) !important;
+  background: var(--lg-surface) !important;
+}
+html[data-theme='light'] .composer-text-input {
+  background: var(--lg-surface) !important;
+  color: var(--lg-text) !important;
+  border: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .composer-text-input:focus {
+  border-color: var(--lg-accent) !important;
+  box-shadow: var(--lg-focus) !important;
+}
+html[data-theme='light'] .composer-send-btn {
+  background: var(--lg-accent) !important;
+  color: #ffffff !important;
+}
+html[data-theme='light'] .spatial-bubble-wrapper.received .spatial-bubble-content-card {
+  background: var(--lg-surface) !important;
+  color: var(--lg-text) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-1) !important;
+}
+html[data-theme='light'] .spatial-bubble-wrapper.sent .spatial-bubble-content-card {
+  background: var(--brand-gradient) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 4px 18px rgba(91, 111, 242, 0.25) !important;
+}
+html[data-theme='light'] .channel-creator-name {
+  color: var(--lg-text) !important;
+}
+.channel-name-row {
+  gap: 8px !important;
+}
+.channel-creator-name {
+  min-width: 0 !important;
+}
+
+/* ------------------------------------------------------------------ 5e. Settings Tabs & Admin */
+html[data-theme='light'] .settings-nav-strip {
+  background: var(--lg-bg-2) !important;
+  border-bottom: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .settings-nav-tab {
+  color: var(--lg-text-2) !important;
+  border: 1px solid transparent !important;
+}
+html[data-theme='light'] .settings-nav-tab:hover {
+  color: var(--lg-text) !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+}
+html[data-theme='light'] .settings-nav-tab.active {
+  color: var(--lg-accent) !important;
+  background: var(--lg-surface) !important;
+  border-color: var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-1) !important;
+}
+html[data-theme='light'] .admin-section-title {
+  color: var(--lg-text) !important;
+}
+html[data-theme='light'] .admin-section-subtitle {
+  color: var(--lg-text-3) !important;
+}
+html[data-theme='light'] .admin-gifts-table-wrap {
+  background: var(--lg-surface) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-1) !important;
+}
+html[data-theme='light'] .admin-gifts-table th {
+  color: var(--lg-text-3) !important;
+  background: var(--lg-bg-2) !important;
+  border-bottom: 1px solid var(--lg-border) !important;
+}
+html[data-theme='light'] .admin-gifts-table td {
+  color: var(--lg-text) !important;
+  border-bottom: 1px solid rgba(40, 48, 75, 0.08) !important;
+}
+html[data-theme='light'] .admin-gift-thumb-box {
+  background: var(--lg-bg-2) !important;
+  border: 1px solid var(--lg-border) !important;
+}
+
+/* ------------------------------------------------------------------ 5f. Profile Screen */
+html[data-theme='light'] .profile-top-btn {
+  background: rgba(255, 255, 255, 0.75) !important;
+  border: 1px solid var(--lg-border) !important;
+  color: var(--lg-text) !important;
+  box-shadow: var(--lg-shadow-1) !important;
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+}
+html[data-theme='light'] .profile-top-btn:hover {
+  background: #ffffff !important;
+  transform: scale(1.05);
+}
+html[data-theme='light'] .profile-drawer-sheet {
+  background: var(--lg-glass-elevated) !important;
+  border-left: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-3) !important;
+}
+html[data-theme='light'] .profile-drawer-item {
+  color: var(--lg-text) !important;
+}
+html[data-theme='light'] .profile-drawer-item:hover {
+  background: rgba(40, 48, 75, 0.05) !important;
+}
+html[data-theme='light'] .profile-drawer-item-title {
+  color: var(--lg-text) !important;
+}
+html[data-theme='light'] .profile-drawer-item-desc {
+  color: var(--lg-text-3) !important;
+}
+
+/* ------------------------------------------------------------------ 6. Mobile tab bar
+   Floating Liquid Glass capsule; respects the home indicator and never covers content. */
+@media (max-width: 768px) {
+  html[data-theme='light'] .mobile-bottom-nav {
+    left: 12px !important;
+    right: 12px !important;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+    height: 62px !important;
+    padding-bottom: 0 !important;
+    border-radius: 26px;
+    background: rgba(255, 255, 255, 0.72) !important;
+    -webkit-backdrop-filter: var(--lg-blur-strong);
+    backdrop-filter: var(--lg-blur-strong);
+    border: 1px solid rgba(255, 255, 255, 0.85) !important;
+    box-shadow: 0 0 0 0.5px rgba(40, 48, 75, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 10px 30px rgba(37, 45, 78, 0.14) !important;
+  }
+
+  html[data-theme='light'] .mobile-nav-item {
+    color: var(--lg-text-3);
+    min-width: var(--lg-touch);
+    transition: color var(--lg-d-fast) ease, transform var(--lg-d-press) var(--lg-ease-out);
+  }
+  html[data-theme='light'] .mobile-nav-item.active {
+    color: var(--lg-accent);
+  }
+  html[data-theme='light'] .mobile-nav-item.active::before {
+    content: '';
+    position: absolute;
+    inset: 7px 10%;
+    border-radius: 18px;
+    background: var(--lg-accent-soft);
+    z-index: -1;
+    animation: lg-fade-scale var(--lg-d-base) var(--lg-ease-out) both;
+  }
+  html[data-theme='light'] .mobile-nav-indicator {
+    display: none;
+  }
+  html[data-theme='light'] .mobile-compose-orb {
+    width: 46px;
+    height: 46px;
+    transform: none;
+    border-radius: 16px;
+    background: var(--brand-gradient);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 6px 16px rgba(91, 111, 242, 0.32);
+  }
+  html[data-theme='light'] .mobile-compose-orb:active {
+    scale: 0.94;
+  }
+  html[data-theme='light'] .mobile-nav-compose-center::before {
+    display: none;
+  }
+  html[data-theme='light'] .mobile-badge-dot {
+    background: var(--lg-danger);
+    box-shadow: 0 0 0 2px #fff;
+  }
+
+  /* Keep scrollable content clear of the floating bar */
+  html[data-theme='light'] .feed-column,
+  html[data-theme='light'] .settings-content-pane {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Compact Send pill in mobile chat */
+  .composer-send-label {
+    display: none !important;
+  }
+}
+
+/* ------------------------------------------------------------------ 6b. Segmented control */
+.lg-segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--lg-r-sm);
+  background: var(--lg-bg-2);
+  box-shadow: inset 0 0 0 1px var(--lg-border);
+  width: 100%;
+  max-width: 420px;
+}
+.lg-segmented-item {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--lg-touch);
+  padding: 0 12px;
+  border: 0;
+  border-radius: calc(var(--lg-r-sm) - 3px);
+  background: transparent;
+  color: var(--lg-text-2);
+  font: 600 14px/1 var(--lg-font);
+  cursor: pointer;
+  transition: background var(--lg-d-fast) var(--lg-ease-out), color var(--lg-d-fast) var(--lg-ease-out),
+    box-shadow var(--lg-d-fast) var(--lg-ease-out);
+}
+.lg-segmented-item:hover:not(.is-selected) { color: var(--lg-text); }
+.lg-segmented-item.is-selected {
+  background: var(--lg-surface);
+  color: var(--lg-accent);
+  box-shadow: var(--lg-shadow-1), var(--lg-glass-hairline);
+}
+.lg-segmented-item:focus-visible { outline: none; box-shadow: var(--lg-focus); }
+
+/* ------------------------------------------------------------------ 7. Motion */
+@keyframes lg-sheet-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes lg-fade-scale {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes lg-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes lg-shimmer {
+  from { background-position: -240px 0; }
+  to { background-position: 240px 0; }
+}
+
+.lg-enter { animation: lg-fade-up var(--lg-d-base) var(--lg-ease-out) both; }
+
+/* Skeleton placeholder */
+.lg-skeleton {
+  border-radius: var(--lg-r-xs);
+  background: linear-gradient(90deg, rgba(40, 48, 75, 0.06) 0%, rgba(40, 48, 75, 0.11) 50%, rgba(40, 48, 75, 0.06) 100%);
+  background-size: 480px 100%;
+  animation: lg-shimmer 1.3s linear infinite;
+}
+html[data-theme='dark'] .lg-skeleton {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.05) 100%);
+  background-size: 480px 100%;
+}
+
+/* Reduced motion: keep fades, drop movement and loops */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  button:active,
+  .lg-btn:active {
+    scale: none !important;
+  }
+}

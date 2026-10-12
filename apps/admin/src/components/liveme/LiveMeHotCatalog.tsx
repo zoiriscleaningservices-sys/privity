@@ -48,7 +48,7 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
         const parsed = JSON.parse(saved);
         const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
         if (liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt)) return null;
-        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500) return null;
+        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 35000) return null;
         return parsed;
       }
       return null;
@@ -62,9 +62,16 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
     try {
       bus = new BroadcastChannel('privity_sync_bus');
       bus.onmessage = (e) => {
-        if (e.data?.type === 'LIVE_HOST_STARTED') {
-          setActiveHost(e.data.host);
-        } else if (e.data?.type === 'LIVE_HOST_ENDED') {
+        if (
+          e.data?.type === 'LIVE_HOST_STARTED' ||
+          e.data?.action === 'LIVE_STARTED' ||
+          e.data?.type === 'STREAM_ACTIVE' ||
+          e.data?.type === 'LIVE_HEARTBEAT' ||
+          e.data?.action === 'LIVE_HEARTBEAT'
+        ) {
+          const host = e.data.host || e.data.stream;
+          if (host) setActiveHost(host);
+        } else if (e.data?.type === 'LIVE_HOST_ENDED' || e.data?.type === 'STREAM_ENDED') {
           setActiveHost(null);
         }
       };
@@ -84,7 +91,7 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
             const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
             if (
               liveStreamSync.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
-              (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500)
+              (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 35000)
             ) {
               setActiveHost(null);
             } else {
@@ -167,7 +174,7 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
   for (const s of networkStreamers) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
     if (!normHandle) continue;
-    if (liveStreamSync.isStreamEnded(s.id, normHandle)) continue;
+    if (liveStreamSync.isStreamEnded(s.id, normHandle, s.startedAt)) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
@@ -175,22 +182,22 @@ export const LiveMeHotCatalog: React.FC<LiveMeHotCatalogProps> = ({
 
   for (const s of LIVEME_STREAMERS) {
     const normHandle = (s.handle || '').toLowerCase().replace('@', '').trim();
-    if (liveStreamSync.isStreamEnded(s.id, normHandle)) continue;
+    if (liveStreamSync.isStreamEnded(s.id, normHandle, s.startedAt)) continue;
     if (!streamersByHandle.has(normHandle)) {
       streamersByHandle.set(normHandle, s);
     }
   }
 
   const allStreamers = Array.from(streamersByHandle.values())
-    .filter((s) => !liveStreamSync.isStreamEnded(s.id, s.handle))
+    .filter((s) => !liveStreamSync.isStreamEnded(s.id, s.handle, s.startedAt))
     .sort((a, b) => {
       const aIsMyHost = a.isHost || (isUserBroadcasting && (a.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
       const bIsMyHost = b.isHost || (isUserBroadcasting && (b.handle || '').toLowerCase().replace('@', '').trim() === userHandle);
       if (aIsMyHost && !bIsMyHost) return -1;
       if (!aIsMyHost && bIsMyHost) return 1;
 
-      const aLive = (a.tagBadge === 'LIVE NOW' || a.isCameraStream || a.isHost || networkStreamers.some((ns) => ns.id === a.id)) && !liveStreamSync.isStreamEnded(a.id, a.handle);
-      const bLive = (b.tagBadge === 'LIVE NOW' || b.isCameraStream || b.isHost || networkStreamers.some((ns) => ns.id === b.id)) && !liveStreamSync.isStreamEnded(b.id, b.handle);
+      const aLive = (a.tagBadge === 'LIVE NOW' || a.isCameraStream || a.isHost || networkStreamers.some((ns) => ns.id === a.id)) && !liveStreamSync.isStreamEnded(a.id, a.handle, a.startedAt);
+      const bLive = (b.tagBadge === 'LIVE NOW' || b.isCameraStream || b.isHost || networkStreamers.some((ns) => ns.id === b.id)) && !liveStreamSync.isStreamEnded(b.id, b.handle, b.startedAt);
       if (aLive && !bLive) return -1;
     if (!aLive && bLive) return 1;
 

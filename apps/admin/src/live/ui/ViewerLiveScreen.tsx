@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Ellipsis, Gift, Heart, Radio, Share2, UserCheck, UserPlus, WifiOff, X } from 'lucide-react';
 import type { UserRef } from '../core/events';
 import type { LiveCommands } from '../client/LiveCommands';
@@ -24,6 +24,7 @@ import { GiftTray } from './GiftTray';
 import { HeartsHandle, HeartsLayer } from './Hearts';
 import { CommentActionsSheet, GuestRequestUi, ShareSheet, SupportersSheet, ViewerMoreSheet } from './ViewerSheets';
 import { GuestDock, useGuestMedia } from './GuestDock';
+import { liveStreamSync } from '../../services/liveStreamSyncService';
 
 export interface ViewerLiveScreenProps {
   feed: LiveFeed;
@@ -81,6 +82,9 @@ function ViewerBody({
   const prefs = useEffectPrefs(effects);
   const { items: toasts, push: toast } = useToasts();
   const hearts = useRef<HeartsHandle>(null);
+  const viewerContainerRef = useRef<HTMLDivElement>(null);
+  const pendingLikesRef = useRef(0);
+  const likeFlushTimerRef = useRef<any>(null);
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [selected, setSelected] = useState<LiveComment | null>(null);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
@@ -92,6 +96,122 @@ function ViewerBody({
   const live = room?.status === 'live';
   const isGuest = meState?.guest_status === 'accepted' && live;
   const guest = useGuestMedia(!!isGuest, me.id, guestMediaSource, media);
+
+  const pointerDownRef = useRef<{ x: number; y: number; time: number; pointerId: number } | null>(null);
+
+  const recordLike = useCallback(() => {
+    pendingLikesRef.current += 1;
+    if (!likeFlushTimerRef.current && room?.liveId) {
+      likeFlushTimerRef.current = setTimeout(() => {
+        const count = pendingLikesRef.current;
+        pendingLikesRef.current = 0;
+        likeFlushTimerRef.current = null;
+        if (count > 0 && room?.liveId) {
+          try {
+            const reactionEvt = {
+              type: 'REACTION_SENT',
+              count,
+              senderHandle: me.handle,
+              liveId: room.liveId,
+            };
+            // Address the host's room (sessions subscribe by host handle). sendRoomEvent already
+            // delivers network-wide, so no second direct Supabase send.
+            liveStreamSync.sendRoomEvent(room.host?.handle || room.liveId, reactionEvt);
+            const bus = new BroadcastChannel('privity_sync_bus');
+            bus.postMessage({ type: 'ROOM_EVENT', streamId: room.liveId, event: reactionEvt });
+            bus.close();
+          } catch {}
+        }
+      }, 350);
+    }
+  }, [room?.liveId, me.handle]);
+
+  useEffect(() => {
+    if (!room?.liveId) return;
+    const unsub = liveStreamSync.subscribeToRoomEvents(room.liveId, (evt: any) => {
+      if (evt?.type === 'REACTION_SENT') {
+        hearts.current?.burst();
+      }
+    });
+    return () => unsub();
+  }, [room?.liveId]);
+
+  // Synchronize remote participant media (guests on stage and battle opponents)
+  useEffect(() => {
+    if (!media?.syncParticipants || !room) return;
+    const participants: Array<{ id: string; handle?: string | null }> = [];
+    if (room.guests) {
+      for (const g of room.guests) {
+        if (g.id !== me.id) participants.push({ id: g.id, handle: g.handle });
+      }
+    }
+    if (room.battle && (room.battle.status === 'accepted' || room.battle.status === 'live' || room.battle.status === 'locked')) {
+      const oppA = room.battle.side_a.host;
+      const oppB = room.battle.side_b.host;
+      if (oppA && oppA.id !== me.id && oppA.id !== room.host.id) participants.push({ id: oppA.id, handle: oppA.handle });
+      if (oppB && oppB.id !== me.id && oppB.id !== room.host.id) participants.push({ id: oppB.id, handle: oppB.handle });
+    }
+    media.syncParticipants(participants);
+  }, [media, room?.guests, room?.battle, room?.host.id, me.id]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    if (
+      target.closest(
+        'button, a, input, textarea, select, [role="button"], [role="dialog"], [role="menu"], [role="tab"], ' +
+        '.plv-sheet, .plv-dialog, .plv-action-row, .plv-action-buttons, .plv-viewer-head, ' +
+        '.plv-guest-dock, .plv-composer, .plv-comments, .plv-comments-scroll, .plv-comment-item, .plv-viewer-bottom, ' +
+        '.plv-battle-card, .plv-chip, .plv-link-btn, .plv-link-banner, .plv-head-row2, .plv-toast-stack, .plv-gift-tray'
+      )
+    ) {
+      pointerDownRef.current = null;
+      return;
+    }
+
+    pointerDownRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      time: Date.now(),
+      pointerId: e.pointerId,
+    };
+  }, []);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const down = pointerDownRef.current;
+    pointerDownRef.current = null;
+    if (!down || down.pointerId !== e.pointerId) return;
+
+    const dx = Math.abs(e.clientX - down.x);
+    const dy = Math.abs(e.clientY - down.y);
+    const dt = Date.now() - down.time;
+
+    // Intentional tap: minimal movement and released within 450ms (excludes drag, pinch, swipe, and long press)
+    if (dx > 16 || dy > 16 || dt > 450) return;
+
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest(
+        'button, a, input, textarea, select, [role="button"], [role="dialog"], [role="menu"], [role="tab"], ' +
+        '.plv-sheet, .plv-dialog, .plv-action-row, .plv-action-buttons, .plv-viewer-head, ' +
+        '.plv-guest-dock, .plv-composer, .plv-comments, .plv-comments-scroll, .plv-comment-item, .plv-viewer-bottom, ' +
+        '.plv-battle-card, .plv-chip, .plv-link-btn, .plv-link-banner, .plv-head-row2, .plv-toast-stack, .plv-gift-tray'
+      )
+    ) {
+      return;
+    }
+
+    const rect = viewerContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const x = Math.max(20, Math.min(rect.width - 20, e.clientX - rect.left));
+    const y = Math.max(48, Math.min(rect.height - 80, e.clientY - rect.top));
+
+    hearts.current?.burst({ x, y });
+    recordLike();
+  }, [recordLike]);
 
   const onNotice = useCallback(
     (n: PersonalNotice) => {
@@ -111,11 +231,15 @@ function ViewerBody({
         case 'UNMUTED':
           toast('You can comment again.', 'info');
           break;
+        case 'REMOVED_FROM_LIVE':
+          toast('The host removed you from this LIVE.', 'warn');
+          setTimeout(() => onLeave(), 1800);
+          break;
         default:
           break;
       }
     },
-    [toast],
+    [toast, onLeave],
   );
   usePersonalNotices(controller, onNotice);
 
@@ -216,7 +340,12 @@ function ViewerBody({
     });
 
   return (
-    <div className={`plv-viewer ${typing ? 'is-typing' : ''} ${isGuest ? 'is-guest' : ''}`}>
+    <div
+      ref={viewerContainerRef}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      className={`plv-viewer ${typing ? 'is-typing' : ''} ${isGuest ? 'is-guest' : ''}`}
+    >
       <div className="plv-video-layer">
         {stage && <VideoStage layout={stage.layout} columns={stage.columns} tiles={stage.tiles} overflow={stage.overflow} />}
       </div>
@@ -314,7 +443,15 @@ function ViewerBody({
             }}
           />
           <div className="plv-action-buttons">
-            <IconButton id="plv-like" label="Like" icon={<Heart size={22} />} onClick={() => hearts.current?.burst()} />
+            <IconButton
+              id="plv-like"
+              label="Like"
+              icon={<Heart size={22} />}
+              onClick={() => {
+                hearts.current?.burst();
+                recordLike();
+              }}
+            />
             <IconButton id="plv-share" label="Share" icon={<Share2 size={21} />} onClick={() => setSheet('share')} />
             <IconButton id="plv-more" label="More options" icon={<Ellipsis size={22} />} onClick={() => setSheet('more')} />
             {host.id !== me.id && (

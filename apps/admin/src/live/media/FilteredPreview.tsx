@@ -23,6 +23,10 @@ export const StreamVideo = memo(function StreamVideo({
     const v = ref.current;
     if (!v) return;
 
+    v.muted = true;
+    v.defaultMuted = true;
+    v.playsInline = true;
+
     const updateTracks = () => {
       const vTracks = stream ? stream.getVideoTracks() : [];
       setTrackCount(vTracks.length);
@@ -53,20 +57,34 @@ export const StreamVideo = memo(function StreamVideo({
       tryPlay();
     };
 
+    const handleLoadedData = () => {
+      updateTracks();
+      tryPlay();
+    };
+
     const handlePlaying = () => {
       setIsPlaying(true);
       setIsBlocked(false);
     };
 
+    const handleTimeUpdate = () => {
+      if (v.currentTime > 0 || (v.videoWidth > 0 && !v.paused)) {
+        setIsPlaying(true);
+        setIsBlocked(false);
+      }
+    };
+
     const handlePause = () => {
-      if (!v.ended) {
+      if (!v.ended && v.currentTime === 0) {
         setIsPlaying(false);
       }
     };
 
     v.addEventListener('loadedmetadata', handleLoadedMetadata);
+    v.addEventListener('loadeddata', handleLoadedData);
     v.addEventListener('canplay', tryPlay);
     v.addEventListener('playing', handlePlaying);
+    v.addEventListener('timeupdate', handleTimeUpdate);
     v.addEventListener('pause', handlePause);
 
     if (stream) {
@@ -77,8 +95,10 @@ export const StreamVideo = memo(function StreamVideo({
 
     return () => {
       v.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      v.removeEventListener('loadeddata', handleLoadedData);
       v.removeEventListener('canplay', tryPlay);
       v.removeEventListener('playing', handlePlaying);
+      v.removeEventListener('timeupdate', handleTimeUpdate);
       v.removeEventListener('pause', handlePause);
       if (stream) {
         stream.removeEventListener('addtrack', updateTracks);
@@ -237,9 +257,15 @@ export const FilteredPreview = memo(function FilteredPreview({
     };
     void v.play().catch(() => undefined);
     if (v.readyState >= 2) begin();
-    else v.addEventListener('loadeddata', begin, { once: true });
+    else {
+      v.addEventListener('loadeddata', begin, { once: true });
+      v.addEventListener('canplay', begin, { once: true });
+      v.addEventListener('playing', begin, { once: true });
+    }
     return () => {
       v.removeEventListener('loadeddata', begin);
+      v.removeEventListener('canplay', begin);
+      v.removeEventListener('playing', begin);
       pipeline.stop();
     };
   }, [stream, pipeline]);

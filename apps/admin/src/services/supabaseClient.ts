@@ -81,6 +81,33 @@ export function isSupabaseRealtimeConnected(): boolean {
   return Boolean(realtimeSyncChannel && realtimeSyncChannel.state === 'joined');
 }
 
+/** True when the shared channel is closed/errored/missing (i.e. a reconnect is genuinely needed). */
+function isRealtimeChannelDown(): boolean {
+  if (!realtimeSyncChannel) return true;
+  const s = realtimeSyncChannel.state;
+  return s === 'closed' || s === 'errored';
+}
+
+/**
+ * Outbound privacy + egress guard for every payload sent over the shared Realtime channel
+ * (and the ntfy mirror). Everything on this channel is delivered to EVERY connected client,
+ * so private fields must never be included, and huge payloads multiply egress by the
+ * number of online users.
+ */
+const PRIVATE_KEYS = new Set(['email', 'password', 'passwordHash', 'accounts', 'phone', 'access_token', 'refresh_token', 'provider_token']);
+export const MAX_BROADCAST_BYTES = 900_000;
+
+export function sanitizeOutboundPayload<T>(value: T, depth = 0): T {
+  if (depth > 8 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((v) => sanitizeOutboundPayload(v, depth + 1)) as unknown as T;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (PRIVATE_KEYS.has(k)) continue;
+    out[k] = sanitizeOutboundPayload(v, depth + 1);
+  }
+  return out as T;
+}
+
 async function transmitChunks(ch: any, jsonStr: string) {
   const CHUNK_SIZE = 48000;
   const totalChunks = Math.ceil(jsonStr.length / CHUNK_SIZE);
@@ -253,15 +280,22 @@ export function getSupabaseRealtimeChannel() {
   return realtimeSyncChannel;
 }
 
-export function broadcastViaSupabase(payload: any) {
+export function broadcastViaSupabase(rawPayload: any) {
+  let payload = rawPayload;
   try {
+    payload = sanitizeOutboundPayload(rawPayload);
+    const jsonStr = JSON.stringify(payload);
+    if (jsonStr.length > MAX_BROADCAST_BYTES) {
+      console.warn(`[Supabase Realtime] Dropped oversized broadcast (${payload?.action || payload?.type || 'event'}, ${Math.round(jsonStr.length / 1024)} KB)`);
+      return;
+    }
     let ch = getSupabaseRealtimeChannel();
     const isReady = ch && (isChannelSubscribed || ch.state === 'joined');
     if (!isReady) {
-      outboundQueue.push(payload);
+      // Bounded queue: never let an offline device build up an unbounded backlog
+      if (outboundQueue.length < 50) outboundQueue.push(payload);
       return;
     }
-    const jsonStr = JSON.stringify(payload);
     // Payload <= 120KB: send as single WebSocket frame for instant delivery
     if (jsonStr.length <= 120000) {
       ch.send({
@@ -269,17 +303,17 @@ export function broadcastViaSupabase(payload: any) {
         event: 'privity_event',
         payload,
       }).catch(() => {
-        outboundQueue.push(payload);
+        if (outboundQueue.length < 50) outboundQueue.push(payload);
       });
     } else {
       // Large payloads (photos, videos, banners): chunk into 48KB slices
       transmitChunks(ch, jsonStr).catch(() => {
-        outboundQueue.push(payload);
+        if (outboundQueue.length < 50) outboundQueue.push(payload);
       });
     }
   } catch (e) {
     console.warn('[Supabase Realtime] Broadcast failed, queuing:', e);
-    outboundQueue.push(payload);
+    if (outboundQueue.length < 50) outboundQueue.push(payload);
   }
 }
 
@@ -293,33 +327,24 @@ export function onSupabaseBroadcast(callback: (payload: any) => void): () => voi
 
 // Auto-reconnect on Mobile OS and browser lifecycle events
 if (typeof window !== 'undefined') {
-  // Active Keepalive Ping every 4s to prevent iOS/Android WebSocket suspension
+  // Health check only. The Realtime socket already runs its own protocol heartbeat, so we no
+  // longer broadcast an app-level ping (that ping was delivered to EVERY connected user every
+  // 4 s). Reconnect only when the channel is actually down — never tear down a joining one.
   setInterval(() => {
     try {
-      if (!realtimeSyncChannel || realtimeSyncChannel.state !== 'joined') {
-        reconnectSupabaseRealtime(true);
-      } else {
-        realtimeSyncChannel.send({
-          type: 'broadcast',
-          event: 'privity_ping',
-          payload: { ts: Date.now() },
-        }).catch(() => {});
-      }
+      if (isRealtimeChannelDown()) reconnectSupabaseRealtime(true);
     } catch {}
-  }, 4000);
+  }, 15000);
 
   window.addEventListener('online', () => {
-    console.log('[Supabase Realtime] Network returned online -> Reconnecting channel');
-    reconnectSupabaseRealtime(true);
+    if (isRealtimeChannelDown() || !isSupabaseRealtimeConnected()) reconnectSupabaseRealtime(true);
   });
   window.addEventListener('pageshow', () => {
-    console.log('[Supabase Realtime] Mobile pageshow -> Reconnecting channel');
-    reconnectSupabaseRealtime(true);
+    if (isRealtimeChannelDown()) reconnectSupabaseRealtime(true);
   });
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        console.log('[Supabase Realtime] Mobile app visible -> Reconnecting channel');
+      if (document.visibilityState === 'visible' && isRealtimeChannelDown()) {
         reconnectSupabaseRealtime(true);
       }
     });

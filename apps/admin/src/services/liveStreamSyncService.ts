@@ -1,7 +1,7 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { Peer } from 'peerjs';
 import { LiveMeStreamer } from '../components/liveme/types';
-import { broadcastViaSupabase, onSupabaseBroadcast } from './supabaseClient';
+import { broadcastViaSupabase, onSupabaseBroadcast, getSupabaseClient } from './supabaseClient';
 
 export interface RemoteLiveStreamPayload {
   id: string;
@@ -91,6 +91,7 @@ class LiveStreamSyncService {
   private hostPeer: Peer | null = null;
   private activePeerCalls: Set<any> = new Set();
   private hostPeerConnections: Map<string, RTCPeerConnection> = new Map();
+  private hostSignalingUnsub: (() => void) | null = null;
   private hostMediaStream: MediaStream | null = null;
   private currentHostSession: RemoteLiveStreamPayload | null = null;
   private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
@@ -120,10 +121,14 @@ class LiveStreamSyncService {
         const action = payload.action || payload.type;
         if (action === 'ROOM_EVENT' && payload.streamId && payload.event) {
           this.dispatchRoomEvent(payload.streamId, payload.event);
-        } else if ((action === 'STREAM_ACTIVE' || action === 'LIVE_STARTED' || action === 'LIVE_HOST_STARTED') && (payload.stream || payload.host)) {
+        } else if ((action === 'STREAM_ACTIVE' || action === 'LIVE_STARTED' || action === 'LIVE_HOST_STARTED' || action === 'STREAM_HEARTBEAT' || action === 'LIVE_HEARTBEAT') && (payload.stream || payload.host)) {
           this.handleIncomingStream(payload.stream || payload.host);
         } else if (action === 'STREAM_ENDED' || action === 'LIVE_ENDED' || action === 'LIVE_HOST_ENDED') {
           this.handleStreamEnded(payload.streamId, payload.creatorHandle || payload.handle);
+        } else if (action === 'QUERY_ACTIVE_STREAMS') {
+          if (this.currentHostSession && this.currentHostSession.isLive !== false) {
+            this.announceStream(this.currentHostSession);
+          }
         }
       });
     } catch {}
@@ -168,6 +173,14 @@ class LiveStreamSyncService {
   public isStreamEnded(streamId?: string, _rawHandle?: string, startedAt?: number): boolean {
     const normId = (streamId || '').toLowerCase().trim();
     if (normId && this.endedStreams.has(normId)) {
+      // If this stream is currently active on this instance or hosting, it is NOT ended
+      if (this.currentHostSession && this.currentHostSession.id.toLowerCase().trim() === normId) {
+        return false;
+      }
+      const active = this.activeStreams.get(normId);
+      if (active && (!active.lastHeartbeat || Date.now() - active.lastHeartbeat <= 35000)) {
+        return false;
+      }
       const record = this.endedStreams.get(normId);
       if (record && startedAt && startedAt > record.endedAt) {
         return false;
@@ -197,7 +210,14 @@ class LiveStreamSyncService {
         if (!e.data) return;
         const action = e.data.action || e.data.type;
         const host = e.data.host || e.data.stream;
-        if ((action === 'LIVE_HOST_STARTED' || action === 'LIVE_STARTED' || action === 'STREAM_ACTIVE') && host) {
+        if (
+          (action === 'LIVE_HOST_STARTED' ||
+            action === 'LIVE_STARTED' ||
+            action === 'STREAM_ACTIVE' ||
+            action === 'LIVE_HEARTBEAT' ||
+            action === 'STREAM_HEARTBEAT') &&
+          host
+        ) {
           const normHandle = (host.creatorHandle || host.handle || '').toLowerCase().replace('@', '').trim();
           this.clearStreamEnded(host.id, normHandle);
           this.handleIncomingStream(host);
@@ -205,6 +225,10 @@ class LiveStreamSyncService {
           this.handleStreamEnded(e.data.streamId || '', e.data.handle || e.data.creatorHandle);
         } else if ((action === 'LIVE_ROOM_EVENT' || action === 'ROOM_EVENT') && e.data.streamId) {
           this.dispatchRoomEvent(e.data.streamId, e.data.event);
+        } else if (action === 'QUERY_ACTIVE_STREAMS') {
+          if (this.currentHostSession && this.currentHostSession.isLive !== false) {
+            this.announceStream(this.currentHostSession);
+          }
         }
       };
     } catch {}
@@ -266,21 +290,30 @@ class LiveStreamSyncService {
           const parsed = JSON.parse(savedHost);
           if (parsed && parsed.id) {
             const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
-            // If the host session was marked ended or heartbeat is older than 12s:
+            // If the host session was marked ended or heartbeat is older than 35s:
             if (
               this.isStreamEnded(parsed.id, normHandle, parsed.startedAt) ||
-              (parsed.lastHeartbeat && now - parsed.lastHeartbeat > 12000)
+              (parsed.lastHeartbeat && now - parsed.lastHeartbeat > 35000)
             ) {
-              localStorage.removeItem('privity_current_live_host');
-              localStorage.removeItem('privity_is_host_broadcasting');
-              localStorage.removeItem('privity_active_live_session');
+              if (this.currentHostSession && this.currentHostSession.id === parsed.id) {
+                localStorage.removeItem('privity_current_live_host');
+                localStorage.removeItem('privity_is_host_broadcasting');
+                localStorage.removeItem('privity_active_live_session');
+              }
             } else if (this.currentHostSession) {
               this.activeStreams.set(this.currentHostSession.id, this.currentHostSession);
+            } else {
+              // Populate activeStreams for viewer tabs so explore grid and discovery instantly see the host
+              this.activeStreams.set(parsed.id, {
+                ...parsed,
+                isLive: true,
+                isCameraStream: true,
+                isHost: false,
+              });
             }
           }
         } catch {
-          localStorage.removeItem('privity_current_live_host');
-          localStorage.removeItem('privity_is_host_broadcasting');
+          // ignore
         }
       }
 
@@ -290,7 +323,7 @@ class LiveStreamSyncService {
         list.forEach((s) => {
           const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
           if (this.isStreamEnded(s.id, normHandle, s.startedAt)) return;
-          if (now - (s.lastHeartbeat || s.startedAt) < 12000) {
+          if (now - (s.lastHeartbeat || s.startedAt) < 35000) {
             s.creatorHandle = normHandle;
             s.creatorName = s.creatorName || (s as any).name || 'Host';
             s.creatorAvatar = s.creatorAvatar || (s as any).avatar || '';
@@ -307,7 +340,7 @@ class LiveStreamSyncService {
       const list = Array.from(this.activeStreams.values()).filter((s) => {
         const normHandle = (s.creatorHandle || (s as any).handle || '').toLowerCase().replace('@', '').trim();
         if (this.isStreamEnded(s.id, normHandle, s.startedAt)) return false;
-        if (now - (s.lastHeartbeat || s.startedAt) > 12000) return false;
+        if (now - (s.lastHeartbeat || s.startedAt) > 35000) return false;
         return true;
       });
       localStorage.setItem('privity_remote_active_streams', JSON.stringify(list));
@@ -418,12 +451,87 @@ class LiveStreamSyncService {
     }
   }
 
+  // Egress control: Supabase Realtime delivers every broadcast to EVERY connected client.
+  private lastSupabaseQueryAt = 0;
+  private lastSupabaseAnnounceAt = 0;
+  private lastNetworkFrameAt: Record<string, number> = {};
+
+  /** Copy of a stream payload without embedded data-URL images (avatars/posters can be 100 KB+). */
+  private slimStreamForNetwork(stream: any): any {
+    if (!stream || typeof stream !== 'object') return stream;
+    const out: any = { ...stream };
+    for (const k of ['creatorAvatar', 'avatar', 'previewUrl', 'posterUrl', 'thumbnailUrl', 'coverUrl']) {
+      const v = out[k];
+      if (typeof v === 'string' && v.startsWith('data:') && v.length > 4096) out[k] = '';
+    }
+    return out;
+  }
+
   public queryNetworkStreams() {
     if (this.mqttClient && this.mqttClient.connected) {
       try {
         this.mqttClient.publish(TOPIC_QUERY, JSON.stringify({ type: 'QUERY_ACTIVE_STREAMS' }));
       } catch {}
     }
+    try {
+      this.broadcastBus?.postMessage({
+        type: 'QUERY_ACTIVE_STREAMS',
+        action: 'QUERY_ACTIVE_STREAMS',
+      });
+    } catch {}
+    // Supabase: only while something on this device is actually showing discovery, and at
+    // most every 20 s (every live host replies to each query, to every connected client).
+    const now = Date.now();
+    if (this.subscribers.size > 0 && now - this.lastSupabaseQueryAt >= 20000) {
+      this.lastSupabaseQueryAt = now;
+      try {
+        broadcastViaSupabase({
+          action: 'QUERY_ACTIVE_STREAMS',
+          type: 'QUERY_ACTIVE_STREAMS',
+        });
+      } catch {}
+      this.querySupabaseActiveSessions();
+    }
+  }
+
+  public async querySupabaseActiveSessions(): Promise<RemoteLiveStreamPayload[]> {
+    const sb = getSupabaseClient();
+    if (!sb) return [];
+    try {
+      const { data, error } = await sb.rpc('live_list_active');
+      if (!error && Array.isArray(data)) {
+        const list: RemoteLiveStreamPayload[] = [];
+        data.forEach((item: any) => {
+          if (!item) return;
+          const host = item.host || {};
+          const handle = (host.handle || '').toLowerCase().replace('@', '').trim();
+          if (!handle) return;
+          const streamPayload: RemoteLiveStreamPayload = {
+            id: item.live_id || `live-${handle}`,
+            creatorHandle: host.handle || handle,
+            creatorName: host.display_name || handle,
+            creatorAvatar: host.avatar_url || '',
+            isVerified: true,
+            category: 'Featured',
+            title: item.title || 'Live Broadcast',
+            description: 'Sovereign Live Broadcast',
+            viewersCount: item.viewer_count || 1,
+            likesCount: 0,
+            previewUrl: host.avatar_url || '',
+            posterUrl: host.avatar_url || '',
+            tags: ['LiveNow', 'Privity'],
+            peerId: `privity-live-${handle}`,
+            startedAt: item.started_at ? Date.parse(item.started_at) : Date.now(),
+            isLive: true,
+            lastHeartbeat: Date.now(),
+          };
+          this.handleIncomingStream(streamPayload);
+          list.push(streamPayload);
+        });
+        return list;
+      }
+    } catch {}
+    return [];
   }
 
   private handleIncomingStream(stream: any) {
@@ -447,9 +555,9 @@ class LiveStreamSyncService {
     }
 
     // 3. Strict timestamp staleness check:
-    // If the message has a timestamp older than 8 seconds, it is stale / delayed / retained!
+    // If the message has a timestamp older than 35 seconds, it is stale / delayed / retained!
     const msgTimestamp = stream.lastHeartbeat || stream.startedAt;
-    if (msgTimestamp && (now - msgTimestamp > 8000)) {
+    if (msgTimestamp && (now - msgTimestamp > 35000)) {
       return;
     }
 
@@ -523,10 +631,9 @@ class LiveStreamSyncService {
           changed = true;
           continue;
         }
-        // Remote streams without a heartbeat for 8 seconds are considered ended
+        // Remote streams without a heartbeat for 35 seconds are purged from memory
         const lastHb = stream.lastHeartbeat || stream.startedAt || now;
-        if (now - lastHb > 8000) {
-          this.markStreamEnded(id, normHandle);
+        if (now - lastHb > 35000) {
           this.activeStreams.delete(id);
           changed = true;
         }
@@ -541,9 +648,12 @@ class LiveStreamSyncService {
   private startQueryLoop() {
     if (this.queryInterval) clearInterval(this.queryInterval);
     this.queryInterval = setInterval(() => {
-      // Periodically query to refresh active streams across all devices
+      // Only poll while a discovery/explore screen on this device is subscribed. Hosts announce
+      // start/end themselves, so idle devices don't need to keep asking.
+      if (this.subscribers.size === 0) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       this.queryNetworkStreams();
-    }, 2000);
+    }, 10000);
   }
 
   private notifySubscribers() {
@@ -575,7 +685,7 @@ class LiveStreamSyncService {
       if (this.isStreamEnded(s.id, normHandle, s.startedAt)) {
         continue;
       }
-      if (now - (s.lastHeartbeat || s.startedAt) > 12000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
+      if (now - (s.lastHeartbeat || s.startedAt) > 35000 && (!this.currentHostSession || this.currentHostSession.id !== s.id)) {
         continue;
       }
 
@@ -614,6 +724,7 @@ class LiveStreamSyncService {
         isHost: isHost,
         isCameraStream: true,
         peerId: s.peerId,
+        startedAt: s.startedAt,
         topContributors: [],
       });
     }
@@ -638,19 +749,6 @@ class LiveStreamSyncService {
       if (!streamId) return true;
       return this.currentHostSession.id === streamId;
     }
-    try {
-      const isBroadcasting = localStorage.getItem('privity_is_host_broadcasting') === 'true';
-      if (!isBroadcasting) return false;
-      const savedHost = localStorage.getItem('privity_current_live_host');
-      if (savedHost) {
-        const parsed = JSON.parse(savedHost);
-        const normHandle = (parsed.creatorHandle || parsed.handle || '').toLowerCase().replace('@', '').trim();
-        if (this.isStreamEnded(parsed.id, normHandle, parsed.startedAt)) return false;
-        if (parsed.lastHeartbeat && Date.now() - parsed.lastHeartbeat > 4500) return false;
-        if (!streamId) return true;
-        return parsed.id === streamId;
-      }
-    } catch {}
     return false;
   }
 
@@ -659,6 +757,22 @@ class LiveStreamSyncService {
       const normHandle = (this.currentHostSession.creatorHandle || '').toLowerCase().replace('@', '').trim();
       if (!this.isStreamEnded(this.currentHostSession.id, normHandle, this.currentHostSession.startedAt)) {
         return this.currentHostSession;
+      }
+    }
+    return null;
+  }
+
+  public getActiveStreamPayload(streamIdOrHandle: string): RemoteLiveStreamPayload | null {
+    if (!streamIdOrHandle) return null;
+    const clean = streamIdOrHandle.toLowerCase().replace('@', '').trim();
+    if (this.currentHostSession && (this.currentHostSession.id === streamIdOrHandle || this.currentHostSession.creatorHandle.toLowerCase().replace('@', '').trim() === clean)) {
+      return this.currentHostSession;
+    }
+    const byId = this.activeStreams.get(streamIdOrHandle);
+    if (byId) return byId;
+    for (const s of this.activeStreams.values()) {
+      if (s.id === streamIdOrHandle || s.creatorHandle.toLowerCase().replace('@', '').trim() === clean) {
+        return s;
       }
     }
     return null;
@@ -673,7 +787,9 @@ class LiveStreamSyncService {
           stream.getTracks().forEach((track) => {
             const sender = senders.find((s) => s.track?.kind === track.kind);
             if (sender) {
-              sender.replaceTrack(track).catch(() => {});
+              if (sender.track?.id !== track.id) {
+                sender.replaceTrack(track).catch(() => {});
+              }
             } else {
               pc.addTrack(track, stream);
             }
@@ -691,7 +807,9 @@ class LiveStreamSyncService {
             stream.getTracks().forEach((track) => {
               const sender = senders.find((s) => s.track?.kind === track.kind);
               if (sender) {
-                sender.replaceTrack(track).catch(() => {});
+                if (sender.track?.id !== track.id) {
+                  sender.replaceTrack(track).catch(() => {});
+                }
               } else {
                 pc.addTrack(track, stream);
               }
@@ -841,29 +959,68 @@ class LiveStreamSyncService {
         call.on('close', () => this.activePeerCalls.delete(call));
         call.on('error', () => this.activePeerCalls.delete(call));
 
-        if (this.hostMediaStream && this.hostMediaStream.getVideoTracks().some((t) => t.readyState === 'live')) {
-          call.answer(this.hostMediaStream);
-        } else {
-          const canvas = document.createElement('canvas');
-          canvas.width = 320;
-          canvas.height = 240;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = '#111827';
-            ctx.fillRect(0, 0, 320, 240);
+        let retries = 15;
+        const tryAnswer = () => {
+          if (this.hostMediaStream && this.hostMediaStream.getVideoTracks().some((t) => t.readyState === 'live')) {
+            call.answer(this.hostMediaStream);
+          } else if (retries > 0) {
+            retries--;
+            setTimeout(tryAnswer, 100);
+          } else {
+            // Camera not live: answer with the real tracks that exist (possibly audio only).
+            // Never substitute a synthetic canvas for the host's camera.
+            call.answer(this.hostMediaStream ?? undefined);
           }
-          const fallbackStream = canvas.captureStream(5);
-          call.answer(fallbackStream);
-        }
+        };
+        tryAnswer();
       });
     } catch (err) {
       console.warn('Privity host peer init notice:', err);
     }
   }
 
+  /**
+   * Adaptive uplink: a P2P host sends one encode per viewer, so split a fixed upload budget
+   * across viewers (bounded per viewer) instead of giving each viewer 4 Mbps.
+   */
+  private rebalanceHostBitrates() {
+    const viewers = Array.from(this.hostPeerConnections.entries()).filter(([k]) => !k.startsWith('guest-'));
+    const n = Math.max(1, viewers.length);
+    const TOTAL_BUDGET = 6_000_000;
+    const perViewer = Math.max(250_000, Math.min(2_500_000, Math.floor(TOTAL_BUDGET / n)));
+    for (const [, pc] of viewers) {
+      try {
+        pc.getSenders().forEach((sender) => {
+          if (sender.track?.kind !== 'video') return;
+          const params = sender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+          if (params.encodings[0].maxBitrate === perViewer) return;
+          params.encodings[0].maxBitrate = perViewer;
+          params.encodings[0].networkPriority = 'high';
+          sender.setParameters(params).catch(() => {});
+        });
+      } catch {}
+    }
+  }
+
+  private dropHostPeer(key: string) {
+    const pc = this.hostPeerConnections.get(key);
+    if (!pc) return;
+    try { pc.close(); } catch {}
+    this.hostPeerConnections.delete(key);
+    this.pendingIceCandidates.delete(key);
+    this.rebalanceHostBitrates();
+  }
+
   private setupHostWebRTCSignaling(roomId: string) {
-    this.subscribeToRoomEvents(roomId, async (evt) => {
+    this.hostSignalingUnsub?.();
+    this.hostSignalingUnsub = this.subscribeToRoomEvents(roomId, async (evt) => {
       if (!this.currentHostSession || !evt) return;
+
+      if (evt.type === 'RTC_VIEWER_LEAVE' && evt.viewerId) {
+        this.dropHostPeer(evt.viewerId);
+        return;
+      }
 
       // 1. Viewer WebRTC Offer handling
       if (evt.type === 'RTC_OFFER' && evt.offer && evt.viewerId) {
@@ -881,18 +1038,17 @@ class LiveStreamSyncService {
             this.hostMediaStream.getTracks().forEach((track) => {
               if (this.hostMediaStream) pc!.addTrack(track, this.hostMediaStream);
             });
-            try {
-              pc.getSenders().forEach((sender) => {
-                if (sender.track?.kind === 'video') {
-                  const params = sender.getParameters();
-                  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
-                  params.encodings[0].maxBitrate = 4000000;
-                  params.encodings[0].networkPriority = 'high';
-                  sender.setParameters(params).catch(() => {});
-                }
-              });
-            } catch {}
           }
+          const viewerKey = evt.viewerId as string;
+          const thisPc = pc;
+          pc.onconnectionstatechange = () => {
+            if (this.hostPeerConnections.get(viewerKey) !== thisPc) return;
+            if (thisPc.connectionState === 'failed' || thisPc.connectionState === 'closed') {
+              this.dropHostPeer(viewerKey);
+            } else if (thisPc.connectionState === 'connected') {
+              this.rebalanceHostBitrates();
+            }
+          };
 
           pc.onicecandidate = (event) => {
             if (event.candidate) {
@@ -969,7 +1125,7 @@ class LiveStreamSyncService {
           }
 
           // Receive guest tracks so host receives guest audio and video
-          const incomingGuestStream = new MediaStream();
+          const incomingGuestStream: MediaStream = typeof MediaStream !== 'undefined' ? new MediaStream() : ({} as any);
           pc.ontrack = (event) => {
             if (event.track) {
               if (!incomingGuestStream.getTracks().some((t) => t.id === event.track.id)) {
@@ -1042,20 +1198,53 @@ class LiveStreamSyncService {
   }
 
   private announceStream(stream: RemoteLiveStreamPayload, type: 'STREAM_ACTIVE' | 'STREAM_HEARTBEAT' = 'STREAM_ACTIVE') {
+    const now = Date.now();
+    stream.lastHeartbeat = now;
+    stream.isLive = true;
+
+    // Keep activeStreams synchronized on this instance
+    this.activeStreams.set(stream.id, stream);
+
+    // Keep local host storage updated with latest heartbeat timestamp
+    if (this.currentHostSession && this.currentHostSession.id === stream.id) {
+      this.currentHostSession.lastHeartbeat = now;
+      this.currentHostSession.isLive = true;
+      try {
+        localStorage.setItem('privity_current_live_host', JSON.stringify(this.currentHostSession));
+        localStorage.setItem('privity_is_host_broadcasting', 'true');
+      } catch {}
+    }
+
+    // Always emit over BroadcastChannel so all browser tabs stay in continuous real-time sync
+    if (this.broadcastBus) {
+      try {
+        this.broadcastBus.postMessage({
+          type: type === 'STREAM_ACTIVE' ? 'LIVE_HOST_STARTED' : 'LIVE_HEARTBEAT',
+          action: type === 'STREAM_ACTIVE' ? 'LIVE_STARTED' : 'LIVE_HEARTBEAT',
+          host: stream,
+          stream,
+        });
+      } catch {}
+    }
+
     if (this.mqttClient && this.mqttClient.connected) {
       try {
-        const payload = JSON.stringify({ type, stream });
+        const payload = JSON.stringify({ type, stream: this.slimStreamForNetwork(stream) });
         this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, payload, { qos: 0, retain: false });
         const streamTopic = `${TOPIC_STREAM_PREFIX}${stream.id}`;
         this.mqttClient.publish(streamTopic, payload, { qos: 0, retain: false });
       } catch {}
     }
 
-    if (type === 'STREAM_ACTIVE') {
+    // Supabase: start/announce at most every 3 s (query replies are bursty), heartbeat every 10 s.
+    // Discovery prunes after 35 s without a heartbeat, so 10 s keeps sessions visible.
+    const minGap = type === 'STREAM_ACTIVE' ? 3000 : 10000;
+    if (now - this.lastSupabaseAnnounceAt >= minGap) {
+      this.lastSupabaseAnnounceAt = now;
       try {
         broadcastViaSupabase({
-          action: 'STREAM_ACTIVE',
-          stream,
+          action: type === 'STREAM_ACTIVE' ? 'STREAM_ACTIVE' : 'STREAM_HEARTBEAT',
+          stream: this.slimStreamForNetwork(stream),
         });
       } catch {}
     }
@@ -1066,6 +1255,8 @@ class LiveStreamSyncService {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+    this.hostSignalingUnsub?.();
+    this.hostSignalingUnsub = null;
 
     this.hostPeerConnections.forEach((pc) => {
       try { pc.close(); } catch {}
@@ -1197,7 +1388,7 @@ class LiveStreamSyncService {
     const targetPeerId = `privity-live-${roomId}`;
     const viewerId = `privity-v-${Math.random().toString(36).substring(2, 9)}`;
 
-    const incomingMediaStream = new MediaStream();
+    const incomingMediaStream: MediaStream = typeof MediaStream !== 'undefined' ? new MediaStream() : ({} as any);
 
     const handleStreamSuccess = (remoteStream: MediaStream) => {
       if (isCleanedUp) return;
@@ -1206,49 +1397,105 @@ class LiveStreamSyncService {
       onStream(remoteStream);
     };
 
-    // 1. Direct WebRTC Signaling over MQTT Room
-    try {
-      const pc = new RTCPeerConnection({
-        iceServers: DEFAULT_ICE_SERVERS,
-      });
+    // 1. Direct WebRTC Signaling over MQTT Room — with bounded, backed-off recovery.
+    let unsubscribeRoom: (() => void) | null = null;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 8;
+    let currentPc: RTCPeerConnection | null = null;
+    let peerJsConnected = false;
+
+    const clearWatchdog = () => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = null;
+    };
+
+    const scheduleRetry = (delayMs: number) => {
+      clearWatchdog();
+      if (isCleanedUp) return;
+      watchdog = setTimeout(() => {
+        if (isCleanedUp) return;
+        // The PeerJS path is already delivering the host's media: no need to renegotiate.
+        if (peerJsConnected) return;
+        if (attempt >= MAX_ATTEMPTS) {
+          if (onStatusChange) onStatusChange('failed');
+          return;
+        }
+        startAttempt();
+      }, delayMs);
+    };
+
+    const startAttempt = () => {
+      if (isCleanedUp || typeof RTCPeerConnection === 'undefined') return;
+      attempt++;
+      try {
+        if (currentPc) currentPc.close();
+      } catch {}
+      pendingHostCandidates.length = 0;
+      if (attempt > 1 && onStatusChange) onStatusChange('connecting');
+
+      const pc = new RTCPeerConnection({ iceServers: DEFAULT_ICE_SERVERS });
+      currentPc = pc;
       rtcPeerConnection = pc;
+      const attemptStream: MediaStream = attempt === 1 ? incomingMediaStream : new MediaStream();
 
       pc.addTransceiver('video', { direction: 'recvonly' });
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
       pc.ontrack = (event) => {
-        if (event.track) {
-          if (!incomingMediaStream.getTracks().some((t) => t.id === event.track.id)) {
-            incomingMediaStream.addTrack(event.track);
-          }
+        if (pc !== currentPc) return;
+        if (event.track && !attemptStream.getTracks().some((t) => t.id === event.track.id)) {
+          attemptStream.addTrack(event.track);
         }
-        if (event.streams && event.streams[0]) {
-          event.streams[0].getTracks().forEach((t) => {
-            if (!incomingMediaStream.getTracks().some((it) => it.id === t.id)) {
-              incomingMediaStream.addTrack(t);
-            }
-          });
-        }
-        handleStreamSuccess(incomingMediaStream);
+        event.streams?.[0]?.getTracks().forEach((t) => {
+          if (!attemptStream.getTracks().some((it) => it.id === t.id)) attemptStream.addTrack(t);
+        });
+        clearWatchdog();
+        attempt = 1; // healthy again: reset the backoff budget
+        handleStreamSuccess(attemptStream);
       };
 
       pc.onicecandidate = (event) => {
-        if (event.candidate && !isCleanedUp) {
-          this.sendRoomEvent(roomId, {
-            type: 'RTC_VIEWER_CANDIDATE',
-            viewerId,
-            candidate: event.candidate,
-          });
+        if (event.candidate && !isCleanedUp && pc === currentPc) {
+          this.sendRoomEvent(roomId, { type: 'RTC_VIEWER_CANDIDATE', viewerId, candidate: event.candidate });
         }
       };
 
-      this.subscribeToRoomEvents(roomId, async (evt) => {
-        if (isCleanedUp || !evt) return;
+      pc.onconnectionstatechange = () => {
+        if (pc !== currentPc || isCleanedUp) return;
+        const s = pc.connectionState;
+        if (s === 'failed') {
+          scheduleRetry(Math.min(15000, 1000 * 2 ** attempt));
+        } else if (s === 'disconnected') {
+          if (onStatusChange) onStatusChange('connecting');
+          // Give ICE a few seconds to self-heal before renegotiating from scratch.
+          scheduleRetry(5000);
+        } else if (s === 'connected') {
+          clearWatchdog();
+          if (hasStreamConnected && onStatusChange) onStatusChange('connected');
+        }
+      };
+
+      pc.createOffer()
+        .then(async (offer) => {
+          if (isCleanedUp || pc !== currentPc) return;
+          await pc.setLocalDescription(offer);
+          this.sendRoomEvent(roomId, { type: 'RTC_OFFER', viewerId, offer });
+        })
+        .catch(() => {});
+
+      // No media within the window (offer lost, host not yet listening, NAT failure) → retry.
+      scheduleRetry(Math.min(20000, 6000 + 2000 * attempt));
+    };
+
+    try {
+      unsubscribeRoom = this.subscribeToRoomEvents(roomId, async (evt) => {
+        const pc = currentPc;
+        if (isCleanedUp || !evt || !pc) return;
         if (evt.type === 'RTC_ANSWER' && evt.viewerId === viewerId && evt.answer) {
           try {
-            if (pc.signalingState !== 'stable') {
+            if (pc.signalingState === 'have-local-offer') {
               await pc.setRemoteDescription(new RTCSessionDescription(evt.answer));
-              // Flush any queued candidates that arrived before remote description was set
               for (const cand of pendingHostCandidates) {
                 await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
               }
@@ -1263,18 +1510,11 @@ class LiveStreamSyncService {
               pendingHostCandidates.push(evt.candidate);
             }
           } catch {}
+        } else if (evt.type === 'STREAM_ENDED' || evt.type === 'LIVE_ENDED') {
+          clearWatchdog();
         }
       });
-
-      pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true }).then(async (offer) => {
-        if (isCleanedUp) return;
-        await pc.setLocalDescription(offer);
-        this.sendRoomEvent(roomId, {
-          type: 'RTC_OFFER',
-          viewerId,
-          offer,
-        });
-      }).catch(() => {});
+      startAttempt();
     } catch {}
 
     // 2. PeerJS in parallel as secondary P2P transport
@@ -1298,7 +1538,13 @@ class LiveStreamSyncService {
           callInstance = call;
 
           call.on('stream', (remoteStream: MediaStream) => {
+            peerJsConnected = true;
+            clearWatchdog();
             handleStreamSuccess(remoteStream);
+          });
+          call.on('close', () => {
+            peerJsConnected = false;
+            if (!isCleanedUp && currentPc?.connectionState !== 'connected') scheduleRetry(1000);
           });
         } catch {}
       });
@@ -1306,6 +1552,13 @@ class LiveStreamSyncService {
 
     return () => {
       isCleanedUp = true;
+      clearWatchdog();
+      try {
+        unsubscribeRoom?.();
+      } catch {}
+      try {
+        this.sendRoomEvent(roomId, { type: 'RTC_VIEWER_LEAVE', viewerId });
+      } catch {}
       try {
         if (rtcPeerConnection) rtcPeerConnection.close();
       } catch {}
@@ -1351,7 +1604,7 @@ class LiveStreamSyncService {
     let isCleanedUp = false;
     let pc: RTCPeerConnection | null = null;
     const pendingHostCandidates: RTCIceCandidateInit[] = [];
-    const incomingHostStream = new MediaStream();
+    const incomingHostStream: MediaStream = typeof MediaStream !== 'undefined' ? new MediaStream() : ({} as any);
 
     try {
       pc = new RTCPeerConnection({
@@ -1468,7 +1721,21 @@ class LiveStreamSyncService {
   public sendRoomEvent(streamIdOrHandle: string, event: any) {
     const roomId = getRoomIdFromHandle(streamIdOrHandle);
     const topic = `${TOPIC_ROOM_PREFIX}${roomId}`;
-    if (this.mqttClient && this.mqttClient.connected) {
+
+    // Camera preview frames (LIVE_FRAME / GUEST_LIVE_FRAME) are a fallback preview only — real
+    // video reaches viewers over WebRTC. They stay on the same-device BroadcastChannel at full
+    // rate, go to MQTT at most every 3 s per room+type, and NEVER go through Supabase (guest
+    // frames were sent every 300 ms to every connected user).
+    const isFrame = !!event && typeof event.frame === 'string';
+    let sendToNetwork = true;
+    if (isFrame) {
+      const key = `${roomId}:${event.type || 'frame'}`;
+      const now = Date.now();
+      sendToNetwork = now - (this.lastNetworkFrameAt[key] || 0) >= 3000;
+      if (sendToNetwork) this.lastNetworkFrameAt[key] = now;
+    }
+
+    if (sendToNetwork && this.mqttClient && this.mqttClient.connected) {
       try {
         this.mqttClient.publish(topic, JSON.stringify(event));
       } catch {}
@@ -1482,13 +1749,15 @@ class LiveStreamSyncService {
       });
     } catch {}
 
-    try {
-      broadcastViaSupabase({
-        action: 'ROOM_EVENT',
-        streamId: roomId,
-        event,
-      });
-    } catch {}
+    if (!isFrame) {
+      try {
+        broadcastViaSupabase({
+          action: 'ROOM_EVENT',
+          streamId: roomId,
+          event,
+        });
+      } catch {}
+    }
 
     this.dispatchRoomEvent(roomId, event);
   }

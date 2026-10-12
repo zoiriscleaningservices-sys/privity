@@ -16,13 +16,14 @@ import { BUILTIN_FORMATS, compileTimeline, segmentAt } from '../battle/timeline'
 import { simCatalog } from '../dev/simCatalog';
 import { globalGiftQueue, DEFAULT_GIFTS } from '../../gifts';
 import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSyncService';
-import { broadcastViaSupabase, onSupabaseBroadcast } from '../../services/supabaseClient';
+import { onSupabaseBroadcast } from '../../services/supabaseClient';
 
 export interface ProductionLiveSessionOptions {
   streamerId: string;
   streamerHandle: string;
   streamerName: string;
   streamerAvatar: string;
+  startedAt?: number | string;
   me: UserRef;
   isHost: boolean;
   onCoinsChange?: (delta: number) => void;
@@ -62,7 +63,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   const now = () => Date.now();
   const iso = () => new Date(now()).toISOString();
 
-  // Host info
+  // Authoritative startedAt derivation and persistence across rerenders/reconnects
   const cleanHostHandle = (streamerHandle || streamerId || '').replace(/^@/, '').toLowerCase().trim();
   const hostUserRef: UserRef = {
     id: cleanHostHandle || streamerId,
@@ -71,7 +72,56 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     avatar_url: streamerAvatar || null,
   };
 
+  const storageStartedKey = `privity_live_started_${liveId}`;
+  const handleStartedKey = cleanHostHandle ? `privity_live_started_${cleanHostHandle}` : null;
+  let sessionStartedAt = 0;
+  if (opts.startedAt) {
+    sessionStartedAt = typeof opts.startedAt === 'number'
+      ? opts.startedAt
+      : new Date(opts.startedAt).getTime();
+  }
+  if (!sessionStartedAt || isNaN(sessionStartedAt)) {
+    const remote = liveStreamSync.getActiveStreamPayload(liveId) || (cleanHostHandle ? liveStreamSync.getActiveStreamPayload(cleanHostHandle) : null);
+    if (remote && remote.startedAt) {
+      sessionStartedAt = remote.startedAt;
+    }
+  }
+  if (!sessionStartedAt || isNaN(sessionStartedAt)) {
+    try {
+      const saved = localStorage.getItem(storageStartedKey) || (handleStartedKey ? localStorage.getItem(handleStartedKey) : null);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed > 0 && parsed <= Date.now()) {
+          sessionStartedAt = parsed;
+        }
+      }
+    } catch {}
+  }
+  if (!sessionStartedAt || isNaN(sessionStartedAt)) {
+    try {
+      const hostMetaRaw = localStorage.getItem('privity_current_live_host');
+      if (hostMetaRaw) {
+        const hostMeta = JSON.parse(hostMetaRaw);
+        if (hostMeta && hostMeta.startedAt) {
+          const parsed = typeof hostMeta.startedAt === 'number' ? hostMeta.startedAt : new Date(hostMeta.startedAt).getTime();
+          if (!isNaN(parsed) && parsed > 0 && parsed <= Date.now()) {
+            sessionStartedAt = parsed;
+          }
+        }
+      }
+    } catch {}
+  }
+  if (!sessionStartedAt || isNaN(sessionStartedAt)) {
+    sessionStartedAt = Date.now();
+  }
+  try {
+    localStorage.setItem(storageStartedKey, String(sessionStartedAt));
+    if (handleStartedKey) localStorage.setItem(handleStartedKey, String(sessionStartedAt));
+  } catch {}
+
   // State caches
+  const processedTxIds = new Set<string>();
+  const processedBattleTxs = new Set<string>();
   const idempotency = new Set<string>();
   const guestRequests = new Map<string, { user: UserRef; requestedAt: number }>();
   const activeGuests: LiveGuest[] = [];
@@ -81,8 +131,36 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
   let lastSegIdx: number | null = null;
   let warnedSegs = new Set<number>();
   let commentsEnabled = true;
+  // Moderation state. Only events signed by this LIVE's host are honoured (see MODERATION_ACTION).
+  const mutedUntil = new Map<string, number>();
+  const removedUsers = new Set<string>();
+  const blockedKey = `privity_live_blocked_${me.id}`;
+  const blockedUsers = new Set<string>(
+    (() => {
+      try {
+        const arr = JSON.parse(localStorage.getItem(blockedKey) || '[]');
+        return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+      } catch {
+        return [];
+      }
+    })(),
+  );
+  const isMuted = (uid: string | undefined | null) => !!uid && (mutedUntil.get(uid) ?? 0) > Date.now();
   let activeHandlers: LiveFeedHandlers | null = null;
   let disposed = false;
+  let isEnded = false;
+
+  // Real-time audience presence tracking
+  const presenceMap = new Map<string, { lastSeen: number; handle: string; isHost: boolean }>();
+  let lastViewerCount = -1;
+  let peakViewerCount = 0;
+  let presenceHeartbeatTimer: any = null;
+
+  presenceMap.set(me.id, {
+    lastSeen: Date.now(),
+    handle: me.handle,
+    isHost,
+  });
 
   // Broadcast channel for multi-tab synchronization
   let bus: BroadcastChannel | null = null;
@@ -100,20 +178,153 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     activeHandlers.onPersonal(notice);
   }
 
+  function broadcastPresenceHeartbeat() {
+    if (disposed) return;
+    const msg = {
+      type: 'PRESENCE_HEARTBEAT',
+      liveId,
+      userId: me.id,
+      handle: me.handle,
+      isHost,
+      ...(isHost ? { commentsEnabled } : {}),
+      timestamp: Date.now(),
+    };
+    liveStreamSync.sendRoomEvent(roomId, msg);
+    try {
+      bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event: msg });
+    } catch {}
+    // (No direct Supabase send: sendRoomEvent already delivers it network-wide.)
+  }
+
+  function prunePresenceAndEmitCount() {
+    if (disposed) return;
+    const nowMs = Date.now();
+    // My own presence is known locally; never depend on the broker echoing it back.
+    presenceMap.set(me.id, { lastSeen: nowMs, handle: me.handle, isHost });
+    for (const [uid, entry] of presenceMap.entries()) {
+      if (nowMs - entry.lastSeen > 20000) {
+        presenceMap.delete(uid);
+      }
+    }
+    // One counting rule for host and viewers: unique non-host user ids currently present.
+    let nonHostViewers = 0;
+    for (const [uid, entry] of presenceMap.entries()) {
+      if (!entry.isHost && uid !== hostUserRef.id) {
+        nonHostViewers++;
+      }
+    }
+    const currentCount = nonHostViewers;
+    peakViewerCount = Math.max(peakViewerCount, currentCount);
+
+    if (currentCount !== lastViewerCount) {
+      lastViewerCount = currentCount;
+      if (isHost) {
+        liveStreamSync.updateHostStats({ viewersCount: currentCount });
+      }
+      dispatchEvent({
+        event_id: `evt-vc-${Date.now()}`,
+        live_id: liveId,
+        battle_id: null,
+        event_type: 'VIEWER_COUNT',
+        actor_id: null,
+        server_ts: iso(),
+        seq: ++seqCounter,
+        schema_version: 1,
+        payload: {
+          count: currentCount,
+          peak: peakViewerCount,
+        },
+      });
+    }
+  }
+
   function broadcastRoomEvent(event: any) {
     liveStreamSync.sendRoomEvent(roomId, { ...event, server_ts: iso() });
     try {
       bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event });
     } catch {}
-    try {
-      broadcastViaSupabase({ action: 'ROOM_EVENT', streamId: liveId, event });
-    } catch {}
+    // (No direct Supabase send: sendRoomEvent already delivers it network-wide.)
+  }
+
+  function applyCommentsEnabled(enabled: boolean) {
+    if (commentsEnabled === enabled) return;
+    commentsEnabled = enabled;
+    const base = { live_id: liveId, battle_id: null, actor_id: hostUserRef.id, server_ts: iso(), seq: ++seqCounter, schema_version: 1 };
+    if (enabled) {
+      dispatchEvent({
+        ...base,
+        event_id: `evt-ce-${Date.now()}`,
+        event_type: 'SYSTEM_NOTICE',
+        payload: { code: 'comments_enabled', message: 'Comments are on.', severity: 'info' },
+      } as AnyLiveEvent);
+    } else {
+      dispatchEvent({
+        ...base,
+        event_id: `evt-cd-${Date.now()}`,
+        event_type: 'MODERATION_NOTICE',
+        payload: { action: 'room_muted', target: null, message: 'The host turned comments off.' },
+      } as AnyLiveEvent);
+    }
   }
 
   // Handle incoming network events
   const handleIncomingNetworkEvent = (raw: any) => {
     if (!raw || disposed) return;
+    const actorId: string | undefined = raw.author?.id || raw.user?.id || raw.userId;
+    if (actorId && actorId !== hostUserRef.id && (removedUsers.has(actorId) || blockedUsers.has(actorId))) {
+      if (raw.type === 'COMMENT_CREATED' || raw.type === 'GUEST_REQUESTED' || raw.type === 'PRESENCE_HEARTBEAT') return;
+    }
+    if (raw.type === 'MODERATION_ACTION' && raw.targetUserId) {
+      if (raw.actorId !== hostUserRef.id) return; // only the host of this LIVE may moderate it
+      const target: string = raw.targetUserId;
+      const ts = iso();
+      if (raw.action === 'mute' && typeof raw.until === 'number') {
+        mutedUntil.set(target, raw.until);
+        if (target === me.id) dispatchPersonal({ type: 'MUTED', live_id: liveId, muted_until: new Date(raw.until).toISOString(), server_ts: ts });
+      } else if (raw.action === 'unmute') {
+        mutedUntil.delete(target);
+        if (target === me.id) dispatchPersonal({ type: 'UNMUTED', live_id: liveId, server_ts: ts });
+      } else if (raw.action === 'remove') {
+        removedUsers.add(target);
+        presenceMap.delete(target);
+        prunePresenceAndEmitCount();
+        if (target === me.id) dispatchPersonal({ type: 'REMOVED_FROM_LIVE', live_id: liveId, server_ts: ts });
+      }
+      return;
+    }
     if (raw.type === 'GIFT_RECEIVED' && raw.gift) {
+      // Never invent values: a gift without a sender, id, or numeric value is dropped.
+      if (!raw.sender?.id || !raw.gift.id || typeof raw.coin_value !== 'number' || raw.coin_value <= 0) return;
+      const txId = raw.tx_id || raw.payload?.tx_id;
+      if (!txId) return;
+      if (processedTxIds.has(txId)) return;
+      processedTxIds.add(txId);
+
+      // Enqueue visual gift animation on screen for all remote participants
+      if (raw.sender?.id !== me.id) {
+        const animGift = DEFAULT_GIFTS.find((g) => g.id === raw.gift.id);
+        if (animGift) {
+          globalGiftQueue.enqueue(
+            {
+              id: raw.event_id || `gift-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              livestreamId: liveId,
+              senderId: raw.sender?.id || 'supporter',
+              senderName: raw.sender?.display_name || raw.sender?.handle || 'Supporter',
+              senderAvatar: raw.sender?.avatar_url || '',
+              recipientId: streamerId,
+              recipientName: streamerName,
+              giftId: animGift.id,
+              giftName: animGift.name,
+              giftIcon: animGift.icon,
+              quantity: raw.quantity || 1,
+              coinValue: raw.coin_value || 10,
+              createdAt: iso(),
+            },
+            animGift
+          );
+        }
+      }
+
       const e: AnyLiveEvent = {
         event_id: raw.event_id || `evt-gift-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         live_id: liveId,
@@ -124,25 +335,31 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
         seq: ++seqCounter,
         schema_version: 1,
         payload: {
-          tx_id: raw.tx_id || `tx-${Date.now()}`,
-          sender: raw.sender || { id: 'supporter', handle: 'supporter', display_name: 'Supporter', avatar_url: null },
+          tx_id: txId,
+          sender: raw.sender,
           recipient_id: hostUserRef.id,
           gift: raw.gift,
           quantity: raw.quantity || 1,
-          coin_value: raw.coin_value || 10,
+          coin_value: raw.coin_value,
           battle_id: battleState?.battle_id || null,
           battle_side: raw.battle_side || 'a',
-          battle_points: raw.battle_points || raw.coin_value || 10,
+          battle_points: raw.battle_points || raw.coin_value,
           multiplier: raw.multiplier || 1,
-          sender_live_total: raw.sender_live_total || 100,
+          sender_live_total: typeof raw.sender_live_total === 'number' ? raw.sender_live_total : raw.coin_value,
           battle_outcome: battleState ? 'counted' : 'no_battle',
         },
       };
       dispatchEvent(e);
       if (battleState) {
-        applyBattlePoints(raw.battle_side === 'b' ? 'b' : 'a', raw.battle_points || raw.coin_value || 10);
+        applyBattlePoints(raw.battle_side === 'b' ? 'b' : 'a', raw.battle_points || raw.coin_value, txId, true);
       }
+    } else if (raw.type === 'COMMENTS_TOGGLED' && typeof raw.enabled === 'boolean') {
+      // Only the host of this LIVE may change the comment setting.
+      if (raw.actorId !== hostUserRef.id) return;
+      applyCommentsEnabled(raw.enabled);
     } else if (raw.type === 'COMMENT_CREATED' && raw.text) {
+      if (!commentsEnabled && raw.author?.id !== hostUserRef.id) return;
+      if (isMuted(raw.author?.id)) return;
       const e: AnyLiveEvent = {
         event_id: raw.event_id || `evt-comm-${Date.now()}`,
         live_id: liveId,
@@ -238,12 +455,73 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
           server_ts: iso(),
         });
       }
+    } else if (raw.type === 'PRESENCE_HEARTBEAT' && raw.userId) {
+      if (raw.isHost && raw.userId === hostUserRef.id && typeof raw.commentsEnabled === 'boolean' && !isHost) {
+        applyCommentsEnabled(raw.commentsEnabled);
+      }
+      presenceMap.set(raw.userId, {
+        lastSeen: Date.now(),
+        handle: raw.handle || raw.userId,
+        isHost: !!raw.isHost,
+      });
+      prunePresenceAndEmitCount();
+    } else if (raw.type === 'PRESENCE_LEAVE' && raw.userId) {
+      presenceMap.delete(raw.userId);
+      prunePresenceAndEmitCount();
+    } else if (raw.type === 'BATTLE_INVITED' && raw.battle) {
+      // Incoming battle invitation from a real creator
+      const targetSideB = raw.battle.side_b?.host;
+      const targetSideA = raw.battle.side_a?.host;
+      const isForMe = targetSideB?.id === me.id || targetSideB?.handle === me.handle ||
+                      targetSideA?.id === me.id || targetSideA?.handle === me.handle;
+      if (isForMe || isHost) {
+        battleState = raw.battle;
+        dispatchEvent({
+          event_id: `evt-b-inv-${Date.now()}`,
+          live_id: liveId,
+          battle_id: raw.battle.battle_id,
+          event_type: 'BATTLE_INVITED',
+          actor_id: raw.from?.id || null,
+          server_ts: iso(),
+          seq: ++seqCounter,
+          schema_version: 1,
+          payload: { battle: raw.battle, from: raw.from || raw.battle.side_a.host },
+        });
+      }
     } else if (raw.type === 'PK_BATTLE_START' || raw.type === 'BATTLE_ACCEPTED') {
-      startLocalBattle(raw.format || 'classic_double', raw.opponent);
+      const bId = raw.battle_id || raw.battle?.battle_id;
+      // Drop if already live with this exact battle ID (prevents duplicate start & duplicate chat banners)
+      if (battleState && battleState.status === 'live' && (!bId || battleState.battle_id === bId)) {
+        return;
+      }
+      const opp = raw.opponent || (raw.battle?.side_b?.host?.id !== me.id ? raw.battle?.side_b?.host : raw.battle?.side_a?.host);
+      if (opp) {
+        startLocalBattle(raw.format || 'classic_double', opp, raw.starts_at, bId);
+      }
+    } else if (raw.type === 'BATTLE_CANCELLED') {
+      const bId = raw.battle_id || raw.battle?.battle_id;
+      if (battleState && (!bId || battleState.battle_id === bId)) {
+        if (battleTimer) {
+          clearInterval(battleTimer);
+          battleTimer = null;
+        }
+        battleState = null;
+        dispatchEvent({
+          event_id: `evt-b-cancel-${Date.now()}`,
+          live_id: liveId,
+          battle_id: bId || 'cancelled',
+          event_type: 'BATTLE_CANCELLED',
+          actor_id: null,
+          server_ts: iso(),
+          seq: ++seqCounter,
+          schema_version: 1,
+          payload: { battle_id: bId || 'cancelled', reason: (raw.reason as 'declined' | 'expired' | 'cancelled' | 'host_left') || 'cancelled' },
+        });
+      }
     } else if (raw.type === 'BATTLE_SCORE' && raw.battle_id) {
       if (battleState) {
-        battleState.score_a = raw.score_a ?? battleState.score_a;
-        battleState.score_b = raw.score_b ?? battleState.score_b;
+        battleState.score_a = typeof raw.score_a === 'number' ? Math.max(battleState.score_a, raw.score_a) : battleState.score_a;
+        battleState.score_b = typeof raw.score_b === 'number' ? Math.max(battleState.score_b, raw.score_b) : battleState.score_b;
         battleState.lead_side = raw.lead_side ?? battleState.lead_side;
         battleState.score_version += 1;
         dispatchEvent({
@@ -266,6 +544,36 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
           },
         });
       }
+    } else if (
+      raw.type === 'LIVE_ENDED' ||
+      raw.action === 'LIVE_ENDED' ||
+      raw.type === 'STREAM_ENDED' ||
+      raw.action === 'STREAM_ENDED' ||
+      raw.type === 'LIVE_HOST_ENDED'
+    ) {
+      if (!isEnded) {
+        isEnded = true;
+        if (battleTimer) {
+          clearInterval(battleTimer);
+          battleTimer = null;
+        }
+        if (presenceHeartbeatTimer) {
+          clearInterval(presenceHeartbeatTimer);
+          presenceHeartbeatTimer = null;
+        }
+        activeGuests.length = 0;
+        dispatchEvent({
+          event_id: raw.event_id || `evt-ended-${Date.now()}`,
+          live_id: liveId,
+          battle_id: null,
+          event_type: 'LIVE_ENDED',
+          actor_id: null,
+          server_ts: raw.server_ts || iso(),
+          seq: ++seqCounter,
+          schema_version: 1,
+          payload: { reason: raw.reason || 'host_ended' },
+        });
+      }
     }
   };
 
@@ -273,22 +581,50 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
 
   if (bus) {
     bus.onmessage = (e) => {
-      if (e.data?.streamId === liveId && e.data?.event) {
+      if (!e.data) return;
+      if (e.data.streamId === liveId && e.data.event) {
         handleIncomingNetworkEvent(e.data.event);
+      } else if (
+        (e.data.streamId === liveId || (cleanHostHandle && e.data.handle === cleanHostHandle)) &&
+        (e.data.type === 'LIVE_HOST_ENDED' || e.data.action === 'LIVE_ENDED' || e.data.type === 'STREAM_ENDED')
+      ) {
+        handleIncomingNetworkEvent({ type: 'LIVE_ENDED', reason: 'host_ended' });
       }
     };
   }
 
+  let unsubSupabase: (() => void) | null = null;
   try {
-    onSupabaseBroadcast((payload: any) => {
-      if (payload?.action === 'ROOM_EVENT' && payload?.streamId === liveId && payload?.event) {
+    unsubSupabase = onSupabaseBroadcast((payload: any) => {
+      if (!payload || disposed) return;
+      if (payload.action === 'ROOM_EVENT' && payload.streamId === liveId && payload.event) {
         handleIncomingNetworkEvent(payload.event);
+      } else if (
+        (payload.streamId === liveId || (cleanHostHandle && (payload.handle === cleanHostHandle || payload.creatorHandle === cleanHostHandle))) &&
+        (payload.action === 'STREAM_ENDED' || payload.action === 'LIVE_ENDED')
+      ) {
+        handleIncomingNetworkEvent({ type: 'LIVE_ENDED', reason: 'host_ended' });
       }
     });
   } catch {}
 
-  function applyBattlePoints(side: Side, points: number) {
+  // Periodic audience presence heartbeats
+  presenceHeartbeatTimer = setInterval(() => {
+    if (disposed) return;
+    broadcastPresenceHeartbeat();
+    prunePresenceAndEmitCount();
+  }, 6000);
+  setTimeout(() => {
+    broadcastPresenceHeartbeat();
+    prunePresenceAndEmitCount();
+  }, 120);
+
+  function applyBattlePoints(side: Side, points: number, txId?: string, isRemoteEvent = false) {
     if (!battleState) return;
+    if (txId) {
+      if (processedBattleTxs.has(txId)) return;
+      processedBattleTxs.add(txId);
+    }
     if (side === 'a') battleState.score_a += points;
     else battleState.score_b += points;
 
@@ -343,30 +679,38 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       });
     }
 
-    broadcastRoomEvent({
-      type: 'BATTLE_SCORE',
-      battle_id: battleState.battle_id,
-      score_a: battleState.score_a,
-      score_b: battleState.score_b,
-      lead_side: newLead,
-    });
+    if (!isRemoteEvent) {
+      broadcastRoomEvent({
+        type: 'BATTLE_SCORE',
+        battle_id: battleState.battle_id,
+        score_a: battleState.score_a,
+        score_b: battleState.score_b,
+        lead_side: newLead,
+      });
+    }
   }
 
-  function startLocalBattle(formatId = 'classic_double', customOpponent?: UserRef) {
+  function startLocalBattle(formatId = 'classic_double', customOpponent?: UserRef, customStartsAt?: number, customBattleId?: string) {
     const fmt = BUILTIN_FORMATS[formatId as keyof typeof BUILTIN_FORMATS] || BUILTIN_FORMATS.classic_double;
-    const startsAt = now() + (fmt.intro_ms || 3000);
+    const startsAt = customStartsAt && customStartsAt > now() - 60000 ? customStartsAt : now() + (fmt.intro_ms || 3000);
     const compiled = compileTimeline(fmt, startsAt);
     battleTimeline = compiled.timeline;
 
-    const opponent: UserRef = customOpponent || {
-      id: 'rival-host',
-      handle: 'rival.pro',
-      display_name: 'Kai Vortex',
-      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400',
-    };
+    const opponent: UserRef | undefined = customOpponent;
+    if (!opponent) {
+      console.warn('[Privity Live] startLocalBattle rejected: a real invited opponent is required.');
+      return;
+    }
+
+    const targetBattleId = customBattleId || (battleState?.status === 'invited' && battleState.battle_id ? battleState.battle_id : `battle-${Date.now()}`);
+
+    // If this exact battle is already live, do not re-initialize or emit duplicate events
+    if (battleState && battleState.battle_id === targetBattleId && battleState.status === 'live') {
+      return;
+    }
 
     battleState = {
-      battle_id: `battle-${Date.now()}`,
+      battle_id: targetBattleId,
       format_id: formatId,
       status: 'live',
       side_a: { live_id: liveId, host: hostUserRef },
@@ -567,18 +911,18 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       live_id: liveId,
       last_seq: seqCounter,
       server_now: iso(),
-      status: 'live',
+      status: isEnded ? 'ended' : 'live',
       title: streamerName ? `${streamerName}'s LIVE Broadcast` : 'Live Broadcast',
       visibility: 'public',
-      started_at: iso(),
+      started_at: new Date(sessionStartedAt).toISOString(),
       host: hostUserRef,
-      viewer_count: Math.max(1, (opts as any).streamer?.viewersCount || 14),
-      peak_viewers: Math.max(1, (opts as any).streamer?.viewersCount || 50),
+      viewer_count: Math.max(0, lastViewerCount),
+      peak_viewers: peakViewerCount,
       top_supporters: [],
       battle: battleState,
       config_version: 1,
       comments_enabled: commentsEnabled,
-      guests: [...activeGuests],
+      guests: isEnded ? [] : [...activeGuests],
       recent_comments: recentComments,
       me: {
         user_id: me.id,
@@ -714,7 +1058,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       const points = totalCost * multiplier;
 
       if (outcome === 'counted') {
-        applyBattlePoints(targetSide, points);
+        applyBattlePoints(targetSide, points, txId);
       }
 
       broadcastRoomEvent({
@@ -755,6 +1099,8 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     },
     async comment(_id, text) {
       if (!text || !text.trim()) return { ok: false, code: 'INVALID_TEXT', message: 'Comment cannot be blank' };
+      if (!commentsEnabled && !isHost) return { ok: false, code: 'COMMENTS_DISABLED', message: 'The host turned comments off.' };
+      if (isMuted(me.id)) return { ok: false, code: 'MUTED', message: 'The host muted you in this LIVE.' };
       const commentId = `comm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const createdAt = iso();
       broadcastRoomEvent({
@@ -771,17 +1117,35 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       return { ok: true, data: {} };
     },
     async setCommentsEnabled(_id, enabled) {
-      commentsEnabled = enabled;
+      if (!isHost) return { ok: false, code: 'FORBIDDEN', message: 'Only the host can change comment settings.' };
+      applyCommentsEnabled(enabled);
+      broadcastRoomEvent({ type: 'COMMENTS_TOGGLED', enabled, actorId: me.id });
       return { ok: true, data: { comments_enabled: enabled } };
     },
-    async mute(_id, _userId, minutes) {
-      const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();
-      return { ok: true, data: { muted_until: until } };
+    async mute(_id, userId, minutes) {
+      if (!isHost) return { ok: false, code: 'FORBIDDEN', message: 'Only the host can mute people in this LIVE.' };
+      if (!userId || userId === me.id) return { ok: false, code: 'INVALID_TARGET', message: 'You cannot mute yourself.' };
+      const untilMs = Date.now() + Math.max(1, minutes) * 60 * 1000;
+      mutedUntil.set(userId, untilMs);
+      broadcastRoomEvent({ type: 'MODERATION_ACTION', action: 'mute', targetUserId: userId, until: untilMs, actorId: me.id });
+      return { ok: true, data: { muted_until: new Date(untilMs).toISOString() } };
     },
-    async unmute(_id, _userId) {
+    async unmute(_id, userId) {
+      if (!isHost) return { ok: false, code: 'FORBIDDEN', message: 'Only the host can unmute people in this LIVE.' };
+      mutedUntil.delete(userId);
+      broadcastRoomEvent({ type: 'MODERATION_ACTION', action: 'unmute', targetUserId: userId, actorId: me.id });
       return { ok: true, data: {} };
     },
-    async kick(_id, _userId, _reason) {
+    async kick(_id, userId, _reason) {
+      if (!isHost) return { ok: false, code: 'FORBIDDEN', message: 'Only the host can remove people from this LIVE.' };
+      if (!userId || userId === me.id) return { ok: false, code: 'INVALID_TARGET', message: 'You cannot remove yourself.' };
+      removedUsers.add(userId);
+      presenceMap.delete(userId);
+      prunePresenceAndEmitCount();
+      if (activeGuests.some((g) => g.id === userId)) {
+        broadcastRoomEvent({ type: 'GUEST_REMOVED', targetUserId: userId });
+      }
+      broadcastRoomEvent({ type: 'MODERATION_ACTION', action: 'remove', targetUserId: userId, actorId: me.id });
       return { ok: true, data: {} };
     },
     async follow(_userId) {
@@ -791,7 +1155,12 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     async unfollow(_userId) {
       return { ok: true, data: { following: false } };
     },
-    async block(_userId) {
+    async block(userId) {
+      if (!userId || userId === me.id) return { ok: false, code: 'INVALID_TARGET', message: 'You cannot block yourself.' };
+      blockedUsers.add(userId);
+      try {
+        localStorage.setItem(blockedKey, JSON.stringify(Array.from(blockedUsers)));
+      } catch {}
       return { ok: true, data: { blocked: true } };
     },
     async requestGuest(_id) {
@@ -832,10 +1201,73 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       }
       return { ok: true, data: rows };
     },
+    async battleInvite(targetOpponent: UserRef, formatId = 'classic_double') {
+      if (!targetOpponent || targetOpponent.id === me.id) {
+        return { ok: false, code: 'INVALID_OPPONENT', message: 'Cannot battle yourself or invalid opponent.' };
+      }
+      const bId = `battle-${Date.now()}`;
+      const fmt = BUILTIN_FORMATS[formatId as keyof typeof BUILTIN_FORMATS] || BUILTIN_FORMATS.classic_double;
+      const startsAt = now() + (fmt.intro_ms || 3000);
+      const compiled = compileTimeline(fmt, startsAt);
+      const inviteSnapshot: BattleSnapshot = {
+        battle_id: bId,
+        format_id: formatId,
+        status: 'invited',
+        side_a: { live_id: liveId, host: hostUserRef },
+        side_b: { live_id: `live-${targetOpponent.id}`, host: targetOpponent },
+        scoring: fmt.scoring,
+        invite_expires_at: new Date(Date.now() + 30000).toISOString(),
+        intro_at: compiled.intro_at,
+        starts_at: compiled.starts_at,
+        ends_at: compiled.ends_at,
+        final_countdown_ms: compiled.final_countdown_ms,
+        timeline: compiled.timeline,
+        score_a: 0,
+        score_b: 0,
+        pull_scores: [],
+        lead_side: null,
+        score_version: 1,
+        result: null,
+      };
+      battleState = inviteSnapshot;
+      broadcastRoomEvent({
+        type: 'BATTLE_INVITED',
+        battle: inviteSnapshot,
+        from: me,
+        targetHostId: targetOpponent.id,
+        targetHandle: targetOpponent.handle,
+      });
+      return { ok: true, data: { battle_id: bId } };
+    },
     async battleRespond(_battleId, accept) {
       if (accept) {
-        broadcastRoomEvent({ type: 'PK_BATTLE_START', format: 'classic_double' });
+        if (!battleState || battleState.battle_id !== _battleId) {
+          return { ok: false, code: 'BATTLE_NOT_FOUND', message: 'This battle invitation is no longer available.' };
+        }
+        if (battleState.status !== 'live') {
+          const norm = (s?: string | null) => (s || '').replace(/^@/, '').toLowerCase().trim();
+          const isMe = (u: UserRef) => u.id === me.id || (!!norm(u.handle) && norm(u.handle) === norm(me.handle));
+          const opponent = isMe(battleState.side_a.host) ? battleState.side_b.host : battleState.side_a.host;
+          if (isMe(opponent)) {
+            return { ok: false, code: 'SELF_MATCH', message: 'You cannot battle yourself.' };
+          }
+          startLocalBattle(battleState.format_id, opponent, Date.parse(battleState.starts_at || '') || undefined, battleState.battle_id);
+        }
+        if (battleState) {
+          broadcastRoomEvent({
+            type: 'BATTLE_ACCEPTED',
+            battle_id: battleState.battle_id,
+            battle: battleState,
+            opponent: me,
+            format: battleState.format_id,
+          });
+        }
       } else {
+        if (battleTimer) {
+          clearInterval(battleTimer);
+          battleTimer = null;
+        }
+        battleState = null;
         broadcastRoomEvent({ type: 'BATTLE_CANCELLED', battle_id: _battleId });
       }
       return { ok: true, data: { status: accept ? 'accepted' : 'cancelled' } };
@@ -844,9 +1276,63 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
       finalizeBattle('a');
       return { ok: true, data: {} };
     },
+    async startBattle(formatId = 'classic_double', customOpponent?: UserRef) {
+      const opponent = customOpponent;
+      if (!opponent) {
+        return { ok: false, code: 'OPPONENT_REQUIRED', message: 'A verified live opponent is required to start a battle.' };
+      }
+      const startsAt = now() + 3000;
+      const bId = `battle-${Date.now()}`;
+      startLocalBattle(formatId, opponent, startsAt, bId);
+      broadcastRoomEvent({
+        type: 'PK_BATTLE_START',
+        battle_id: bId,
+        format: formatId,
+        opponent,
+        starts_at: startsAt,
+      });
+      return { ok: true, data: { battle_id: bId } };
+    },
     async endLive(_id) {
-      broadcastRoomEvent({ type: 'LIVE_ENDED', streamId: liveId });
+      if (isEnded) return { ok: true, data: { status: 'ended' } };
+      isEnded = true;
+
+      if (battleTimer) {
+        clearInterval(battleTimer);
+        battleTimer = null;
+      }
+      if (presenceHeartbeatTimer) {
+        clearInterval(presenceHeartbeatTimer);
+        presenceHeartbeatTimer = null;
+      }
+      activeGuests.length = 0;
+
+      try {
+        localStorage.removeItem(storageStartedKey);
+        if (handleStartedKey) localStorage.removeItem(handleStartedKey);
+        localStorage.removeItem('privity_current_live_host');
+        localStorage.removeItem('privity_is_host_broadcasting');
+      } catch {}
+
+      // 1. Dispatch locally so the host's studio immediately displays summary
+      dispatchEvent({
+        event_id: `evt-ended-${Date.now()}`,
+        live_id: liveId,
+        battle_id: null,
+        event_type: 'LIVE_ENDED',
+        actor_id: me.id,
+        server_ts: iso(),
+        seq: ++seqCounter,
+        schema_version: 1,
+        payload: { reason: 'host_ended' },
+      });
+
+      // 2. Broadcast room event to all connected clients
+      broadcastRoomEvent({ type: 'LIVE_ENDED', streamId: liveId, reason: 'host_ended' });
+
+      // 3. Mark stream ended across local storage, peer connections, MQTT and sync service
       liveStreamSync.stopHostBroadcast();
+
       return { ok: true, data: { status: 'ended' } };
     },
   };
@@ -857,7 +1343,15 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     dispose() {
       disposed = true;
       if (battleTimer) clearInterval(battleTimer);
+      if (presenceHeartbeatTimer) clearInterval(presenceHeartbeatTimer);
+      try {
+        const leaveMsg = { type: 'PRESENCE_LEAVE', liveId, userId: me.id };
+        liveStreamSync.sendRoomEvent(roomId, leaveMsg);
+        bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event: leaveMsg });
+      } catch {}
       unsubRoom();
+      try { unsubSupabase?.(); } catch {}
+      unsubSupabase = null;
       bus?.close();
     },
   };

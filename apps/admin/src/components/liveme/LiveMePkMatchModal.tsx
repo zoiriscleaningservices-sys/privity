@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { LiveMeStreamer } from './types';
-import { LIVEME_STREAMERS } from './liveMeData';
 import { RoomViewer } from './LiveMeViewersModal';
 import { liveStreamSync } from '../../services/liveStreamSyncService';
 
@@ -48,28 +47,35 @@ export const LiveMePkMatchModal: React.FC<LiveMePkMatchModalProps> = ({
   const [matchedCandidate, setMatchedCandidate] = useState<LiveMeStreamer | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Eligible streamers for battle: Combine real network broadcasters with catalog creators
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+
+  // Eligible streamers for battle: Strictly real network broadcasters actively live
   const eligibleStreamers = React.useMemo(() => {
-    const networkStreams = liveStreamSync.getStreamersList().filter((s) => !s.isHost);
-    const combined: LiveMeStreamer[] = [...networkStreams];
-    for (const ms of LIVEME_STREAMERS) {
-      if (!ms.isHost && !combined.some((s) => s.id === ms.id || s.handle === ms.handle)) {
-        combined.push(ms);
-      }
-    }
-    return combined;
+    return liveStreamSync.getStreamersList().filter(
+      (s) => !s.isHost && s.isLive !== false && !liveStreamSync.isStreamEnded(s.id, s.handle, s.startedAt)
+    );
   }, []);
 
   // Trigger quick match radar scan
   const startQuickScan = () => {
     setIsScanning(true);
     setMatchedCandidate(null);
+    setScanMessage(null);
+    liveStreamSync.queryNetworkStreams();
+
     setTimeout(() => {
-      // Pick random creator from available streamers
-      const randomStreamer = eligibleStreamers[Math.floor(Math.random() * eligibleStreamers.length)] || eligibleStreamers[0];
-      setMatchedCandidate(randomStreamer);
-      setIsScanning(false);
-      showToast(`⚡ Rival Match Found: ${randomStreamer.name}!`);
+      const activeList = liveStreamSync.getStreamersList().filter(
+        (s) => !s.isHost && s.isLive !== false && !liveStreamSync.isStreamEnded(s.id, s.handle, s.startedAt)
+      );
+      if (activeList.length > 0) {
+        const randomStreamer = activeList[Math.floor(Math.random() * activeList.length)];
+        setMatchedCandidate(randomStreamer);
+        setIsScanning(false);
+        showToast(`⚡ Rival Match Found: ${randomStreamer.name}!`);
+      } else {
+        setIsScanning(false);
+        setScanMessage('No eligible creators are currently live for matchmaking. Another creator must be actively broadcasting to match.');
+      }
     }, 1100);
   };
 
@@ -239,9 +245,16 @@ export const LiveMePkMatchModal: React.FC<LiveMePkMatchModalProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <button type="button" className="liveme-pk-start-btn" onClick={startQuickScan}>
-                    ⚡ Start Quick Match Radar
-                  </button>
+                  <div style={{ textAlign: 'center', width: '100%' }}>
+                    {scanMessage && (
+                      <p style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)', margin: '0 0 16px 0', lineHeight: 1.5 }}>
+                        {scanMessage}
+                      </p>
+                    )}
+                    <button type="button" className="liveme-pk-start-btn" onClick={startQuickScan}>
+                      ⚡ Start Quick Match Radar
+                    </button>
+                  </div>
                 )}
               </div>
             )}
