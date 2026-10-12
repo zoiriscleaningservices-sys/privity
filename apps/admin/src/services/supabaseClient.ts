@@ -1,14 +1,13 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Active project. (Previous project rnpjtailldnkwaglvdiu was suspended — HTTP 402 — Oct 2026.)
-export const SUPABASE_PROJECT_ID = 'vjtouftqexxdhiiivvzx';
+export const SUPABASE_PROJECT_ID = 'rnpjtailldnkwaglvdiu';
 export const SUPABASE_URL =
   (import.meta as any).env?.VITE_SUPABASE_URL ||
   `https://${SUPABASE_PROJECT_ID}.supabase.co`;
 
 const STORAGE_ANON_KEY = 'privity_supabase_anon_key';
 
-export const DEFAULT_PUBLISHABLE_KEY = 'sb_publishable_up3vmLx4Qv3H9HqQoPEWsA_DxZXUh-q';
+export const DEFAULT_PUBLISHABLE_KEY = 'sb_publishable_uFUkA9x1C2Zb-Lh_0-lzcw_RKWGKRCK';
 export const DEFAULT_GOOGLE_CLIENT_ID = '723694367508-8h7rqo8gf2217ma8053hk5v1otqfdic1.apps.googleusercontent.com';
 
 export function getSupabaseAnonKey(): string {
