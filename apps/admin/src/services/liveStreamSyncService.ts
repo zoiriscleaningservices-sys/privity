@@ -450,6 +450,22 @@ class LiveStreamSyncService {
     }
   }
 
+  // Egress control: Supabase Realtime delivers every broadcast to EVERY connected client.
+  private lastSupabaseQueryAt = 0;
+  private lastSupabaseAnnounceAt = 0;
+  private lastNetworkFrameAt: Record<string, number> = {};
+
+  /** Copy of a stream payload without embedded data-URL images (avatars/posters can be 100 KB+). */
+  private slimStreamForNetwork(stream: any): any {
+    if (!stream || typeof stream !== 'object') return stream;
+    const out: any = { ...stream };
+    for (const k of ['creatorAvatar', 'avatar', 'previewUrl', 'posterUrl', 'thumbnailUrl', 'coverUrl']) {
+      const v = out[k];
+      if (typeof v === 'string' && v.startsWith('data:') && v.length > 4096) out[k] = '';
+    }
+    return out;
+  }
+
   public queryNetworkStreams() {
     if (this.mqttClient && this.mqttClient.connected) {
       try {
@@ -462,13 +478,19 @@ class LiveStreamSyncService {
         action: 'QUERY_ACTIVE_STREAMS',
       });
     } catch {}
-    try {
-      broadcastViaSupabase({
-        action: 'QUERY_ACTIVE_STREAMS',
-        type: 'QUERY_ACTIVE_STREAMS',
-      });
-    } catch {}
-    this.querySupabaseActiveSessions();
+    // Supabase: only while something on this device is actually showing discovery, and at
+    // most every 20 s (every live host replies to each query, to every connected client).
+    const now = Date.now();
+    if (this.subscribers.size > 0 && now - this.lastSupabaseQueryAt >= 20000) {
+      this.lastSupabaseQueryAt = now;
+      try {
+        broadcastViaSupabase({
+          action: 'QUERY_ACTIVE_STREAMS',
+          type: 'QUERY_ACTIVE_STREAMS',
+        });
+      } catch {}
+      this.querySupabaseActiveSessions();
+    }
   }
 
   public async querySupabaseActiveSessions(): Promise<RemoteLiveStreamPayload[]> {
@@ -625,9 +647,12 @@ class LiveStreamSyncService {
   private startQueryLoop() {
     if (this.queryInterval) clearInterval(this.queryInterval);
     this.queryInterval = setInterval(() => {
-      // Periodically query to refresh active streams across all devices
+      // Only poll while a discovery/explore screen on this device is subscribed. Hosts announce
+      // start/end themselves, so idle devices don't need to keep asking.
+      if (this.subscribers.size === 0) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       this.queryNetworkStreams();
-    }, 2000);
+    }, 10000);
   }
 
   private notifySubscribers() {
@@ -1172,19 +1197,25 @@ class LiveStreamSyncService {
 
     if (this.mqttClient && this.mqttClient.connected) {
       try {
-        const payload = JSON.stringify({ type, stream });
+        const payload = JSON.stringify({ type, stream: this.slimStreamForNetwork(stream) });
         this.mqttClient.publish(TOPIC_ACTIVE_STREAMS, payload, { qos: 0, retain: false });
         const streamTopic = `${TOPIC_STREAM_PREFIX}${stream.id}`;
         this.mqttClient.publish(streamTopic, payload, { qos: 0, retain: false });
       } catch {}
     }
 
-    try {
-      broadcastViaSupabase({
-        action: type === 'STREAM_ACTIVE' ? 'STREAM_ACTIVE' : 'STREAM_HEARTBEAT',
-        stream,
-      });
-    } catch {}
+    // Supabase: start/announce at most every 3 s (query replies are bursty), heartbeat every 10 s.
+    // Discovery prunes after 35 s without a heartbeat, so 10 s keeps sessions visible.
+    const minGap = type === 'STREAM_ACTIVE' ? 3000 : 10000;
+    if (now - this.lastSupabaseAnnounceAt >= minGap) {
+      this.lastSupabaseAnnounceAt = now;
+      try {
+        broadcastViaSupabase({
+          action: type === 'STREAM_ACTIVE' ? 'STREAM_ACTIVE' : 'STREAM_HEARTBEAT',
+          stream: this.slimStreamForNetwork(stream),
+        });
+      } catch {}
+    }
   }
 
   public stopHostBroadcast() {
@@ -1594,7 +1625,21 @@ class LiveStreamSyncService {
   public sendRoomEvent(streamIdOrHandle: string, event: any) {
     const roomId = getRoomIdFromHandle(streamIdOrHandle);
     const topic = `${TOPIC_ROOM_PREFIX}${roomId}`;
-    if (this.mqttClient && this.mqttClient.connected) {
+
+    // Camera preview frames (LIVE_FRAME / GUEST_LIVE_FRAME) are a fallback preview only — real
+    // video reaches viewers over WebRTC. They stay on the same-device BroadcastChannel at full
+    // rate, go to MQTT at most every 3 s per room+type, and NEVER go through Supabase (guest
+    // frames were sent every 300 ms to every connected user).
+    const isFrame = !!event && typeof event.frame === 'string';
+    let sendToNetwork = true;
+    if (isFrame) {
+      const key = `${roomId}:${event.type || 'frame'}`;
+      const now = Date.now();
+      sendToNetwork = now - (this.lastNetworkFrameAt[key] || 0) >= 3000;
+      if (sendToNetwork) this.lastNetworkFrameAt[key] = now;
+    }
+
+    if (sendToNetwork && this.mqttClient && this.mqttClient.connected) {
       try {
         this.mqttClient.publish(topic, JSON.stringify(event));
       } catch {}
@@ -1608,13 +1653,15 @@ class LiveStreamSyncService {
       });
     } catch {}
 
-    try {
-      broadcastViaSupabase({
-        action: 'ROOM_EVENT',
-        streamId: roomId,
-        event,
-      });
-    } catch {}
+    if (!isFrame) {
+      try {
+        broadcastViaSupabase({
+          action: 'ROOM_EVENT',
+          streamId: roomId,
+          event,
+        });
+      } catch {}
+    }
 
     this.dispatchRoomEvent(roomId, event);
   }

@@ -69,7 +69,7 @@ import {
   StoryItem,
 } from './components/feed/TikTokSlideFeed';
 import { authService, UserAccount } from './services/authService';
-import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, reconnectSupabaseRealtime, isSupabaseRealtimeConnected } from './services/supabaseClient';
+import { getSupabaseClient, broadcastViaSupabase, onSupabaseBroadcast, sanitizeOutboundPayload } from './services/supabaseClient';
 import { getDeterministicLevel } from './components/liveme/userProfileUtils';
 import { AuthModal } from './components/auth';
 import { convertVideoToAnimatedLoop, isKnownVideoUrl, extractVideoThumbnail } from './services/videoMediaHelper';
@@ -1452,6 +1452,9 @@ export function App() {
       });
   });
   const postsRef = React.useRef(posts);
+  // Egress throttles for registry replies (see QUERY_POSTS / QUERY_PROFILES handlers)
+  const lastPostsReplyAtRef = React.useRef(0);
+  const lastProfilesReplyAtRef = React.useRef(0);
   postsRef.current = posts;
 
   // 3. Persistent Following Map (strictly filters out any mock handles, IDs, and false values)
@@ -1915,7 +1918,14 @@ export function App() {
     // Periodic heartbeat ping every 12 seconds
     const interval = setInterval(sendPresencePing, 12000);
 
-    const handleUserActivity = () => sendPresencePing();
+    // Activity pings are throttled: a ping on EVERY tap was delivered to every connected user.
+    let lastActivityPing = 0;
+    const handleUserActivity = () => {
+      const t = Date.now();
+      if (t - lastActivityPing < 10000) return;
+      lastActivityPing = t;
+      sendPresencePing();
+    };
     window.addEventListener('focus', handleUserActivity);
     window.addEventListener('pointerdown', handleUserActivity);
 
@@ -2016,9 +2026,9 @@ export function App() {
       console.warn('Supabase broadcast failed', e);
     }
 
-    // 3. Cloud broadcast to all active devices (ntfy)
+    // 3. Cloud broadcast to all active devices (ntfy) — public service: same private-field scrub
     try {
-      const jsonStr = JSON.stringify(payload);
+      const jsonStr = JSON.stringify(sanitizeOutboundPayload(payload));
       if (jsonStr.length > 3500) {
         // Large payload with photo/video -> upload as ntfy attachment so it is never rejected or truncated
         fetch(`${SYNC_ENDPOINT}?filename=event.json`, {
@@ -3304,13 +3314,18 @@ export function App() {
         }
 
         case 'QUERY_PROFILES': {
+          // Reply with OUR OWN public profile only (each user answers for themselves), at most
+          // every 30 s. Never send the device's stored accounts — they contain emails.
+          const nowQ = Date.now();
+          if (nowQ - lastProfilesReplyAtRef.current < 30000) break;
+          const meKey = cleanMyHandle;
           const profs = profilesRef.current;
-          const accs = authService.getAllAccounts();
-          if ((profs && Object.keys(profs).length > 0) || Object.keys(accs).length > 0) {
+          const mine = meKey ? (profs?.[meKey] || profs?.[meKey.toLowerCase()]) : null;
+          if (mine && mine.handle) {
+            lastProfilesReplyAtRef.current = nowQ;
             broadcastSyncEventRef.current({
               action: 'SYNC_PROFILES_REGISTRY',
-              registry: profs,
-              accounts: accs,
+              registry: { [meKey]: mine },
             });
           }
           break;
@@ -3478,6 +3493,11 @@ export function App() {
         }
 
         case 'QUERY_POSTS': {
+          // Reply only with posts WE authored (each author answers for their own posts), at most
+          // every 30 s. Previously every device re-broadcast everyone's posts, media included.
+          const nowQ = Date.now();
+          if (nowQ - lastPostsReplyAtRef.current < 30000) break;
+          lastPostsReplyAtRef.current = nowQ;
           if (deletedPostIdsRef.current.size > 0) {
             broadcastSyncEventRef.current({
               action: 'SYNC_DELETED_POSTS',
@@ -3485,7 +3505,13 @@ export function App() {
             });
           }
           if (postsRef.current && postsRef.current.length > 0) {
-            const validPosts = postsRef.current.filter((p) => !isMockPost(p) && !deletedPostIdsRef.current.has(p.id));
+            const validPosts = postsRef.current.filter(
+              (p) =>
+                !isMockPost(p) &&
+                !deletedPostIdsRef.current.has(p.id) &&
+                !!cleanMyHandle &&
+                normalizeHandle(p.authorHandle) === cleanMyHandle
+            );
             for (let i = 0; i < Math.min(validPosts.length, 15); i += 3) {
               const chunk = validPosts.slice(i, i + 3);
               setTimeout(() => {
@@ -3843,38 +3869,31 @@ export function App() {
     };
     window.addEventListener('storage', handleStorageEvent);
 
-    // 6. Active Realtime Health Check & Background Heartbeat
-    let lastQueryTime = 0;
+    // 6. Background health check. The 6-second "send me ALL posts/profiles" broadcast from every
+    // device was the main Supabase egress cost (every device replied to every device), so
+    // queries now only run on startup and on wake (throttled below).
     const pollInterval = setInterval(() => {
-      // Auto-heal Supabase Realtime channel if mobile OS closed or errored it
-      if (!isSupabaseRealtimeConnected()) {
-        reconnectSupabaseRealtime(true);
-      }
-
-      // Proactive query sync every 6s so idle/resumed devices catch up 100% in real time
-      const now = Date.now();
-      if (now - lastQueryTime >= 6000) {
-        lastQueryTime = now;
-        broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
-        broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
-      }
-
-      quickCatchUp();
       if (!es || es.readyState === EventSource.CLOSED) {
+        quickCatchUp();
         connectSSE();
       }
-    }, 2000);
+    }, 5000);
 
     // 7. On window/document visibility, mobile pageshow, focus, or network return
+    let lastWakeQueryAt = 0;
     const handleWake = () => {
       if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-        reconnectSupabaseRealtime(true);
+        // (Realtime channel health is handled in supabaseClient; don't tear it down on focus.)
         quickCatchUp();
         if (!es || es.readyState === EventSource.CLOSED) {
           connectSSE();
         }
-        broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
-        broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
+        const t = Date.now();
+        if (t - lastWakeQueryAt >= 60000) {
+          lastWakeQueryAt = t;
+          broadcastSyncEventRef.current({ action: 'QUERY_PROFILES' });
+          broadcastSyncEventRef.current({ action: 'QUERY_POSTS' });
+        }
       }
     };
     if (typeof document !== 'undefined') {
@@ -4654,6 +4673,7 @@ export function App() {
   useEffect(() => {
     if (!isHostBroadcasting || !activeLiveStream) return;
     const cleanHandle = (myProfile.handle || '').replace(/^@/, '');
+    let hbTick = 0;
     const hbInterval = setInterval(() => {
       const now = Date.now();
       const hostMeta = {
@@ -4690,10 +4710,21 @@ export function App() {
         syncBus.close();
       } catch {}
 
-      broadcastSyncEvent({
-        action: 'LIVE_HEARTBEAT',
-        host: hostMeta,
-      });
+      // Network heartbeat (Supabase + ntfy reach EVERY connected user): every 10 s, no
+      // embedded data-URL avatar. Same-device tabs above still refresh every 2.5 s.
+      hbTick += 1;
+      if (hbTick % 4 === 1) {
+        const isBigDataUrl = (v: unknown) => typeof v === 'string' && v.startsWith('data:') && v.length > 4096;
+        const netMeta = {
+          ...hostMeta,
+          creatorAvatar: isBigDataUrl(hostMeta.creatorAvatar) ? '' : hostMeta.creatorAvatar,
+          avatar: isBigDataUrl(hostMeta.avatar) ? '' : hostMeta.avatar,
+        };
+        broadcastSyncEvent({
+          action: 'LIVE_HEARTBEAT',
+          host: netMeta,
+        });
+      }
     }, 2500);
 
     return () => clearInterval(hbInterval);

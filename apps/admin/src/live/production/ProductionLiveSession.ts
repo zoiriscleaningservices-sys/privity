@@ -16,7 +16,7 @@ import { BUILTIN_FORMATS, compileTimeline, segmentAt } from '../battle/timeline'
 import { simCatalog } from '../dev/simCatalog';
 import { globalGiftQueue, DEFAULT_GIFTS } from '../../gifts';
 import { liveStreamSync, getRoomIdFromHandle } from '../../services/liveStreamSyncService';
-import { broadcastViaSupabase, onSupabaseBroadcast } from '../../services/supabaseClient';
+import { onSupabaseBroadcast } from '../../services/supabaseClient';
 
 export interface ProductionLiveSessionOptions {
   streamerId: string;
@@ -177,16 +177,14 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     try {
       bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event: msg });
     } catch {}
-    try {
-      broadcastViaSupabase({ action: 'ROOM_EVENT', streamId: liveId, event: msg });
-    } catch {}
+    // (No direct Supabase send: sendRoomEvent already delivers it network-wide.)
   }
 
   function prunePresenceAndEmitCount() {
     if (disposed) return;
     const nowMs = Date.now();
     for (const [uid, entry] of presenceMap.entries()) {
-      if (nowMs - entry.lastSeen > 14000) {
+      if (nowMs - entry.lastSeen > 20000) {
         presenceMap.delete(uid);
       }
     }
@@ -226,9 +224,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     try {
       bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event });
     } catch {}
-    try {
-      broadcastViaSupabase({ action: 'ROOM_EVENT', streamId: liveId, event });
-    } catch {}
+    // (No direct Supabase send: sendRoomEvent already delivers it network-wide.)
   }
 
   // Handle incoming network events
@@ -523,9 +519,10 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     };
   }
 
+  let unsubSupabase: (() => void) | null = null;
   try {
-    onSupabaseBroadcast((payload: any) => {
-      if (!payload) return;
+    unsubSupabase = onSupabaseBroadcast((payload: any) => {
+      if (!payload || disposed) return;
       if (payload.action === 'ROOM_EVENT' && payload.streamId === liveId && payload.event) {
         handleIncomingNetworkEvent(payload.event);
       } else if (
@@ -542,7 +539,7 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
     if (disposed) return;
     broadcastPresenceHeartbeat();
     prunePresenceAndEmitCount();
-  }, 4000);
+  }, 6000);
   setTimeout(() => {
     broadcastPresenceHeartbeat();
     prunePresenceAndEmitCount();
@@ -1252,9 +1249,10 @@ export function createProductionLiveSession(opts: ProductionLiveSessionOptions):
         const leaveMsg = { type: 'PRESENCE_LEAVE', liveId, userId: me.id };
         liveStreamSync.sendRoomEvent(roomId, leaveMsg);
         bus?.postMessage({ type: 'ROOM_EVENT', streamId: liveId, event: leaveMsg });
-        broadcastViaSupabase({ action: 'ROOM_EVENT', streamId: liveId, event: leaveMsg });
       } catch {}
       unsubRoom();
+      try { unsubSupabase?.(); } catch {}
+      unsubSupabase = null;
       bus?.close();
     },
   };

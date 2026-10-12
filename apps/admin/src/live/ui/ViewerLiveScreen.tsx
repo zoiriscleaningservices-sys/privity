@@ -25,7 +25,6 @@ import { HeartsHandle, HeartsLayer } from './Hearts';
 import { CommentActionsSheet, GuestRequestUi, ShareSheet, SupportersSheet, ViewerMoreSheet } from './ViewerSheets';
 import { GuestDock, useGuestMedia } from './GuestDock';
 import { liveStreamSync } from '../../services/liveStreamSyncService';
-import { broadcastViaSupabase } from '../../services/supabaseClient';
 
 export interface ViewerLiveScreenProps {
   feed: LiveFeed;
@@ -115,13 +114,12 @@ function ViewerBody({
               senderHandle: me.handle,
               liveId: room.liveId,
             };
-            liveStreamSync.sendRoomEvent(room.liveId, reactionEvt);
+            // Address the host's room (sessions subscribe by host handle). sendRoomEvent already
+            // delivers network-wide, so no second direct Supabase send.
+            liveStreamSync.sendRoomEvent(room.host?.handle || room.liveId, reactionEvt);
             const bus = new BroadcastChannel('privity_sync_bus');
             bus.postMessage({ type: 'ROOM_EVENT', streamId: room.liveId, event: reactionEvt });
             bus.close();
-            try {
-              broadcastViaSupabase({ action: 'ROOM_EVENT', streamId: room.liveId, event: reactionEvt });
-            } catch {}
           } catch {}
         }
       }, 350);
