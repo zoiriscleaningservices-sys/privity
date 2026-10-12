@@ -43,7 +43,7 @@ import { ShowOverlay } from './ShowOverlay';
 import { CommentComposer, CommentList } from './Comments';
 import { FilterSheet } from './FilterSheet';
 import { StageManagerSheet } from './StageManagerSheet';
-import { BattleInviteCard, HostSettingsSheet, ModerationSheet, BattleMatchmakerSheet } from './HostSheets';
+import { BattleInviteCard, BattleOutgoingCard, HostSettingsSheet, ModerationSheet, BattleMatchmakerSheet } from './HostSheets';
 import { useGuestRequests, useStagePresentation } from './useHostStage';
 import { SupportersSheet } from './ViewerSheets';
 import { HeartsHandle, HeartsLayer } from './Hearts';
@@ -246,11 +246,16 @@ function StudioBody({
       }
     }
     if (room.battle && (room.battle.status === 'accepted' || room.battle.status === 'live' || room.battle.status === 'locked')) {
-      const opp = room.battle.side_b.host;
+      const oppA = room.battle.side_a.host;
+      const oppB = room.battle.side_b.host;
+      const cleanMyId = (me.id || '').toLowerCase().trim();
+      const cleanMyHandle = (me.handle || '').replace(/^@/, '').toLowerCase().trim();
+      const isMeA = (oppA.id || '').toLowerCase().trim() === cleanMyId || ((oppA.handle || '').replace(/^@/, '').toLowerCase().trim() === cleanMyHandle);
+      const opp = isMeA ? oppB : oppA;
       if (opp && opp.id !== me.id) participants.push({ id: opp.id, handle: opp.handle });
     }
     media.syncParticipants(participants);
-  }, [media, room?.guests, room?.battle, me.id]);
+  }, [media, room?.guests, room?.battle, me.id, me.handle]);
 
   // Stop my devices as soon as the LIVE has ended.
   useEffect(() => {
@@ -410,7 +415,13 @@ function StudioBody({
   const micProblem = mic.enabled && mic.status !== 'live' && mic.status !== 'requesting' && mic.status !== 'off' ? mic.message : null;
   const battle = room.battle;
   const invite = battle && battle.status === 'invited' ? battle : null;
-  const opponent = invite ? (invite.side_a.host.id === me.id ? invite.side_b.host : invite.side_a.host) : null;
+  const normH = (s?: string | null) => (s || '').replace(/^@/, '').toLowerCase().trim();
+  const isSender = invite ? (
+    invite.side_a.host.id === me.id || (!!normH(me.handle) && normH(invite.side_a.host.handle) === normH(me.handle))
+  ) : false;
+  const incomingInvite = invite && !isSender ? invite : null;
+  const outgoingInvite = invite && isSender ? invite : null;
+  const opponent = invite ? (isSender ? invite.side_b.host : invite.side_a.host) : null;
   const battleOnStage = !!battleSides(room);
   const topSupporter = room.topSupporters[0] ?? null;
   const dual = local.dual;
@@ -490,17 +501,29 @@ function StudioBody({
       <ShowOverlay engine={controller.engine} />
       <HeartsLayer ref={hearts} />
 
-      {invite && opponent && (
+      {incomingInvite && opponent && (
         <BattleInviteCard
-          battle={invite}
+          battle={incomingInvite}
           from={opponent}
           busy={busy === 'battle'}
           error={battleError}
           onRespond={(accept) => {
             setBattleError(null);
-            void run('battle', () => commands.battleRespond(invite.battle_id, accept)).then((d) => {
+            void run('battle', () => commands.battleRespond(incomingInvite.battle_id, accept)).then((d) => {
               if (!d) setBattleError('Could not answer the invitation. It may have expired.');
             });
+          }}
+        />
+      )}
+
+      {outgoingInvite && opponent && (
+        <BattleOutgoingCard
+          battle={outgoingInvite}
+          target={opponent}
+          busy={busy === 'battle'}
+          onCancel={() => {
+            setBattleError(null);
+            void run('battle', () => commands.battleRespond(outgoingInvite.battle_id, false));
           }}
         />
       )}
